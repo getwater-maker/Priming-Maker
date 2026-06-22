@@ -85,6 +85,19 @@ main{flex:1;overflow:auto;padding:14px 16px}
 .genoverlay .spin{width:30px;height:30px;border:3px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin 1s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 .autosave-ind{font-size:11px;color:#7a8a6a;align-self:center;white-space:nowrap;margin-left:2px}
+/* 작업 큐(적재 대본) 스트립 */
+.qstrip{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:6px 8px;margin-bottom:8px;background:#f3ede3;border:1px solid var(--line);border-radius:8px}
+.qlabel{font-size:12px;font-weight:700;color:#8a7a5a;margin-right:4px}
+.qchip{display:flex;align-items:center;gap:6px;padding:4px 8px;background:#fff;border:1px solid var(--line);border-radius:7px;cursor:pointer;max-width:240px}
+.qchip:hover{border-color:#c9b48a}
+.qchip.active{background:#fff7e8;border-color:#e0b85a;box-shadow:0 0 0 1px #e0b85a inset;cursor:default}
+.qchip .qttl{font-size:12px;font-weight:600;color:#3a3128;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px}
+.qchip .qmeta{font-size:11px;color:#998}
+.qchip.s-running{border-color:#5a9; background:#eefaf4}
+.qchip.s-done{opacity:.7}
+.qchip.s-failed{border-color:#d66;background:#fdeeee}
+.qchip .qx{border:none;background:transparent;color:#b99;cursor:pointer;font-size:12px;padding:0 2px;line-height:1}
+.qchip .qx:hover{color:#d44}
 .thumb.none.gen{color:#fff;background:#1a1714}
 .thumbx{position:absolute;top:5px;right:5px;width:24px;height:24px;border-radius:50%;border:none;
   background:rgba(217,126,126,.92);color:#fff;font-size:13px;font-weight:700;cursor:pointer;line-height:1;padding:0}

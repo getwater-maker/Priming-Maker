@@ -86,10 +86,13 @@ function storeActive() {
   scheduleAutoSave(); // set-aspect/merge-groups 등 pushDtoUpdate 안 거치는 변경도 자동저장
 }
 // 현재 모드 큐에 항목 추가 + 활성화 + S.* 미러 갱신.
+//   같은 scriptPath 가 이미 큐에 있으면 새로 만들지 않고 그 항목을 갱신·활성화(중복·자동저장 충돌 방지).
 function addItem(parsed, scriptPath, outRoot, settings) {
   const q = S.modes[S.mode];
-  const it = { id: newItemId(), parsed, scriptPath, outRoot, settings: settings || null, status: 'idle' };
-  q.items.push(it); q.activeId = it.id;
+  let it = scriptPath ? q.items.find((x) => x.scriptPath === scriptPath) : null;
+  if (it) { it.parsed = parsed; it.outRoot = outRoot; if (settings) it.settings = settings; }
+  else { it = { id: newItemId(), parsed, scriptPath, outRoot, settings: settings || null, status: 'idle' }; q.items.push(it); }
+  q.activeId = it.id;
   S.parsed = parsed; S.scriptPath = scriptPath; S.outRoot = outRoot;
   scheduleAutoSave();
   return it;
@@ -296,11 +299,12 @@ ipcMain.handle('open-script', async (_e, args = {}) => {
     }
   }
   ensureDirs(S.outRoot); // media/tts/subtitles 먼저 생성
-  setSingleItem(S.parsed, S.scriptPath, S.outRoot); // 현재 모드 큐에 보관 (Step1: 1개 유지)
+  // 큐에 추가(append) + 활성화. (이전 항목은 같은 객체 참조라 이미 최신 — storeActive 불필요)
+  addItem(S.parsed, S.scriptPath, S.outRoot);
   log(`대본 열기(${S.mode}): ${S.parsed.fileTitle}`);
   if (restoreNote) log(restoreNote);
   log(`편수 ${S.parsed.projects.length} · 출력 ${S.outRoot}`);
-  return { dto: P.toDTO(S.parsed), scriptPath, outRoot: S.outRoot };
+  return { dto: P.toDTO(S.parsed), scriptPath, outRoot: S.outRoot, queue: queueDTO() };
 });
 
 // 출력 경로 = <채널 outputFolder>/<대본파일명(확장자 제외)>/
@@ -562,8 +566,26 @@ function mapFlowImagesOnce(project, imgDir, mediaDir, allowOrder, logger) {
   });
   return n;
 }
+// 모드별 큐(적재된 대본 목록) 메타데이터 — 렌더러 큐 UI 용. 매 DTO 갱신에 첨부.
+function queueDTO() {
+  const mk = (mode) => {
+    const q = S.modes[mode];
+    return {
+      activeId: q.activeId,
+      items: q.items.map((it) => ({
+        id: it.id,
+        title: (it.parsed && it.parsed.fileTitle) || (it.scriptPath ? path.basename(it.scriptPath) : '대본'),
+        file: it.scriptPath ? path.basename(it.scriptPath) : '',
+        projects: (it.parsed && it.parsed.projects) ? it.parsed.projects.length : 0,
+        status: it.status || 'idle',
+        active: it.id === q.activeId,
+      })),
+    };
+  };
+  return { mode: S.mode, longform: mk('longform'), shorts: mk('shorts') };
+}
 function pushDtoUpdate() {
-  try { if (win && !win.isDestroyed() && S.parsed) { const d = P.toDTO(S.parsed); d.timings = { ...S.timings }; win.webContents.send('dto-update', d); } } catch {}
+  try { if (win && !win.isDestroyed() && S.parsed) { const d = P.toDTO(S.parsed); d.timings = { ...S.timings }; d.queue = queueDTO(); win.webContents.send('dto-update', d); } } catch {}
   scheduleAutoSave(); // 데이터가 바뀔 때마다(디바운스) 자동저장
 }
 
@@ -1023,9 +1045,9 @@ ipcMain.handle('load-project', async () => {
   S.mode = (snap.mode === 'longform') ? 'longform' : 'shorts';
   for (const pr of projects) pr.mode = S.mode;
   S.parsed = { fileTitle: snap.fileTitle, meta: snap.meta, projects, format: 'grouped', mode: S.mode };
-  setSingleItem(S.parsed, S.scriptPath, S.outRoot); // 현재 모드 큐에 보관 (Step1: 1개 유지)
+  addItem(S.parsed, S.scriptPath, S.outRoot); // 현재 모드 큐에 추가 + 활성화
   log(`📂 프로젝트 불러오기(${S.mode}): ${r.filePaths[0]}`);
-  return { dto: P.toDTO(S.parsed), scriptPath: S.scriptPath, outRoot: S.outRoot, mode: S.mode };
+  return { dto: P.toDTO(S.parsed), scriptPath: S.scriptPath, outRoot: S.outRoot, mode: S.mode, queue: queueDTO() };
 });
 
 // ⚡ 전체 만들기 — TTS + 이미지 동시 → I2V 영상 → .vrew → 출력폴더 열기
@@ -1135,8 +1157,29 @@ ipcMain.handle('reset-project', () => {
   const q = S.modes[S.mode]; if (q) { q.items = []; q.activeId = null; } // 현재 모드 큐 비움
   syncActiveToS(); // S.parsed=null
   scheduleAutoSave();
-  log(`🆕 초기화(${S.mode}) — 새 대본을 여세요`);
-  return true;
+  log(`🆕 초기화(${S.mode}) — 현재 모드 큐 비움`);
+  return { dto: null, queue: queueDTO() };
+});
+
+// ── 작업 큐 ── 현재 모드의 적재 대본 목록 조회/선택/제거
+ipcMain.handle('list-queue', () => queueDTO());
+ipcMain.handle('select-queue-item', (_e, args = {}) => {
+  const id = args && args.id;
+  const q = S.modes[S.mode];
+  if (!q.items.find((x) => x.id === id)) return { dto: S.parsed ? P.toDTO(S.parsed) : null, queue: queueDTO() };
+  q.activeId = id; syncActiveToS();
+  log(`↔ 대본 선택: ${(S.parsed && S.parsed.fileTitle) || ''}`);
+  return { dto: S.parsed ? P.toDTO(S.parsed) : null, queue: queueDTO() };
+});
+ipcMain.handle('remove-queue-item', (_e, args = {}) => {
+  const id = args && args.id;
+  const q = S.modes[S.mode];
+  q.items = q.items.filter((x) => x.id !== id);
+  if (q.activeId === id) q.activeId = q.items.length ? q.items[q.items.length - 1].id : null;
+  syncActiveToS();
+  scheduleAutoSave();
+  log(`🗑 대본 제거 (남은 ${q.items.length}개)`);
+  return { dto: S.parsed ? P.toDTO(S.parsed) : null, queue: queueDTO() };
 });
 
 // 그룹 1개만 TTS 변환 (그 그룹의 문장들)
@@ -1303,7 +1346,7 @@ ipcMain.handle('set-mode', (_e, args = {}) => {
   storeActive();                 // 현재 모드 작업물 보관
   activateMode(args.mode);       // 새 모드 것으로 전환
   log(`↔ 모드 전환: ${S.mode}${S.parsed ? '' : ' (이 모드 대본 없음 — 대본을 여세요)'}`);
-  return S.parsed ? P.toDTO(S.parsed) : null;
+  return { dto: S.parsed ? P.toDTO(S.parsed) : null, queue: queueDTO() };
 });
 
 // 대본 수정 — 편집한 텍스트로 재파싱(+원본 .md 갱신).

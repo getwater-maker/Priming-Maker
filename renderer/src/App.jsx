@@ -30,10 +30,13 @@ function phaseBadge(p, isLf) {
   return ['', p];
 }
 
+const QSTATUS = { idle: '대기', running: '진행중', done: '완료', failed: '실패' };
+
 export default function App() {
   const [mode, setMode] = useState('longform'); // 'longform'(주 사용) | 'shorts'
   const isLf = mode === 'longform';
   const [dto, setDto] = useState(null);
+  const [queue, setQueue] = useState(null); // 현재 모드 작업 큐(적재 대본 목록) — main 의 queueDTO
   const [presets, setPresets] = useState([]);
   const [styles, setStyles] = useState([]);
 
@@ -109,7 +112,7 @@ export default function App() {
 
   useEffect(() => {
     api.onLog((line) => logline(line));
-    api.onDtoUpdate((d) => { if (d) { setDto(d); if (d.timings) setTimings(d.timings); } });
+    api.onDtoUpdate((d) => { if (d) { setDto(d); if (d.timings) setTimings(d.timings); if (d.queue) setQueue(d.queue); } });
     api.onAutosaved((info) => setAutoSavedAt((info && info.at) || Date.now()));
     loadPresets().then(loadStyles);
     // 모드별 기본 음성배속을 mode-profiles 에서 가져와 현재 모드 기본값으로 세팅
@@ -214,8 +217,18 @@ export default function App() {
   async function openScript() {
     const r = await api.openScript({ presetName: presetName || null, mode });
     if (!r) return;
-    setDto(r.dto); setFtitle(r.dto.fileTitle);
-    setStatus(`${r.dto.projects.length}편 로드`);
+    setDto(r.dto); setFtitle(r.dto.fileTitle); if (r.queue) setQueue(r.queue);
+    setStatus(`${r.dto.projects.length}편 로드 · 큐에 추가`);
+  }
+  // 큐에서 대본 선택 → 활성화
+  async function selectQueueItem(id) {
+    try { const r = await api.selectQueueItem(id); if (r.queue) setQueue(r.queue); setDto(r.dto || null); setFtitle(r.dto ? (r.dto.fileTitle || '') : ''); }
+    catch (e) { logline('대본 선택 오류: ' + e.message); }
+  }
+  // 큐에서 대본 제거
+  async function removeQueueItem(id) {
+    try { const r = await api.removeQueueItem(id); if (r.queue) setQueue(r.queue); setDto(r.dto || null); setFtitle(r.dto ? (r.dto.fileTitle || '') : ''); setStatus('대본 제거됨'); }
+    catch (e) { logline('대본 제거 오류: ' + e.message); }
   }
   // 작업 소요시간은 백엔드에서 단계별로 측정해 dto-update(d.timings)로 전송 → setTimings 로 표시.
   async function runTts(shortsNum) {
@@ -326,8 +339,9 @@ export default function App() {
     finally { setImpBusy(false); }
   }
   async function resetProject() {
-    await api.resetProject();
-    setDto(null); setFtitle(''); setStatus('초기화됨 — 새 대본을 여세요');
+    const r = await api.resetProject();
+    if (r && r.queue) setQueue(r.queue);
+    setDto(null); setFtitle(''); setStatus('초기화됨 — 현재 모드 큐 비움');
   }
   async function saveProject() {
     try { const r = await api.saveProject(); setStatus('프로젝트 저장됨'); logline('저장: ' + r.file); }
@@ -336,7 +350,7 @@ export default function App() {
   async function loadProject() {
     const r = await api.loadProject(); if (!r) return;
     if (r.mode && r.mode !== mode) { setMode(r.mode); setAspect(r.mode === 'longform' ? '16:9' : '9:16'); }
-    setDto(r.dto); setFtitle(r.dto.fileTitle); setStatus(`${r.dto.projects.length}편 불러옴`);
+    setDto(r.dto); setFtitle(r.dto.fileTitle); if (r.queue) setQueue(r.queue); setStatus(`${r.dto.projects.length}편 불러옴`);
   }
   async function openComfy() {
     try { const c = await api.getComfyConfig(); setComfy(c || {}); setComfyOpen(true); }
@@ -770,6 +784,21 @@ export default function App() {
 
       <div id="body">
         <main>
+          {queue && queue[mode] && queue[mode].items.length > 0 && (
+            <div className="qstrip">
+              <span className="qlabel">{isLf ? '롱폼' : '쇼츠'} 큐 ({queue[mode].items.length})</span>
+              {queue[mode].items.map((it) => (
+                <div key={it.id}
+                  className={'qchip' + (it.active ? ' active' : '') + (it.status && it.status !== 'idle' ? ' s-' + it.status : '')}
+                  title={it.file || it.title}
+                  onClick={() => { if (!it.active) selectQueueItem(it.id); }}>
+                  <span className="qttl">{it.title}</span>
+                  <span className="qmeta">{it.projects}편{it.status && it.status !== 'idle' ? ' · ' + (QSTATUS[it.status] || it.status) : ''}</span>
+                  <button className="qx" title="큐에서 제거" onClick={(e) => { e.stopPropagation(); removeQueueItem(it.id); }}>✕</button>
+                </div>
+              ))}
+            </div>
+          )}
           <Cards dto={dto} isLf={isLf} capCharsN={effCap}
             onTts={runTts} onImg={runImg} onVid={runVid} onBulk={runBulk}
             onPlayShorts={playShorts} onPlayGroup={playGroup} onRegen={runRegen}
@@ -979,7 +1008,7 @@ export default function App() {
     setMode(m);
     setAspect(m === 'longform' ? '16:9' : '9:16');
     // 모드별 보관된 대본으로 전환 (없으면 빈 화면). 롱폼/쇼츠 대본은 독립.
-    try { const d = await api.setMode({ mode: m }); setDto(d || null); setFtitle(d ? (d.fileTitle || '') : ''); }
+    try { const r = await api.setMode({ mode: m }); if (r && r.queue) setQueue(r.queue); setDto(r ? r.dto : null); setFtitle(r && r.dto ? (r.dto.fileTitle || '') : ''); }
     catch (e) { logline('모드 전환 오류: ' + e.message); }
   }
 }
