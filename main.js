@@ -1079,10 +1079,10 @@ function buildSnapshot() {
       bgEnabled: pr.bgEnabled, bgFill: pr.bgFill, bgFillOp: pr.bgFillOp, bgStroke: pr.bgStroke,
       bgStrokeOp: pr.bgStrokeOp, bgStrokeW: pr.bgStrokeW, bgRound: pr.bgRound, bgDashed: pr.bgDashed,
       groups: pr.groups.map((g) => ({
-        num: g.num, phase: g.phase, mode: g.mode, isI2V: g.isI2V,
+        num: g.num, phase: g.phase, mode: g.mode, isI2V: g.isI2V, isIntro: g.isIntro,
         imagePrompt: g.imagePrompt, videoPrompt: g.videoPrompt, motionNote: g.motionNote,
         imagePath: g.imagePath, videoPath: g.videoPath,
-        sentences: pr.getSentencesOfGroup(g).map((s) => ({ text: s.text, ttsAudioPath: s.ttsAudioPath, ttsDurationSec: s.ttsDurationSec })),
+        sentences: pr.getSentencesOfGroup(g).map((s) => ({ text: s.text, ttsAudioPath: s.ttsAudioPath, ttsDurationSec: s.ttsDurationSec, isIntro: s.isIntro })),
       })),
     })),
   };
@@ -1166,10 +1166,12 @@ function projectsFromSnapshot(snap) {
     const sid = makeSentenceIder(); const sentences = []; const groups = [];
     (ps.groups || []).forEach((gs) => {
       const g = new Group({ num: gs.num, sentenceIds: [] });
-      Object.assign(g, { imagePrompt: gs.imagePrompt, videoPrompt: gs.videoPrompt, phase: gs.phase, title: gs.phase, mode: gs.mode, isI2V: gs.isI2V, motionNote: gs.motionNote, imagePath: gs.imagePath, videoPath: gs.videoPath });
+      // isIntro: 신규 스냅샷은 저장값, 구 스냅샷은 phase 로 폴백(도입부 H2 → phase 에 '도입' 포함)
+      const introFlag = gs.isIntro != null ? !!gs.isIntro : /도입/.test(gs.phase || '');
+      Object.assign(g, { imagePrompt: gs.imagePrompt, videoPrompt: gs.videoPrompt, phase: gs.phase, title: gs.phase, mode: gs.mode, isI2V: gs.isI2V, isIntro: introFlag, motionNote: gs.motionNote, imagePath: gs.imagePath, videoPath: gs.videoPath });
       (gs.sentences || []).forEach((ss) => {
         const s = new Sentence({ id: sid(ss.text), num: sentences.length + 1, text: ss.text });
-        s.groupId = g.id; s.ttsAudioPath = ss.ttsAudioPath || null; s.ttsDurationSec = ss.ttsDurationSec || null;
+        s.groupId = g.id; s.ttsAudioPath = ss.ttsAudioPath || null; s.ttsDurationSec = ss.ttsDurationSec || null; s.isIntro = !!ss.isIntro;
         g.sentenceIds.push(s.id); sentences.push(s);
       });
       groups.push(g);
