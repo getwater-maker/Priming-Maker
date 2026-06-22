@@ -316,7 +316,7 @@ function softenForModeration(prompt) {
   return p + ', wholesome historical illustration, safe for work, no violence, no weapons';
 }
 
-async function generateImagesGenspark(project, imagesDir, logger, abortSignal, stylePrompt, onlyNums, onProgress) {
+async function generateImagesGenspark(project, imagesDir, logger, abortSignal, stylePrompt, onlyNums, onProgress, profileId) {
   fs.mkdirSync(imagesDir, { recursive: true });
   const groups = project.groups;
   const idx = groups.map((g, i) => i).filter((i) => groups[i].imagePrompt && groups[i].imagePrompt.trim()
@@ -334,7 +334,7 @@ async function generateImagesGenspark(project, imagesDir, logger, abortSignal, s
   const outputPaths = idx.map((i) => path.join(imagesDir, `${String(groups[i].num).padStart(2, '0')}.png`));
 
   const { GensparkEngine } = require('../genspark-engine');
-  const eng = new GensparkEngine({ profileId: 'default', logger: log });
+  const eng = new GensparkEngine({ profileId: profileId || 'default', logger: log });
   eng._aspectRatio = project.aspect || '9:16'; // 9:16 비율 강제 (config ratio override)
 
   // Genspark 는 한 번 제출에 최대 6장 → 6개씩 묶어 배치 제출.
@@ -427,7 +427,12 @@ async function generateHookVideosGrok(project, videoDir, logger, abortSignal, vi
   }
 
   const { GrokEngine } = require('../grok-engine');
-  const eng = new GrokEngine({ profileId: 'default', logger: log });
+  // Grok 멀티계정 — 오늘 한도 안 찬 계정 선택(없으면 default). 한도 추적은 markUsed.
+  const GrokAcc = require('./grok-accounts');
+  const grokAccObj = GrokAcc.pickActive();
+  const grokProfile = grokAccObj ? grokAccObj.id : 'default';
+  if (grokAccObj && grokAccObj.id !== 'default') log(`🔑 Grok 계정: ${grokAccObj.label}`);
+  const eng = new GrokEngine({ profileId: grokProfile, logger: log });
   eng._aspectRatio = project.aspect || '9:16'; // 이미지 비율(9:16/1:1)에 맞춰 영상 생성
   if (videoDuration === '10s' || videoDuration === '6s') eng._videoDuration = videoDuration; // UI 지정 클립 길이
 
@@ -472,6 +477,8 @@ async function generateHookVideosGrok(project, videoDir, logger, abortSignal, vi
   } finally {
     try { await eng.stop(); } catch {}
   }
+  const okN = results.filter((r) => r && r.success).length;
+  if (okN > 0) { try { GrokAcc.markUsed(grokProfile, okN); } catch {} } // 계정 오늘 사용량 누적
   return results;
 }
 

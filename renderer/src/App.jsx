@@ -31,6 +31,7 @@ function phaseBadge(p, isLf) {
 }
 
 const QSTATUS = { idle: '대기', running: '진행중', done: '완료', failed: '실패' };
+const ENGINE_META = { genspark: { name: 'Genspark (Nano Banana 2)' }, flow: { name: 'Google Flow' }, comfy: { name: 'ComfyUI (SDXL)' } };
 
 export default function App() {
   const [mode, setMode] = useState('longform'); // 'longform'(주 사용) | 'shorts'
@@ -43,7 +44,7 @@ export default function App() {
   // 헤더 컨트롤
   const [presetName, setPresetName] = useState('');
   const [styleId, setStyleId] = useState('chibi');
-  const [imgEngine, setImgEngine] = useState('genspark');
+  const [imgEngine, setImgEngine] = useState('rotate'); // 'rotate'(Flow+Genspark 순환) | 'comfy'
   const [aspect, setAspect] = useState('16:9');
   const [videoEngine, setVideoEngine] = useState('grok10');
   const [vidFrom, setVidFrom] = useState(1);   // I2V 범위 시작 그룹
@@ -92,6 +93,12 @@ export default function App() {
   const [promptView, setPromptView] = useState(null);   // 그룹 프롬프트 보기 { label, image, video, motion }
   const [flowAccOpen, setFlowAccOpen] = useState(false);
   const [flowAcc, setFlowAcc] = useState(null);          // { dailyCap, accounts:[{id,label,used}] }
+  const [imgRotOpen, setImgRotOpen] = useState(false);
+  const [imgRot, setImgRot] = useState(null);            // { order:[], enabled:{} } 이미지 순환 설정
+  const [gsAccOpen, setGsAccOpen] = useState(false);
+  const [gsAcc, setGsAcc] = useState(null);              // Genspark 멀티계정
+  const [grokAccOpen, setGrokAccOpen] = useState(false);
+  const [grokAcc, setGrokAcc] = useState(null);          // Grok 멀티계정
 
   const logRef = useRef(null);
   const loaded = !!(dto && dto.projects && dto.projects.length);
@@ -437,6 +444,30 @@ export default function App() {
     try { const d = await api.getFlowAccounts(); setFlowAcc(d || { dailyCap: 45, accounts: [] }); setFlowAccOpen(true); }
     catch (e) { logline('Flow 계정 읽기 오류: ' + e.message); }
   }
+  // 이미지 순환 설정
+  async function openImgRotation() {
+    try { const c = await api.getImageRotation(); setImgRot(c || { order: ['genspark', 'flow'], enabled: { genspark: true, flow: true } }); setImgRotOpen(true); }
+    catch (e) { logline('순환 설정 읽기 오류: ' + e.message); }
+  }
+  async function saveImgRot(next) { setImgRot(next); try { await api.setImageRotation(next); } catch (e) { logline('순환 저장 오류: ' + e.message); } }
+  function toggleRotEngine(id) { const en = { ...(imgRot.enabled || {}) }; en[id] = en[id] === false; saveImgRot({ ...imgRot, enabled: en }); }
+  function moveRotEngine(id, dir) {
+    const order = [...(imgRot.order || [])]; const i = order.indexOf(id); const j = i + dir;
+    if (i < 0 || j < 0 || j >= order.length) return;
+    [order[i], order[j]] = [order[j], order[i]]; saveImgRot({ ...imgRot, order });
+  }
+  // Genspark 멀티계정
+  async function openGsAcc() { try { setGsAcc(await api.getGensparkAccounts()); setGsAccOpen(true); } catch (e) { logline('Genspark 계정 오류: ' + e.message); } }
+  async function addGsAcc() { const l = prompt('계정 라벨 (예: Genspark A)'); if (l == null) return; try { setGsAcc(await api.addGensparkAccount(l)); } catch (e) { logline(e.message); } }
+  async function removeGsAcc(id) { try { setGsAcc(await api.removeGensparkAccount(id)); } catch (e) { logline(e.message); } }
+  async function changeGsCap(n) { try { setGsAcc(await api.setGensparkCap(n)); } catch (e) { logline(e.message); } }
+  async function gsLogin(id) { setStatus('Genspark 로그인 창 여는 중…'); try { const r = await api.gensparkLogin(id); setStatus(r.ok ? '✓ Genspark 로그인 완료' : 'Genspark 로그인 실패: ' + (r.error || '')); } catch (e) { setStatus('Genspark 로그인 오류'); } }
+  // Grok 멀티계정
+  async function openGrokAcc() { try { setGrokAcc(await api.getGrokAccounts()); setGrokAccOpen(true); } catch (e) { logline('Grok 계정 오류: ' + e.message); } }
+  async function addGrokAcc() { const l = prompt('계정 라벨 (예: Grok A)'); if (l == null) return; try { setGrokAcc(await api.addGrokAccount(l)); } catch (e) { logline(e.message); } }
+  async function removeGrokAcc(id) { try { setGrokAcc(await api.removeGrokAccount(id)); } catch (e) { logline(e.message); } }
+  async function changeGrokCap(n) { try { setGrokAcc(await api.setGrokCap(n)); } catch (e) { logline(e.message); } }
+  async function grokLogin(id) { setStatus('Grok(X) 로그인 창 여는 중…'); try { const r = await api.grokLogin(id); setStatus(r.ok ? '✓ Grok 로그인 완료' : 'Grok 로그인 실패: ' + (r.error || '')); } catch (e) { setStatus('Grok 로그인 오류'); } }
   async function addFlowAcc() {
     const label = prompt('계정 라벨 (예: Flow A)'); if (label == null) return;
     try { setFlowAcc(await api.addFlowAccount(label)); } catch (e) { logline('추가 오류: ' + e.message); }
@@ -781,12 +812,11 @@ export default function App() {
               <option value="">스타일 없음</option>
               {styles.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
-            <select title="이미지 생성툴" value={imgEngine} onChange={(e) => setImgEngine(e.target.value)}>
-              <option value="genspark">Genspark</option>
-              <option value="flow">Google Flow</option>
+            <select title="이미지 생성툴" value={imgEngine === 'comfy' ? 'comfy' : 'rotate'} onChange={(e) => setImgEngine(e.target.value)}>
+              <option value="rotate">순환 (Flow+Genspark)</option>
               <option value="comfy">ComfyUI(SDXL)</option>
             </select>
-            {imgEngine === 'flow' && <button className="ghost" title="Flow 멀티계정 등록·로그인·한도" style={{ padding: '6px 9px' }} onClick={openFlowAcc}>⚙ 계정</button>}
+            {imgEngine !== 'comfy' && <button className="ghost" title="순환 엔진/순서·계정 설정" style={{ padding: '6px 9px' }} onClick={openImgRotation}>⚙ 순환</button>}
             {imgEngine === 'comfy' && <button className="ghost" title="ComfyUI 서버·SDXL 설정" style={{ padding: '6px 9px' }} onClick={openComfy}>⚙ Comfy</button>}
             <button className="ghost" disabled={!loaded} onClick={() => runImg(null)}>🖼 이미지</button>
             <span className="hdiv" />
@@ -1014,6 +1044,73 @@ export default function App() {
             </div>
             <div className="meta">⚠ 여러 계정으로 한도를 우회하는 것은 Flow 약관 위반·정지 위험이 있습니다. 계정당 보수적으로 사용하세요.</div>
             <div className="mbtns"><button onClick={addFlowAcc}>+ 계정 추가</button><button className="ghost" onClick={() => setFlowAccOpen(false)}>닫기</button></div>
+          </div>
+        </div>
+      )}
+
+      {imgRotOpen && imgRot && (
+        <div className="modal-bg show" onClick={(e) => { if (e.target.classList.contains('modal-bg')) setImgRotOpen(false); }}>
+          <div className="modal-card">
+            <h3>⚙ 이미지 순환 설정</h3>
+            <div className="meta" style={{ marginBottom: 8 }}>위에서부터 순서대로 시도하고, 한 엔진이 <b>한도</b>(Genspark 5시간/일일캡, Flow 계정한도)에 걸리면 <b>다음 엔진</b>이 남은 이미지를 이어 만듭니다. 체크 해제 시 순환에서 제외. (ComfyUI는 순환과 별개 단독)</div>
+            <div style={{ margin: '8px 0' }}>
+              {(imgRot.order || []).map((id, i) => (
+                <div key={id} className="frow" style={{ alignItems: 'center', gap: 4 }}>
+                  <button className="ghost" style={{ flex: '0 0 auto', padding: '2px 7px' }} disabled={i === 0} onClick={() => moveRotEngine(id, -1)}>↑</button>
+                  <button className="ghost" style={{ flex: '0 0 auto', padding: '2px 7px' }} disabled={i === imgRot.order.length - 1} onClick={() => moveRotEngine(id, 1)}>↓</button>
+                  <label style={{ flex: 1, display: 'flex', gap: 6, alignItems: 'center' }}>
+                    <input type="checkbox" checked={imgRot.enabled ? imgRot.enabled[id] !== false : true} onChange={() => toggleRotEngine(id)} />
+                    <b>{i + 1}. {ENGINE_META[id] ? ENGINE_META[id].name : id}</b>
+                  </label>
+                  {id === 'flow' && <button className="ghost" style={{ flex: '0 0 auto' }} onClick={openFlowAcc}>🔑 Flow 계정</button>}
+                  {id === 'genspark' && <button className="ghost" style={{ flex: '0 0 auto' }} onClick={openGsAcc}>🔑 Genspark 계정</button>}
+                </div>
+              ))}
+            </div>
+            <div className="meta">⚠ 여러 계정/엔진으로 한도를 우회하는 것은 각 서비스 약관 위반·정지 위험이 있습니다. 보수적으로.</div>
+            <div className="mbtns"><button className="ghost" onClick={() => setImgRotOpen(false)}>닫기</button></div>
+          </div>
+        </div>
+      )}
+
+      {gsAccOpen && gsAcc && (
+        <div className="modal-bg show" onClick={(e) => { if (e.target.classList.contains('modal-bg')) setGsAccOpen(false); }}>
+          <div className="modal-card">
+            <h3>⚙ Genspark 멀티계정</h3>
+            <div className="meta" style={{ marginBottom: 8 }}>계정마다 <b>🔑 로그인</b>으로 한 번씩 로그인(쿠키 저장). 생성 시 한도 안 찬 계정부터, 한도 도달 시 다음 계정으로.</div>
+            <div className="frow"><label>일일 한도</label><input className="n" type="number" style={{ width: 70 }} value={gsAcc.dailyCap} onChange={(e) => changeGsCap(e.target.value)} /><span className="meta">계정당 하루 생성 상한</span></div>
+            <div style={{ margin: '8px 0' }}>
+              {gsAcc.accounts.map((a) => (
+                <div key={a.id} className="frow" style={{ alignItems: 'center' }}>
+                  <span style={{ flex: 1, fontWeight: 700 }}>{a.label} <span className="meta">(오늘 {a.used}/{gsAcc.dailyCap})</span></span>
+                  <button className="ghost" style={{ flex: '0 0 auto' }} onClick={() => gsLogin(a.id)}>🔑 로그인</button>
+                  {a.id !== 'default' && <button className="ghost" style={{ flex: '0 0 auto' }} title="계정 삭제" onClick={() => removeGsAcc(a.id)}>✕</button>}
+                </div>
+              ))}
+            </div>
+            <div className="meta">⚠ 약관 위반·정지 위험. 계정당 보수적으로.</div>
+            <div className="mbtns"><button onClick={addGsAcc}>+ 계정 추가</button><button className="ghost" onClick={() => setGsAccOpen(false)}>닫기</button></div>
+          </div>
+        </div>
+      )}
+
+      {grokAccOpen && grokAcc && (
+        <div className="modal-bg show" onClick={(e) => { if (e.target.classList.contains('modal-bg')) setGrokAccOpen(false); }}>
+          <div className="modal-card">
+            <h3>⚙ Grok(X) 멀티계정 — 영상</h3>
+            <div className="meta" style={{ marginBottom: 8 }}>Grok 영상 생성용 X(트위터) 계정. <b>🔑 로그인</b>으로 한 번씩 로그인(쿠키 저장).</div>
+            <div className="frow"><label>일일 한도</label><input className="n" type="number" style={{ width: 70 }} value={grokAcc.dailyCap} onChange={(e) => changeGrokCap(e.target.value)} /><span className="meta">계정당 하루 생성 상한</span></div>
+            <div style={{ margin: '8px 0' }}>
+              {grokAcc.accounts.map((a) => (
+                <div key={a.id} className="frow" style={{ alignItems: 'center' }}>
+                  <span style={{ flex: 1, fontWeight: 700 }}>{a.label} <span className="meta">(오늘 {a.used}/{grokAcc.dailyCap})</span></span>
+                  <button className="ghost" style={{ flex: '0 0 auto' }} onClick={() => grokLogin(a.id)}>🔑 로그인</button>
+                  {a.id !== 'default' && <button className="ghost" style={{ flex: '0 0 auto' }} title="계정 삭제" onClick={() => removeGrokAcc(a.id)}>✕</button>}
+                </div>
+              ))}
+            </div>
+            <div className="meta">⚠ 약관 위반·정지 위험. 보수적으로.</div>
+            <div className="mbtns"><button onClick={addGrokAcc}>+ 계정 추가</button><button className="ghost" onClick={() => setGrokAccOpen(false)}>닫기</button></div>
           </div>
         </div>
       )}

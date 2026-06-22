@@ -243,6 +243,10 @@ ipcMain.handle('list-ollama-models', async () => {
   const cfg = require('./core/ollama-config').load();
   return (await ollamaTags(cfg.baseUrl)).models;
 });
+// 이미지 순환 설정 — 풀에 넣을 엔진/순서 (Genspark↔Flow 등)
+ipcMain.handle('get-image-rotation', () => require('./core/image-rotation').load());
+ipcMain.handle('set-image-rotation', (_e, patch) => require('./core/image-rotation').save(patch || {}));
+
 // Flow 멀티계정 — 목록/추가/삭제/한도/로그인
 ipcMain.handle('get-flow-accounts', () => require('./core/flow-accounts').list());
 ipcMain.handle('add-flow-account', (_e, label) => { require('./core/flow-accounts').add(label); return require('./core/flow-accounts').list(); });
@@ -257,6 +261,40 @@ ipcMain.handle('flow-login', async (_e, args = {}) => {
     log('✓ Flow 로그인 완료(쿠키 저장). 이 계정으로 이미지 생성 가능합니다.');
     return { ok: true };
   } catch (e) { log('Flow 로그인 오류: ' + e.message); return { ok: false, error: e.message }; }
+});
+
+// Genspark 멀티계정
+ipcMain.handle('get-genspark-accounts', () => require('./core/genspark-accounts').list());
+ipcMain.handle('add-genspark-account', (_e, label) => { require('./core/genspark-accounts').add(label); return require('./core/genspark-accounts').list(); });
+ipcMain.handle('remove-genspark-account', (_e, id) => { require('./core/genspark-accounts').remove(id); return require('./core/genspark-accounts').list(); });
+ipcMain.handle('set-genspark-cap', (_e, n) => { require('./core/genspark-accounts').setCap(n); return require('./core/genspark-accounts').list(); });
+ipcMain.handle('genspark-login', async (_e, args = {}) => {
+  const accId = (args && args.accId) || 'default';
+  log(`🔑 Genspark 로그인 (${accId}) — 열린 크롬에서 직접 로그인하세요 (쿠키 저장됨)`);
+  try {
+    const { GensparkEngine } = require('./genspark-engine');
+    const eng = new GensparkEngine({ profileId: accId, logger: log });
+    await eng.login();
+    log('✓ Genspark 로그인 완료(쿠키 저장).');
+    return { ok: true };
+  } catch (e) { log('Genspark 로그인 오류: ' + e.message); return { ok: false, error: e.message }; }
+});
+
+// Grok(X) 멀티계정 — 영상
+ipcMain.handle('get-grok-accounts', () => require('./core/grok-accounts').list());
+ipcMain.handle('add-grok-account', (_e, label) => { require('./core/grok-accounts').add(label); return require('./core/grok-accounts').list(); });
+ipcMain.handle('remove-grok-account', (_e, id) => { require('./core/grok-accounts').remove(id); return require('./core/grok-accounts').list(); });
+ipcMain.handle('set-grok-cap', (_e, n) => { require('./core/grok-accounts').setCap(n); return require('./core/grok-accounts').list(); });
+ipcMain.handle('grok-login', async (_e, args = {}) => {
+  const accId = (args && args.accId) || 'default';
+  log(`🔑 Grok(X) 로그인 (${accId}) — 열린 크롬에서 X 계정으로 로그인하세요`);
+  try {
+    const { GrokEngine } = require('./grok-engine');
+    const eng = new GrokEngine({ profileId: accId, logger: log });
+    await eng.login();
+    log('✓ Grok 로그인 완료(쿠키 저장).');
+    return { ok: true };
+  } catch (e) { log('Grok 로그인 오류: ' + e.message); return { ok: false, error: e.message }; }
 });
 // 참조음성 목록 — ~/.flow-app/ref-audio 의 음성 파일들 (드롭다운 + 미리듣기용)
 ipcMain.handle('list-ref-audio', () => {
@@ -488,8 +526,20 @@ async function runRotatingImages(project, imagesDir, logger, styleId, startEngin
     logger(`🔄 [${engineId}] 남은 ${remaining.length}장 생성 시도 (그룹 ${nums.join(',')})`);
     try {
       if (engineId === 'genspark') {
-        const r = await P.generateImagesGenspark(project, imagesDir, logger, () => S.abort, stylePrompt, nums, pushDtoUpdate);
-        if (r && r.limitReached) { logger('⚠ Genspark 한도 도달 — 다음 엔진으로 이어감'); continue; }
+        // Genspark 멀티계정: 한 계정이 한도면 다음 계정으로, 계정 모두 소진 시 다음 엔진으로.
+        const GsAcc = require('./core/genspark-accounts');
+        const accounts = GsAcc.activeAccounts();
+        if (!accounts.length) { logger('⚠ 모든 Genspark 계정 오늘 한도 — 다음 엔진으로'); continue; }
+        for (const acc of accounts) {
+          if (S.abort) break;
+          const stillNeed = need(); if (!stillNeed.length) break;
+          const ns = stillNeed.map((g) => g.num);
+          logger(`🔑 Genspark 계정: ${acc.label} — 남은 ${stillNeed.length}장`);
+          const r = await P.generateImagesGenspark(project, imagesDir, logger, () => S.abort, stylePrompt, ns, pushDtoUpdate, acc.id);
+          if (r && r.ok) GsAcc.markUsed(acc.id, r.ok); // 성공분만 카운트
+          if (r && r.limitReached) { logger(`⚠ Genspark 계정 "${acc.label}" 한도 — 다음 계정/엔진으로`); continue; }
+          break; // 한도가 아닌 이유로 끝남(나머지는 차단/실패) → Genspark 더 시도 무의미
+        }
       } else if (engineId === 'flow') {
         await runFlowImages(project, imagesDir, logger, styleId, nums);
       } else if (engineId === 'comfy') {

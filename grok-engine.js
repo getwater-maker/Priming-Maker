@@ -320,6 +320,14 @@ class GrokEngine {
     }
   }
 
+  // 로그인 전용 — 브라우저를 열어 X 로그인(최대 5분 대기) 후 쿠키 저장하고 닫음. (멀티계정 로그인)
+  async login() {
+    await this.start();
+    this.log('[Grok] 로그인 완료 — 쿠키 저장 후 창을 닫습니다.');
+    await this.stop();
+    return { ok: true };
+  }
+
   async stop() {
     if (this.context) {
       try { await this.context.close(); } catch {}
