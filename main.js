@@ -1492,6 +1492,63 @@ ipcMain.handle('import-prompts', (_e, args = {}) => {
 });
 
 // API 자동작성 — 등록된 LLM 키로 한 번에 프롬프트 작성 → 매핑
+// 분할/재구성 후 미디어 파일명을 그룹 새 num 에 맞춤(겹침 방지: 높은 num 부터). g.imagePath/videoPath 갱신.
+function renumberMediaFiles(project, mediaDir) {
+  const groups = [...project.groups].sort((a, b) => b.num - a.num);
+  for (const g of groups) {
+    for (const key of ['imagePath', 'videoPath']) {
+      const p = g[key];
+      if (!p || !fs.existsSync(p)) continue;
+      if (!p.startsWith(mediaDir)) continue; // media-N 안의 파일만(외부 첨부는 그대로)
+      const ext = path.extname(p);
+      const want = path.join(mediaDir, `${String(g.num).padStart(2, '0')}${ext}`);
+      if (path.resolve(p) === path.resolve(want)) continue;
+      try { if (fs.existsSync(want)) fs.rmSync(want, { force: true }); fs.renameSync(p, want); g[key] = want; } catch (e) {}
+    }
+  }
+}
+
+// 그룹 분할 — TTS 길이 절반(균형)에 가장 가까운 문장 경계에서 2개로. 두 새 그룹은 프롬프트/이미지 초기화.
+//   다른 그룹의 프롬프트·자산은 절대 건드리지 않음(같은 Group 객체 유지). 미디어 파일은 새 num 에 맞춰 정렬.
+ipcMain.handle('split-group', (_e, args = {}) => {
+  if (!S.parsed) throw new Error('대본을 먼저 여세요.');
+  const { shortsNum, groupNum } = args;
+  const pr = S.parsed.projects.find((p) => p.shortsNum === shortsNum);
+  if (!pr) throw new Error('편을 찾을 수 없습니다.');
+  const { Group, finalizeGroupIds } = require('./core/project-model');
+  const idx = pr.groups.findIndex((g) => g.num === groupNum);
+  if (idx < 0) throw new Error('그룹을 찾을 수 없습니다.');
+  const g = pr.groups[idx];
+  const sents = pr.getSentencesOfGroup(g);
+  if (sents.length < 2) throw new Error('이 그룹은 문장이 1개라 나눌 수 없습니다 (대본에서 문장을 더 나눠주세요).');
+  // 균형 분할 — 누적 TTS 가 전체의 절반에 가장 가까운 경계
+  const total = sents.reduce((a, s) => a + (s.ttsDurationSec || 0), 0);
+  let acc = 0, best = 1, bestDiff = Infinity;
+  for (let i = 1; i < sents.length; i++) {
+    acc += (sents[i - 1].ttsDurationSec || 0);
+    const diff = Math.abs(acc - total / 2);
+    if (diff < bestDiff) { bestDiff = diff; best = i; }
+  }
+  const firstS = sents.slice(0, best), secondS = sents.slice(best);
+  const mk = (ss) => {
+    const ng = new Group({ num: 0, sentenceIds: ss.map((s) => s.id) });
+    ng.phase = g.phase; ng.title = g.phase; ng.isIntro = g.isIntro;
+    ng.imagePrompt = null; ng.videoPrompt = null; ng.motionNote = null; // ★ 두 그룹 프롬프트 초기화
+    ng.imagePath = null; ng.videoPath = null; ng.imageStatus = null; ng.videoStatus = null;
+    ng.isI2V = false; ng.mode = 'motion';
+    return ng;
+  };
+  pr.groups.splice(idx, 1, mk(firstS), mk(secondS)); // 원본 1개 → 새 2개로 교체(나머지 그대로)
+  pr.groups.forEach((gg, i) => { gg.num = i + 1; });  // 재번호
+  finalizeGroupIds(pr.groups, pr.sentences);          // sentence.groupId 재지정
+  try { renumberMediaFiles(pr, shortsDirs(S.outRoot, pr.shortsNum).media); } catch {}
+  storeActive(); pushDtoUpdate();
+  const t1 = firstS.reduce((a, s) => a + (s.ttsDurationSec || 0), 0);
+  const t2 = secondS.reduce((a, s) => a + (s.ttsDurationSec || 0), 0);
+  log(`✂ ${prLabel(pr)} G${groupNum}(${total.toFixed(1)}초) → 2그룹 분할 (${t1.toFixed(1)}+${t2.toFixed(1)}초, ${firstS.length}+${secondS.length}문장). 두 그룹 프롬프트 초기화.`);
+  return P.toDTO(S.parsed);
+});
+
 ipcMain.handle('generate-prompts-api', async (_e, args = {}) => {
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
   const { provider = 'gemini', styleName = '' } = args;
@@ -1517,8 +1574,10 @@ ipcMain.handle('generate-prompts-api', async (_e, args = {}) => {
     log(`🤖 [${provider}] API 프롬프트 자동 작성 시작 (${PromptIO.LLM_TEXT_MODELS[provider]})…`);
     callAnswer = (req) => PromptIO.callLlmTextApi(provider, key, req);
   }
-  // 긴 대본은 청크로 나눠 호출(컨텍스트 초과 방지) → 매핑 누적
-  const r = await generatePromptsChunked(S.parsed.projects, { styleName }, callAnswer, log);
+  // 빈 프롬프트만 채움 — 이미지 OR i2v(영상) 프롬프트가 비어있는 그룹만 (분할로 초기화된 그룹 등).
+  //   이미 둘 다 있는 그룹은 건너뜀(덮어쓰지 않음).
+  const includeFn = (g) => (!g.imagePrompt || !g.imagePrompt.trim()) || (!g.videoPrompt || !g.videoPrompt.trim());
+  const r = await generatePromptsChunked(S.parsed.projects, { styleName, includeFn }, callAnswer, log);
   if (r.groups > 0) {
     log(`📥 [${label}] 적용 — ${r.groups}개 그룹 (🖼 ${r.img} · 🎬 ${r.vid})`);
     if (r.sanitized.length) { log(`🛡 안전 치환 ${r.sanitized.length}건`); }

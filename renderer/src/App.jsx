@@ -278,11 +278,13 @@ export default function App() {
     } catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
   }
   async function runImg(shortsNum) {
+    if (!ensurePromptsFilled(shortsNum)) return;
     setStatus(`이미지 생성중(${imgEngine})…`);
     try { const d = await api.imageBuild({ shortsNum, engine: imgEngine, styleId: styleId || null }); setDto(d); setStatus('이미지 완료'); }
     catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
   }
   async function runVid(shortsNum) {
+    if (!ensurePromptsFilled(shortsNum)) return;
     setStatus(`영상 생성중(G${vidFrom}~${vidTo})…`);
     try { const d = await api.videoBuild({ shortsNum, fromNum: parseInt(vidFrom, 10) || 1, toNum: parseInt(vidTo, 10) || 1, engine: videoEngine, flowVideoModel, flowCount }); setDto(d); setStatus('영상 완료'); }
     catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
@@ -299,6 +301,7 @@ export default function App() {
       fromNum: parseInt(vidFrom, 10) || 1, toNum: parseInt(vidTo, 10) || 1,
       dry: false, videoEngine, clipMaxSec: _clipMaxSec(), flowVideoModel, flowCount,
     };
+    if (!ensurePromptsFilled(shortsNum)) return;
     setStatus('⚡ 전체 제작중… (TTS+이미지→영상→.vrew)');
     try { const d = await api.makeAll(args); setDto(d); setStatus('전체 제작 완료'); }
     catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
@@ -314,6 +317,7 @@ export default function App() {
       if (Sh[i]) plan.push({ mode: 'shorts', id: Sh[i].id, settings: Sh[i].settings || null });
     }
     if (!plan.length) { setStatus('큐에 대본이 없습니다'); return; }
+    if (!ensurePromptsFilled(null)) return; // 현재 표시 대본 기준 빈 프롬프트 검사
     const order = plan.map((p) => (p.mode === 'longform' ? '롱' : '쇼')).join(' → ');
     if (!window.confirm(`큐 ${plan.length}개 대본을 순차 제작합니다.\n순서: ${order}\n(각 대본은 자기 설정으로, GPU 한 대라 한 번에 하나씩)\n계속할까요?`)) return;
     setStatus(`⚡⚡ 큐 순차 제작중… (${plan.length}개)`);
@@ -376,15 +380,39 @@ export default function App() {
       setStatus(ok ? '📤 요청서 클립보드 복사 완료 — 웹 LLM에 붙여넣으세요' : '복사 실패');
     } catch (e) { logline('내보내기 오류: ' + e.message); }
   }
-  // ✍ 프롬프트작성 — 각 그룹 내용을 분석해 이미지 프롬프트 자동 작성·적용 (Ollama, 미도달 시 Gemini 폴백).
+  // ✍ 프롬프트작성 — 프롬프트가 비어있는 그룹의 이미지+i2v 프롬프트만 채움 (Ollama, 미도달 시 Gemini 폴백).
   async function runMakePrompts() {
     if (!dto) { setStatus('대본을 먼저 여세요'); return; }
-    setImpBusy(true); setStatus('✍ 프롬프트 자동작성 중… (Ollama)');
+    setImpBusy(true); setStatus('✍ 빈 프롬프트 자동작성 중… (Ollama)');
     try {
       const d = await api.generatePromptsApi({ provider: 'ollama', styleName: styleName() });
-      setDto(d); setStatus('✍ 프롬프트 작성 완료');
+      setDto(d); setStatus('✍ 빈 프롬프트 작성 완료');
     } catch (e) { logline('프롬프트작성 오류: ' + e.message); setStatus('프롬프트작성 실패 — ⚙에서 Ollama 확인'); alert('프롬프트 작성 실패:\n' + e.message); }
     finally { setImpBusy(false); }
+  }
+  // 그룹 분할 — 10초 초과 그룹을 2개로(균형). 두 그룹 프롬프트 초기화.
+  async function splitGroup(shortsNum, groupNum) {
+    try { const d = await api.splitGroup({ shortsNum, groupNum }); setDto(d); setStatus('✂ 그룹 분할 — 두 그룹 프롬프트 초기화됨. ✍프롬프트작성으로 채우세요'); }
+    catch (e) { logline('분할 오류: ' + e.message); alert('분할 실패:\n' + e.message); }
+  }
+  // 제작 전 검사 — 이미지/ i2v 프롬프트가 빈 그룹이 있으면 목록 팝업 + 진행 차단. (shortsNum=null → 전체)
+  function ensurePromptsFilled(shortsNum) {
+    if (!dto) return false;
+    const projs = dto.projects.filter((p) => shortsNum == null || p.shortsNum === shortsNum);
+    const missing = [];
+    for (const p of projs) {
+      for (const c of p.cuts) {
+        const noImg = !c.imagePrompt || !c.imagePrompt.trim();
+        const noVid = !c.videoPrompt || !c.videoPrompt.trim();
+        if (noImg || noVid) missing.push(`${p.title} G${c.num}: ${[noImg ? '이미지' : null, noVid ? 'i2v' : null].filter(Boolean).join('·')} 없음`);
+      }
+    }
+    if (missing.length) {
+      alert(`프롬프트가 비어 있어 진행할 수 없습니다.\n✍ 프롬프트작성 버튼으로 채운 뒤 다시 시도하세요.\n\n빈 그룹 ${missing.length}개:\n` + missing.slice(0, 20).join('\n') + (missing.length > 20 ? `\n…외 ${missing.length - 20}개` : ''));
+      setStatus(`⛔ 빈 프롬프트 ${missing.length}개 — 진행 안 함`);
+      return false;
+    }
+    return true;
   }
   async function applyImport() {
     if (!impText.trim()) { setStatus('붙여넣은 텍스트가 없습니다'); return; }
@@ -900,7 +928,7 @@ export default function App() {
             onPlayShorts={playShorts} onPlayGroup={playGroup} onRegen={runRegen}
             onMake={runMake} onVrew={runVrew} onAttach={attachAsset} onClear={clearAsset}
             onTitleField={updateTitleField} onPreview={(kind, src) => setPreview({ kind, src })}
-            onPlayFrom={playFrom} onGroupTts={runGroupTts} onGroupVid={runGroupVid} onShowPrompt={showPrompt} />
+            onPlayFrom={playFrom} onGroupTts={runGroupTts} onGroupVid={runGroupVid} onShowPrompt={showPrompt} onSplit={splitGroup} />
         </main>
         <aside id="logwrap" className={logCollapsed ? 'collapsed' : ''}>
           <div id="logbar" onClick={(e) => { if (e.target.tagName === 'BUTTON') return; setLogCollapsed((v) => !v); }}>
@@ -1177,7 +1205,7 @@ export default function App() {
 }
 
 // ── 카드 목록 (편별 그룹/컷) ──────────────────────────────
-function Cards({ dto, isLf, capCharsN, onTts, onImg, onVid, onBulk, onPlayShorts, onPlayGroup, onRegen, onMake, onVrew, onAttach, onClear, onTitleField, onPreview, onPlayFrom, onGroupTts, onGroupVid, onShowPrompt }) {
+function Cards({ dto, isLf, capCharsN, onTts, onImg, onVid, onBulk, onPlayShorts, onPlayGroup, onRegen, onMake, onVrew, onAttach, onClear, onTitleField, onPreview, onPlayFrom, onGroupTts, onGroupVid, onShowPrompt, onSplit }) {
   if (!dto || !dto.projects.length) {
     return <div id="cards"><div className="empty">대본(.md)을 열면 편별 그룹과 컷이 여기에 표시됩니다.</div></div>;
   }
@@ -1221,7 +1249,9 @@ function Cards({ dto, isLf, capCharsN, onTts, onImg, onVid, onBulk, onPlayShorts
                         <div className="narr-top">
                           <span className="num">G{c.num}</span>
                           <div className="narr-btns">
-                            {c.groupDurationSec ? <span className="dur">▶ {c.groupDurationSec.toFixed(1)}s</span> : null}
+                            {c.groupDurationSec ? <span className={'dur' + (c.groupDurationSec > 10 ? ' over' : '')}>▶ {c.groupDurationSec.toFixed(1)}s</span> : null}
+                            {c.groupDurationSec > 10 && (c.sentences && c.sentences.length >= 2) &&
+                              <button className="gprev split" title={`${c.groupDurationSec.toFixed(1)}초 — 10초 초과. 2개 그룹으로 분할(프롬프트 초기화)`} onClick={() => onSplit(pr.shortsNum, c.num)}>✂ 분할</button>}
                             <button className="gprev" title="첨부 이미지 재생성" onClick={() => onRegen(pr.shortsNum, c.num)}>🔄</button>
                             <button className="gprev" title="이 그룹 미리듣기" onClick={() => onPlayGroup(pr.shortsNum, c.num)}>▶</button>
                             <button className="gprev" title="여기부터 재생" onClick={() => onPlayFrom(pr.shortsNum, c.num)}>⏭</button>

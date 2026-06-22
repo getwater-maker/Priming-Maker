@@ -66,6 +66,7 @@ contextBridge.exposeInMainWorld('api', {
   ttsGroup: (args) => ipcRenderer.invoke('tts-group', args),
   videoGroup: (args) => ipcRenderer.invoke('video-group', args),
   mergeGroups: (args) => ipcRenderer.invoke('merge-groups', args),
+  splitGroup: (args) => ipcRenderer.invoke('split-group', args),
   resplit: (args) => ipcRenderer.invoke('resplit', args),
   introVideoPrep: (args) => ipcRenderer.invoke('intro-video-prep', args),
   exportPrompts: (args) => ipcRenderer.invoke('export-prompts', args),
