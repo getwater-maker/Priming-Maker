@@ -1,0 +1,71 @@
+{
+  "name": "priming",
+  "productName": "Priming",
+  "version": "0.1.0",
+  "description": "롱폼(16:9)·쇼츠(9:16) 통합 영상 제작 — 대본(.md) → TTS → 이미지/영상 → Vrew(.vrew) 자동 제작 (PrimingFlow + Shots-maker 통합)",
+  "main": "bootstrap.js",
+  "author": "getwater",
+  "scripts": {
+    "start": "vite build && electron .",
+    "build:renderer": "vite build",
+    "dev:renderer": "vite",
+    "test:parser": "node test/parser.test.js",
+    "build:shorts": "node build-shorts.js",
+    "pack": "vite build && electron-builder --win --dir",
+    "dist": "vite build && electron-builder --win nsis --x64 --publish never",
+    "release": "vite build && electron-builder --win nsis --x64 --publish always"
+  },
+  "dependencies": {
+    "adm-zip": "^0.5.17",
+    "electron-updater": "^6.8.3",
+    "ffmpeg-static": "^5.3.0",
+    "playwright": "^1.60.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.7.0",
+    "electron": "^33.4.11",
+    "electron-builder": "^25.1.8",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "vite": "^5.4.21"
+  },
+  "build": {
+    "appId": "com.user.priming",
+    "productName": "Priming",
+    "asar": true,
+    "files": [
+      "**/*",
+      "!renderer/src/**/*",
+      "!**/*.map",
+      "!_*.md"
+    ],
+    "asarUnpack": [
+      "tts/omnivoice-backend/**",
+      "node_modules/ffmpeg-static/**",
+      "assets/fonts/**"
+    ],
+    "win": {
+      "icon": "assets/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "installerIcon": "assets/icon.ico",
+      "uninstallerIcon": "assets/icon.ico"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "getwater-maker",
+        "repo": "Priming-Maker",
+        "releaseType": "release"
+      }
+    ]
+  }
+}

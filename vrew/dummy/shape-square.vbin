@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 <%= width %> <%= height%>" style="overflow: hidden;">
+  <% var roundingBoxLength = Math.min(width, height)/2 * cornerRounding; %>
+  <% var cubicBezierConst = 0.55228; %>
+  <% var cubicBezierOffset = (1-cubicBezierConst)*roundingBoxLength; %>
+  <defs>
+    <clipPath id="<%=randomId%>">
+    <path 
+        d="M <%= roundingBoxLength %> 0
+           L <%= width - roundingBoxLength %> 0
+           C <%= width - cubicBezierOffset %> 0, <%= width %> <%= cubicBezierOffset %>, <%= width %> <%= roundingBoxLength %>
+           L <%= width %> <%= height - roundingBoxLength %>
+           C <%= width %> <%= height - cubicBezierOffset %>, <%= width - cubicBezierOffset %> <%= height %>, <%= width - roundingBoxLength %> <%= height %>
+           L <%= roundingBoxLength %> <%= height %>
+           C <%= cubicBezierOffset %> <%= height %>, 0 <%= height - cubicBezierOffset %>, 0 <%= height - roundingBoxLength %>
+           L 0 <%= roundingBoxLength %>
+           C 0 <%= cubicBezierOffset %>, <%= cubicBezierOffset %> 0, <%= roundingBoxLength %> 0
+           Z">
+    </path>
+    </clipPath>
+  </defs>
+  <path
+      d="M <%= roundingBoxLength %> 0
+         L <%= width - roundingBoxLength %> 0
+         C <%= width - cubicBezierOffset %> 0, <%= width %> <%= cubicBezierOffset %>, <%= width %> <%= roundingBoxLength %>
+         L <%= width %> <%= height - roundingBoxLength %>
+         C <%= width %> <%= height - cubicBezierOffset %>, <%= width - cubicBezierOffset %> <%= height %>, <%= width - roundingBoxLength %> <%= height %>
+         L <%= roundingBoxLength %> <%= height %>
+         C <%= cubicBezierOffset %> <%= height %>, 0 <%= height - cubicBezierOffset %>, 0 <%= height - roundingBoxLength %>
+         L 0 <%= roundingBoxLength %>
+         C 0 <%= cubicBezierOffset %>, <%= cubicBezierOffset %> 0, <%= roundingBoxLength %> 0
+         Z"
+      clip-path="url(#<%=randomId%>)"
+      stroke-width="<%= strokeWidth%>" 
+      stroke="<%= strokeColor%>" 
+      fill="<%= planeColor%>"
+      vector-effect="non-scaling-stroke"
+      stroke-dasharray="<% if(isDashed) { %><%= 2.2*strokeWidth %> <%= 2.2*strokeWidth %><% } else { %>0<% } %>"
+      stroke-linecap="butt"
+    >
+  </path>
+</svg>

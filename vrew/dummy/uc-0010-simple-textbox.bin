@@ -1,0 +1,43 @@
+
+<style>
+.uc-0010-simple-textbox {
+  text-align: var(--textbox-align);
+  line-height: 1.4;
+  font-size: 25px;
+  color: white;
+  font-family: initial;
+  font-weight: initial;
+
+  display: flex;
+  align-items: center;
+  justify-content: var(--textbox-align);
+  width: 100%;
+  overflow: visible;
+}
+.uc-0010-simple-textbox .textarea {
+  white-space: pre-wrap;
+  word-wrap: break-word;
+
+  background-color: var(--textbox-color);
+  width: fit-content;
+  padding: 3px 0px 1px 0px;
+}
+.uc-0010-simple-textbox .textarea p {
+  margin-block-start: 0px;
+  margin-block-end: 0px;
+  padding: 0px 5px;
+  line-height: var(--textbox-lineheight);
+}
+.uc-0010-simple-textbox .textarea p span { 
+  vertical-align: bottom;
+}
+.uc-0010-simple-textbox .textarea .ql-blank p {
+  padding: 0px;
+}
+.uc-0010-simple-textbox .textarea .ql-blank p > span {
+  background-color: transparent !important;
+}
+</style>
+<div class="uc-0010-simple-textbox">
+  <div class="textarea" id="textarea"></div>
+</div>

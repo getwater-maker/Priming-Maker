@@ -1,0 +1,1352 @@
+/**
+ * main.js — Electron 메인 프로세스. 창 생성 + IPC 오케스트레이션.
+ * 권위 데이터(Project 인스턴스)는 여기 메모리(S)에 보유, 렌더러로는 DTO만 전달.
+ */
+const path = require('path');
+const os = require('os');
+const fs = require('fs');
+const { app, BrowserWindow, ipcMain, dialog, shell, protocol, net } = require('electron');
+const P = require('./core/pipeline');
+const { getModeProfile } = require('./core/mode-profiles');
+
+// 현재 작업 모드 — open-script 가 설정한 S.mode, 또는 파싱 결과/프로젝트에서 추론.
+function currentMode() {
+  return (S.parsed && S.parsed.mode) || S.mode || 'shorts';
+}
+// .vrew(및 SRT) 파일명 — 대본 파일명과 동일. 한 파일에 편이 여럿(쇼츠 3편)이면 _N 접미.
+function vrewBaseName(pr) {
+  const src = S.scriptPath ? path.basename(S.scriptPath).replace(/\.md$/i, '')
+    : (S.parsed && S.parsed.fileTitle) || getModeProfile(currentMode()).vrewPrefix;
+  const base = _safeFolder(src);
+  const n = (S.parsed && S.parsed.projects) ? S.parsed.projects.length : 1;
+  return n > 1 ? `${base}_${pr.shortsNum}` : base;
+}
+// 로그 라벨 — 롱폼은 '롱폼', 쇼츠는 '쇼츠N'. (롱폼 프로젝트도 내부 shortsNum=1 이라 라벨만 모드로 구분)
+function prLabel(pr) {
+  const lf = (pr && pr.mode === 'longform') || currentMode() === 'longform';
+  return lf ? '롱폼' : `쇼츠${pr ? pr.shortsNum : ''}`;
+}
+// 롱폼 분할옵션 — 프리셋의 split 객체(롱폼 전용) 우선, 없으면 평면 필드.
+function presetThresholds(preset) {
+  if (!preset) return {};
+  const s = preset.split || {};
+  const pick = (a, b) => (a != null ? a : b);
+  return {
+    introSentenceSize: pick(s.introSentenceSize, preset.introSentenceSize),
+    mainSentenceSize: pick(s.mainSentenceSize, preset.mainSentenceSize),
+    shortLen: pick(s.shortLen, preset.shortLen),
+    longLen: pick(s.longLen, preset.longLen),
+    splitMode: pick(s.splitMode, preset.splitMode) || 'h3',
+  };
+}
+// 영상 엔진 → Grok 클립 길이 ('grok10'→10s, 그 외 grok→6s)
+function grokDurOf(engine) { return engine === 'grok10' ? '10s' : '6s'; }
+// 롱폼은 AI 고지 필수 — preset 에 강제로 enabled. (기본 문구 보장)
+function forceAiNoticeIfLongform(preset) {
+  if (currentMode() !== 'longform' || !preset) return preset;
+  // 롱폼: AI 고지 필수 + 5초 후 5초간 표시 (preset 값보다 우선하도록 뒤에 둠).
+  return { ...preset, aiNotice: {
+    text: '본 영상의 음성과 이미지는 AI 도구를 활용하여 제작되었습니다.',
+    ...(preset.aiNotice || {}),
+    enabled: true, startMode: 'seconds', startSeconds: 5, durationSeconds: 5,
+  } };
+}
+
+// 로컬 이미지/영상 미리보기용 커스텀 프로토콜 (app ready 전에 등록 필요)
+protocol.registerSchemesAsPrivileged([
+  { scheme: 'media', privileges: { secure: true, supportFetchAPI: true, stream: true, bypassCSP: true } },
+]);
+
+let win = null;
+const S = { parsed: null, scriptPath: null, outRoot: null, preset: null, ttsMgr: null, flowEng: null, flowEngProfileDir: null, abort: false, mode: 'longform',
+  // 작업 소요시간(초) — 백엔드에서 단계별 측정해 DTO 로 전송(make-all 의 각 단계 시간도 실시간 표시).
+  timings: { tts: 0, image: 0, video: 0, make: 0 },
+  // 모드별 대본을 독립 보관 — 롱폼/쇼츠 각각 따로 첨부·작업. 전환 시 해당 모드 것으로 활성화(재파싱 없음).
+  modes: { longform: null, shorts: null } };
+// 현재 활성 대본을 S.modes[현재모드] 에 저장
+function storeActive() {
+  if (!S.parsed) { S.modes[S.mode] = null; return; }
+  S.modes[S.mode] = { parsed: S.parsed, scriptPath: S.scriptPath, outRoot: S.outRoot };
+  scheduleAutoSave(); // set-aspect/merge-groups 등 pushDtoUpdate 안 거치는 변경도 자동저장
+}
+// 지정 모드의 보관 대본을 활성으로 (없으면 비움)
+function activateMode(m) {
+  S.mode = (m === 'longform') ? 'longform' : 'shorts';
+  const st = S.modes[S.mode];
+  S.parsed = st ? st.parsed : null;
+  S.scriptPath = st ? st.scriptPath : null;
+  S.outRoot = st ? st.outRoot : null;
+}
+
+function createWindow() {
+  win = new BrowserWindow({
+    width: 1240, height: 860,
+    title: 'Priming',
+    icon: path.join(__dirname, 'assets', 'icon.ico'),
+    backgroundColor: '#faf6f0',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+  win.setMenuBarVisibility(false);
+  // 렌더러(React/Vite): dev 는 PM_DEV_URL(HMR 서버), prod 는 빌드된 정적 파일.
+  const devUrl = process.env.PM_DEV_URL;
+  if (devUrl) { win.loadURL(devUrl); win.webContents.openDevTools({ mode: 'detach' }); }
+  else win.loadFile(path.join(__dirname, 'renderer', 'dist', 'index.html'));
+
+  // 진단(PM_DIAG=1): 렌더러 콘솔/크래시를 stdout 으로 포워딩 후 자동 종료 — 스모크 검증용.
+  if (process.env.PM_DIAG) {
+    win.webContents.on('console-message', (_e, level, message) => {
+      process.stdout.write(`[renderer:${level}] ${message}\n`);
+    });
+    win.webContents.on('render-process-gone', (_e, d) => process.stdout.write(`[render-gone] ${JSON.stringify(d)}\n`));
+    win.webContents.on('did-finish-load', () => {
+      win.webContents.executeJavaScript(
+        'JSON.stringify({root: !!document.querySelector("#root"), cards: !!document.querySelector("#cards"), header: document.querySelector("h1")?.textContent, hasApi: !!window.api})'
+      ).then((r) => {
+        process.stdout.write(`[diag] ${r}\n`);
+        try { fs.writeFileSync(path.join(os.homedir(), '.priming-maker', 'diag.txt'), r); } catch (_) {}
+      }).catch((e) => process.stdout.write(`[diag-err] ${e.message}\n`));
+      setTimeout(() => app.quit(), 2500);
+    });
+  }
+}
+
+function _mimeOf(p) {
+  const e = path.extname(p).toLowerCase();
+  return ({ '.mp4': 'video/mp4', '.mov': 'video/quicktime', '.webm': 'video/webm', '.m4v': 'video/mp4',
+    '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif',
+    '.wav': 'audio/wav', '.mp3': 'audio/mpeg', '.mpga': 'audio/mpeg' })[e] || 'application/octet-stream';
+}
+
+app.whenReady().then(() => {
+  // media://<encoded-abs-path> → 로컬 파일. Range 직접 처리(비디오 스트리밍 — net.fetch(file://)는 Range에서 ERR_UNEXPECTED).
+  protocol.handle('media', (request) => {
+    let p = decodeURIComponent(request.url.slice('media://'.length)).replace(/^\/+/, '');
+    try {
+      const stat = fs.statSync(p);
+      const mime = _mimeOf(p);
+      const range = request.headers.get('Range');
+      const m = range && /bytes=(\d+)-(\d*)/.exec(range);
+      if (m) {
+        const start = parseInt(m[1], 10);
+        const end = m[2] ? Math.min(parseInt(m[2], 10), stat.size - 1) : stat.size - 1;
+        const len = end - start + 1;
+        const fd = fs.openSync(p, 'r');
+        const buf = Buffer.alloc(len);
+        fs.readSync(fd, buf, 0, len, start);
+        fs.closeSync(fd);
+        return new Response(buf, { status: 206, headers: {
+          'Content-Type': mime, 'Content-Length': String(len),
+          'Content-Range': `bytes ${start}-${end}/${stat.size}`, 'Accept-Ranges': 'bytes',
+        } });
+      }
+      return new Response(fs.readFileSync(p), { status: 200, headers: {
+        'Content-Type': mime, 'Content-Length': String(stat.size), 'Accept-Ranges': 'bytes',
+      } });
+    } catch (e) {
+      return new Response('not found', { status: 404 });
+    }
+  });
+  createWindow();
+  app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
+  // 자동 업데이트는 bootstrap.js 의 auto-updater 모듈이 담당 (PrimingFlow 방식)
+});
+app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
+app.on('before-quit', () => {
+  try { writeSnapshotSync(); } catch {} // 종료 직전 마지막 변경 보장
+  try { if (S.flowEng && S.flowEng.context) S.flowEng.context.close(); } catch {}
+});
+
+const log = (line) => { if (win && !win.isDestroyed()) win.webContents.send('log', String(line)); };
+
+ipcMain.handle('list-presets', () => {
+  try { return P.listPresets(); } catch (e) { return []; }
+});
+// 모드별 기본값(음성배속·화면비 등) — 렌더러가 mode-profiles 를 단일 출처로 참조.
+ipcMain.handle('get-mode-profiles', () => {
+  const { MODE_PROFILES } = require('./core/mode-profiles');
+  return MODE_PROFILES;
+});
+ipcMain.handle('list-styles', () => {
+  try { return require('./core/style-store').loadAll().map((s) => ({ id: s.id, name: s.name, prompt: s.prompt || '' })); }
+  catch (e) { return []; }
+});
+// ComfyUI(i2v) 설정 get/set + 연결 테스트
+ipcMain.handle('get-comfy-config', () => require('./core/comfy-config').load());
+ipcMain.handle('set-comfy-config', (_e, patch = {}) => require('./core/comfy-config').save(patch || {}));
+ipcMain.handle('test-comfy', async () => {
+  const cfg = require('./core/comfy-config').load();
+  const { ComfyEngine } = require('./comfy-engine');
+  const ok = await new ComfyEngine(cfg, log).health();
+  log(ok ? `✓ ComfyUI 연결 OK (${cfg.baseUrl})` : `✗ ComfyUI 연결 실패 (${cfg.baseUrl})`);
+  return { ok, baseUrl: cfg.baseUrl };
+});
+// Ollama(LLM 프롬프트 자동작성) 설정 get/set + 연결 테스트 + 모델 목록
+ipcMain.handle('get-ollama-config', () => require('./core/ollama-config').load());
+ipcMain.handle('set-ollama-config', (_e, patch = {}) => require('./core/ollama-config').save(patch || {}));
+async function ollamaTags(baseUrl) {
+  const base = String(baseUrl || '').replace(/\/+$/, '');
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 3000);
+  try {
+    const res = await fetch(`${base}/api/tags`, { signal: ctrl.signal });
+    if (!res.ok) return { ok: false, error: `HTTP ${res.status}`, models: [] };
+    const data = await res.json();
+    return { ok: true, models: (data.models || []).map((m) => m.name) };
+  } catch (e) { return { ok: false, error: e.message, models: [] }; }
+  finally { clearTimeout(t); }
+}
+ipcMain.handle('test-ollama', async () => {
+  const cfg = require('./core/ollama-config').load();
+  const r = await ollamaTags(cfg.baseUrl);
+  if (!r.ok) { log(`✗ Ollama 연결 실패 (${cfg.baseUrl}) — ${r.error}`); return { ok: false, error: r.error, baseUrl: cfg.baseUrl, models: [] }; }
+  const hasModel = r.models.includes(cfg.model);
+  log(`✓ Ollama 연결 OK (${cfg.baseUrl}) — 모델 ${r.models.length}개${hasModel ? `, '${cfg.model}' 설치됨` : `, ⚠ '${cfg.model}' 미설치`}`);
+  return { ok: true, baseUrl: cfg.baseUrl, models: r.models, hasModel };
+});
+ipcMain.handle('list-ollama-models', async () => {
+  const cfg = require('./core/ollama-config').load();
+  return (await ollamaTags(cfg.baseUrl)).models;
+});
+// Flow 멀티계정 — 목록/추가/삭제/한도/로그인
+ipcMain.handle('get-flow-accounts', () => require('./core/flow-accounts').list());
+ipcMain.handle('add-flow-account', (_e, label) => { require('./core/flow-accounts').add(label); return require('./core/flow-accounts').list(); });
+ipcMain.handle('remove-flow-account', (_e, id) => { require('./core/flow-accounts').remove(id); return require('./core/flow-accounts').list(); });
+ipcMain.handle('set-flow-cap', (_e, n) => { require('./core/flow-accounts').setCap(n); return require('./core/flow-accounts').list(); });
+ipcMain.handle('flow-login', async (_e, args = {}) => {
+  const accId = (args && args.accId) || 'default';
+  log(`🔑 Flow 로그인 창 열기 (${accId}) — 열린 크롬에서 직접 로그인하세요 (쿠키 저장됨)`);
+  try {
+    const eng = getFlowEng(flowProfileDir(accId));
+    await eng.login();
+    log('✓ Flow 로그인 완료(쿠키 저장). 이 계정으로 이미지 생성 가능합니다.');
+    return { ok: true };
+  } catch (e) { log('Flow 로그인 오류: ' + e.message); return { ok: false, error: e.message }; }
+});
+// 참조음성 목록 — ~/.flow-app/ref-audio 의 음성 파일들 (드롭다운 + 미리듣기용)
+ipcMain.handle('list-ref-audio', () => {
+  const dir = path.join(os.homedir(), '.flow-app', 'ref-audio');
+  try {
+    return fs.readdirSync(dir).filter((f) => /\.(wav|mp3|flac|m4a)$/i.test(f)).map((f) => ({ name: f, path: path.join(dir, f) }));
+  } catch { return []; }
+});
+
+ipcMain.handle('open-script', async (_e, args = {}) => {
+  const preset = P.getPreset(args.presetName || null);
+  const opt = { properties: ['openFile'], filters: [{ name: 'Markdown', extensions: ['md'] }] };
+  if (preset && preset.scriptFolder && fs.existsSync(preset.scriptFolder)) opt.defaultPath = preset.scriptFolder;
+  const r = await dialog.showOpenDialog(win, opt);
+  if (r.canceled || !r.filePaths[0]) return null;
+  const scriptPath = r.filePaths[0];
+  S.scriptPath = scriptPath;
+  S.mode = (args.mode === 'longform') ? 'longform' : 'shorts';
+  S.preset = preset;
+  S.outRoot = computeOutRoot(scriptPath, preset, S.mode);
+
+  // ── 자동저장 복원 ── 같은 대본의 작업본(스냅샷)이 있으면 이어받기(구글독스식).
+  //   • 대본(.md)을 스냅샷 이후 수정하지 않았으면 → 작업본 전체 복원(이미지/음성/프롬프트 그대로).
+  //   • 대본을 수정했으면 → 새로 파싱한 위에 자산/프롬프트만 최대한 덮어쓰기(overlaySnapshot).
+  let restoreNote = '';
+  let snap = null;
+  try { const { file } = snapshotFile(); if (fs.existsSync(file)) snap = JSON.parse(fs.readFileSync(file, 'utf8')); } catch {}
+  const sameMode = snap && ((snap.mode === 'longform' ? 'longform' : 'shorts') === S.mode);
+  let mdMtime = 0; try { mdMtime = fs.statSync(scriptPath).mtimeMs; } catch {}
+  if (sameMode && snap.savedAt && snap.savedAt >= mdMtime) {
+    // 대본 수정 없음 → 작업본 그대로 이어받기
+    const projects = projectsFromSnapshot(snap);
+    for (const pr of projects) pr.mode = S.mode;
+    S.parsed = { fileTitle: snap.fileTitle, meta: snap.meta, projects, format: 'grouped', mode: S.mode };
+    restoreNote = `♻ 자동저장된 작업본을 이어서 불러왔습니다 (${new Date(snap.savedAt).toLocaleString()}).`;
+  } else {
+    S.parsed = P.parseScript(scriptPath, S.mode, presetThresholds(preset));
+    if (sameMode) {
+      const n = overlaySnapshot(S.parsed, snap);
+      if (n) restoreNote = `♻ 대본 수정 감지 — 새로 파싱 후 기존 자산 ${n}개 복원.`;
+    }
+  }
+  ensureDirs(S.outRoot); // media/tts/subtitles 먼저 생성
+  storeActive(); // 현재 모드 슬롯에 보관 (롱폼/쇼츠 독립)
+  log(`대본 열기(${S.mode}): ${S.parsed.fileTitle}`);
+  if (restoreNote) log(restoreNote);
+  log(`편수 ${S.parsed.projects.length} · 출력 ${S.outRoot}`);
+  return { dto: P.toDTO(S.parsed), scriptPath, outRoot: S.outRoot };
+});
+
+// 출력 경로 = <채널 outputFolder>/<대본파일명(확장자 제외)>/
+//   그 안에 media/(이미지+영상) · tts/(음성) · subtitles/(SRT) 하위폴더 + 쇼츠N.vrew.
+//   Windows 금지문자만 제거(대괄호·공백은 유지).
+function _safeFolder(name) {
+  return String(name).replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, ' ').trim();
+}
+function computeOutRoot(scriptPath, preset, mode) {
+  const folder = _safeFolder(path.basename(scriptPath).replace(/\.md$/i, ''));
+  // 모드별 출력폴더(롱폼/쇼츠) 우선, 없으면 공용 outputFolder, 그것도 없으면 ./output
+  const modeOut = preset && (mode === 'longform' ? preset.outLong : preset.outShort);
+  const outBase = modeOut || (preset && preset.outputFolder) || path.join(__dirname, 'output');
+  return path.join(outBase, folder);
+}
+// 쇼츠별 폴더: media-N(이미지+영상) · tts-N(음성) · subtitles-N(SRT). 루트에 쇼츠N.vrew.
+function shortsDirs(outRoot, n) {
+  const d = { media: path.join(outRoot, `media-${n}`), tts: path.join(outRoot, `tts-${n}`), subtitles: path.join(outRoot, `subtitles-${n}`) };
+  for (const k of Object.keys(d)) { try { fs.mkdirSync(d[k], { recursive: true }); } catch {} }
+  return d;
+}
+function ensureDirs(outRoot) {
+  try { fs.mkdirSync(outRoot, { recursive: true }); } catch {}
+  if (S.parsed) for (const pr of S.parsed.projects) shortsDirs(outRoot, pr.shortsNum);
+}
+
+ipcMain.handle('tts-build', async (_e, args = {}) => {
+  if (!S.parsed) throw new Error('대본을 먼저 여세요.');
+  const { shortsNum = null, dry = false, presetName = null, speed = 1.15 } = args;
+  const clipMaxSec = (args.clipMaxSec && Number(args.clipMaxSec) > 0) ? Number(args.clipMaxSec) : 8.0; // 영상 엔진별 그룹 캡(Grok 6/Flow 8)
+  S.abort = false;
+  if (!dry) {
+    S.preset = P.getPreset(presetName);
+    if (!S.preset) throw new Error('프리셋을 찾을 수 없습니다.');
+    log(`프리셋 "${S.preset.name}" (${S.preset.engine}, 음성 배속 ${speed}x) 연결 중…`);
+    const { mgr, ok } = await P.makeTtsManager(log, S.preset.engine);
+    if (!ok) throw new Error(`TTS 엔진 '${S.preset.engine}' 미가동 (백엔드 확인)`);
+    S.ttsMgr = mgr;
+  }
+
+  const _ttsT0 = Date.now();
+  S.timings.tts = 0;
+  for (const pr of S.parsed.projects) {
+    if (shortsNum && pr.shortsNum !== shortsNum) continue;
+    const ttsDir = shortsDirs(S.outRoot, pr.shortsNum).tts;
+    if (S.abort) { log('⏹ 중단됨'); break; }
+    if (dry) { P.fillSilent(pr, ttsDir); log(`✓ ${prLabel(pr)} 무음 오디오`); }
+    else { await P.fillTts(pr, S.preset, S.ttsMgr, ttsDir, log, () => S.abort, speed, pushDtoUpdate); log(`✓ ${prLabel(pr)} 음성 완료`); }
+    // 음성변환 직후: (쇼츠만) 문장 기준 clipMaxSec(영상 엔진별 6/8초) 미만 단위로 그룹 자동 재구성.
+    //   롱폼은 group-builder 가 이미 의미 단위로 묶었으므로 8초 재패킹을 건너뛴다.
+    if (getModeProfile(currentMode()).grouping.strategy === 'tts-greedy') {
+      const m = P.mergeGroupsByTts(pr, clipMaxSec);
+      log(`  ↳ ${clipMaxSec}초 미만 단위로 그룹 재구성: ${m.before} → ${m.after}개`);
+    }
+    pushDtoUpdate();
+  }
+  S.timings.tts = (Date.now() - _ttsT0) / 1000;
+  pushDtoUpdate();
+  return P.toDTO(S.parsed);
+});
+
+ipcMain.handle('export-vrew', async (_e, args = {}) => {
+  if (!S.parsed) throw new Error('대본을 먼저 여세요.');
+  const { shortsNum = null, presetName = null, captionStyle = null, captionMaxChars = 7 } = args;
+  try { fs.mkdirSync(S.outRoot, { recursive: true }); } catch {}
+  let preset = S.preset || P.getPreset(presetName);
+  if (preset && captionStyle) {
+    preset = { ...preset, captionStyle: { ...(preset.captionStyle || {}), ...captionStyle } };
+  }
+  preset = forceAiNoticeIfLongform(preset); // 롱폼 AI 고지 필수
+  const outs = [];
+  for (const pr of S.parsed.projects) {
+    if (shortsNum && pr.shortsNum !== shortsNum) continue;
+    const dirs = shortsDirs(S.outRoot, pr.shortsNum);
+    const baseName = vrewBaseName(pr);
+    const vrewPath = path.join(S.outRoot, `${baseName}.vrew`);
+    try {
+      const res = await P.buildProjectVrew(pr, vrewPath, preset, log, captionMaxChars); // 배속은 음성에 이미 반영
+      P.writeSrt(pr, path.join(dirs.subtitles, `${baseName}.srt`), captionMaxChars);
+      outs.push({ shortsNum: pr.shortsNum, vrewPath, clipCount: res.clipCount, imageCount: res.imageCount });
+      log(`✓ ${baseName}.vrew (clip ${res.clipCount}, image ${res.imageCount})`);
+      shell.openPath(vrewPath); // 생성 즉시 Vrew로 열어 바로 렌더 가능
+    } catch (e) {
+      log(`✗ ${prLabel(pr)} 실패: ${e.message}`);
+    }
+  }
+  return { outRoot: S.outRoot, outs };
+});
+
+// Flow 이미지 — FlowAutomator는 win(IPC send)이 필요해 main에서 처리.
+// customPrompts에 group.imagePrompt를 그대로 넣어 번역 없이 사용.
+// Flow는 임시폴더에 생성 → 결과를 쇼츠N_images/cutM.ext 로 복사 (Genspark와 동일 위치, _flow 폴더 안 만듦).
+// 크롬 프로필 정리 — stale 락 제거 + 복원 프롬프트 억제(비정상 종료 후 about:blank 창 누적 방지)
+function cleanChromeProfile(profileDir) {
+  for (const f of ['SingletonLock', 'SingletonCookie', 'SingletonSocket']) {
+    try { fs.rmSync(path.join(profileDir, f), { force: true }); } catch {}
+  }
+  for (const sub of ['Default', '']) {
+    try {
+      const pref = path.join(profileDir, sub, 'Preferences');
+      if (fs.existsSync(pref)) {
+        const j = JSON.parse(fs.readFileSync(pref, 'utf8'));
+        j.profile = j.profile || {};
+        j.profile.exit_type = 'Normal';
+        j.profile.exited_cleanly = true;
+        fs.writeFileSync(pref, JSON.stringify(j));
+      }
+    } catch {}
+  }
+}
+
+// 계정 id → 프로필 폴더.
+function flowProfileDir(accId) { return path.join(os.homedir(), '.flow-app', 'profiles', accId || 'default'); }
+// FlowAutomator 단일 인스턴스 유지. 활성 계정(프로필)이 바뀌면 기존 크롬을 닫고 새 프로필로 교체
+//   → 동시에 크롬 여러 개 뜨는 것 방지(계정은 한 번에 하나만 사용).
+function getFlowEng(profileDir) {
+  if (S.flowEng && S.flowEngProfileDir === profileDir) return S.flowEng;
+  if (S.flowEng) { try { if (S.flowEng.context) S.flowEng.context.close(); } catch {} S.flowEng = null; }
+  fs.mkdirSync(profileDir, { recursive: true });
+  cleanChromeProfile(profileDir);
+  const { FlowAutomator } = require('./flow-engine');
+  S.flowEng = new FlowAutomator(win, profileDir);
+  S.flowEngProfileDir = profileDir;
+  return S.flowEng;
+}
+
+async function runFlowImages(project, imagesDir, logger, styleId) {
+  fs.mkdirSync(imagesDir, { recursive: true });
+  const workDir = path.join(os.tmpdir(), `sm_flow_${project.shortsNum}_${Date.now().toString(36)}`);
+  fs.mkdirSync(workDir, { recursive: true });
+  // 멀티계정 순환 — 오늘 한도 안 찬 첫 계정 선택. 전부 소진이면 중단.
+  const FlowAccounts = require('./core/flow-accounts');
+  const acc = FlowAccounts.pickActive();
+  if (!acc) throw new Error('모든 Flow 계정의 오늘 한도가 찼습니다 — ⚙Flow 계정에서 한도를 늘리거나 계정을 추가하세요.');
+  const cap = FlowAccounts.load().dailyCap;
+  const used = FlowAccounts.list().accounts.find((a) => a.id === acc.id);
+  logger(`🔑 Flow 계정: ${acc.label} (오늘 ${used ? used.used : 0}/${cap})`);
+  const profileDir = flowProfileDir(acc.id);
+  const eng = getFlowEng(profileDir);
+  const stylePrompt = styleId ? (require('./core/style-store').getPrompt(styleId) || '') : '';
+  const pfx = stylePrompt ? `${stylePrompt}, ` : ''; // 커스텀 프롬프트(이미지 프롬프트 있는 그룹)용 스타일 접두어
+  // 그룹 나레이션(전체 문장) — 프롬프트 없을 때 Flow 가 이걸 영어 시각 프롬프트로 변환(내용 반영).
+  const paragraphs = project.groups.map((g) => project.getSentencesOfGroup(g).map((s) => s.text).join(' ').trim() || `cut${g.num}`);
+  // 프롬프트 있으면 스타일+프롬프트 그대로, 없으면 null → Flow 가 나레이션을 번역(스타일은 엔진이 별도 적용).
+  const customPrompts = project.groups.map((g) => (g.imagePrompt && g.imagePrompt.trim()) ? (pfx + g.imagePrompt) : null);
+  const imgDir = path.join(workDir, 'images');
+  // 생성 중 폴더를 폴링 → 새 이미지가 나타나면 즉시 그룹에 붙이고 화면 실시간 갱신.
+  const poll = setInterval(() => {
+    const n = mapFlowImagesOnce(project, imgDir, imagesDir, false);
+    if (n > 0) pushDtoUpdate();
+  }, 2500);
+  try {
+    await eng.run({
+      paragraphs, customPrompts, mediaType: 'image',
+      ratio: project.aspect || '9:16', outputDir: workDir, style: styleId || 'cinematic', // 나레이션 번역 경로에 스타일 적용
+      withSubtitle: false, vrewOnly: false, skipVrew: true, // 우리 앱이 .vrew 를 만드므로 Flow 자체 .vrew 빌드 생략
+      antiDetect: { enabled: true, preset: '기본' }, profileId: acc.id, // 계정별 휴먼 페이싱·카운팅
+    });
+  } finally {
+    clearInterval(poll);
+  }
+  // 최종 매핑(순서 폴백 포함) + 화면 갱신
+  const total = mapFlowImagesOnce(project, imgDir, imagesDir, true, logger);
+  logger(`[Flow] 이미지 매핑 완료 ${total}/${project.groups.length}`);
+  // 이 계정의 오늘 사용량 누적(보수적: 시도한 그룹 수). 한도 도달 시 다음 실행부터 다음 계정으로.
+  const usedNow = FlowAccounts.markUsed(acc.id, project.groups.length);
+  if (usedNow >= cap) logger(`⚠ Flow 계정 "${acc.label}" 오늘 한도(${cap}) 도달 → 다음 실행은 다른 계정 사용`);
+  pushDtoUpdate();
+  try { fs.rmSync(workDir, { recursive: true, force: true }); } catch {}
+}
+
+// ComfyUI(SDXL) 이미지 — HTTP API(브라우저 X). 그룹별 g.imagePrompt 로 텍스트→이미지. 로컬/런팟 공용.
+async function runComfyImages(project, imagesDir, logger, styleId) {
+  fs.mkdirSync(imagesDir, { recursive: true });
+  const cfg = require('./core/comfy-config').load();
+  const { ComfyEngine } = require('./comfy-engine');
+  const eng = new ComfyEngine(cfg, logger);
+  if (!(await eng.health())) throw new Error(`ComfyUI 연결 실패 (${cfg.baseUrl}) — ComfyUI 실행/주소 확인 (⚙ Comfy)`);
+  const stylePrompt = styleId ? (require('./core/style-store').getPrompt(styleId) || '') : '';
+  const pfx = stylePrompt ? `${stylePrompt}, ` : '';
+  let done = 0, total = 0;
+  for (const g of project.groups) {
+    if (S.abort) { logger('⏹ 중단됨'); break; }
+    if (!g.imagePrompt || !g.imagePrompt.trim()) continue; // 프롬프트 없으면 건너뜀(autoFillPrompts 가 먼저 채움)
+    if (g.imagePath && fs.existsSync(g.imagePath)) continue; // 이미 있음(캐시 프리필/이전 생성)
+    total++;
+    const out = path.join(imagesDir, `${String(g.num).padStart(2, '0')}.png`);
+    logger(`🖼 ComfyUI(SDXL) G${g.num} 생성…`);
+    const r = await eng.textToImage({ prompt: pfx + g.imagePrompt, aspect: project.aspect || '9:16', outputPath: out, abortSignal: () => S.abort });
+    if (r.success) { g.imagePath = out; g.imageStatus = 'done'; done++; pushDtoUpdate(); }
+    else logger(`✗ G${g.num} 실패: ${r.error}`);
+  }
+  logger(`[ComfyUI] 이미지 ${done}/${total} 완료`);
+  pushDtoUpdate();
+}
+
+// Flow 영상 (i2v) — 앞에서 N개 그룹의 이미지를 프레임/애셋으로 붙여 Veo 영상화. 결과 → group.videoPath.
+async function runFlowVideos(project, mediaDir, logger, opts = {}) {
+  const { model = 'Veo 3.1 - Lite', count = 'x1', onlyNums = null } = opts;
+  // 범위(onlyNums) 그룹만, 없으면 이미지 있는 전체. (랜덤 개수 방식 폐지)
+  const targets = (onlyNums && onlyNums.length)
+    ? project.groups.filter((g) => onlyNums.includes(g.num) && g.imagePath && fs.existsSync(g.imagePath))
+    : project.groups.filter((g) => g.imagePath && fs.existsSync(g.imagePath));
+  if (!targets.length) { logger('Flow 영상: 이미지가 있는 대상 그룹이 없음 (먼저 이미지 생성)'); return; }
+
+  const workDir = path.join(os.tmpdir(), `sm_flowv_${project.shortsNum}_${Date.now().toString(36)}`);
+  fs.mkdirSync(workDir, { recursive: true });
+  const FlowAccounts = require('./core/flow-accounts');
+  const vacc = FlowAccounts.pickActive() || { id: 'default' };
+  const eng = getFlowEng(flowProfileDir(vacc.id));
+
+  const paragraphs = targets.map((g) => (project.getSentencesOfGroup(g)[0] || {}).text || `cut${g.num}`);
+  const customPrompts = targets.map((g) => g.videoPrompt || g.motionNote || 'natural slow motion, cinematic feel');
+  const frameImages = targets.map((g) => g.imagePath);
+  targets.forEach((g) => { g.videoStatus = 'generating'; });
+  pushDtoUpdate();
+  logger(`[Flow] 영상 ${targets.length}개 생성 (모델 ${model}, ${count}, i2v)…`);
+
+  const imgDir = path.join(workDir, 'images');
+  try {
+    await eng.run({
+      paragraphs, customPrompts, mediaType: 'video', model, count,
+      ratio: project.aspect || '9:16', outputDir: workDir,
+      withSubtitle: false, vrewOnly: false, skipVrew: true, frameImages,
+      antiDetect: { enabled: true, preset: '기본' }, profileId: 'default',
+    });
+  } catch (e) { logger('Flow 영상 오류: ' + e.message); }
+
+  // 출력 .mp4 → 대상 그룹 videoPath 매핑 (파일명 앞 2자리 = 순번, 폴백 순서)
+  let files = [];
+  try { files = fs.readdirSync(imgDir).filter((f) => /\.mp4$/i.test(f)).sort(); } catch {}
+  targets.forEach((g, i) => {
+    const num = String(i + 1).padStart(2, '0');
+    const f = files.find((x) => x.startsWith(num)) || files[i];
+    if (!f) { g.videoStatus = 'fail'; return; }
+    const dest = path.join(mediaDir, `${String(g.num).padStart(2, '0')}.mp4`);
+    try { fs.copyFileSync(path.join(imgDir, f), dest); g.videoPath = dest; g.videoStatus = 'done'; logger(`[Flow] G${g.num} 영상 첨부`); }
+    catch (e) { g.videoStatus = 'fail'; logger(`영상 복사 실패 G${g.num}: ${e.message}`); }
+  });
+  pushDtoUpdate();
+  try { fs.rmSync(workDir, { recursive: true, force: true }); } catch {}
+}
+
+// 워크폴더 이미지 → media-N/NN.ext 로 매핑 (이미 매핑된 그룹은 건너뜀, 멱등). 신규 매핑 수 반환.
+function mapFlowImagesOnce(project, imgDir, mediaDir, allowOrder, logger) {
+  let files = [];
+  try { files = fs.readdirSync(imgDir).filter((f) => /\.(png|jpe?g|webp)$/i.test(f)).sort(); } catch { return 0; }
+  let n = 0;
+  project.groups.forEach((g, i) => {
+    if (g.imagePath && g.imagePath.startsWith(mediaDir) && fs.existsSync(g.imagePath)) return; // 이미 매핑됨
+    const num = String(i + 1).padStart(2, '0');
+    let f = files.find((x) => x.startsWith(num));
+    if (!f && allowOrder) f = files[i];
+    if (!f) return;
+    const ext = path.extname(f).toLowerCase().replace('.jpeg', '.jpg');
+    const dest = path.join(mediaDir, `${String(g.num).padStart(2, '0')}${ext}`);
+    try { fs.copyFileSync(path.join(imgDir, f), dest); g.imagePath = dest; g.imageStatus = 'done'; n++; if (logger) logger(`[Flow] G${g.num} 이미지 첨부`); }
+    catch (e) { if (logger) logger(`이미지 복사 실패 G${g.num}: ${e.message}`); }
+  });
+  return n;
+}
+function pushDtoUpdate() {
+  try { if (win && !win.isDestroyed() && S.parsed) { const d = P.toDTO(S.parsed); d.timings = { ...S.timings }; win.webContents.send('dto-update', d); } } catch {}
+  scheduleAutoSave(); // 데이터가 바뀔 때마다(디바운스) 자동저장
+}
+
+// ── 이미지 캐시(재활용) ── 키 = imagePrompt + style + aspect + engine. (H3=프롬프트 고정 → 잘 맞음)
+// 생성 전 프리필 — 캐시에 있으면 media-N 으로 복사하고 g.imagePath 설정(엔진이 건너뜀).
+function prefillImageCache(project, mediaDir, styleId, engine) {
+  const MC = require('./core/media-cache');
+  let n = 0;
+  for (const g of project.groups) {
+    if (!g.imagePrompt || !g.imagePrompt.trim()) continue;
+    if (g.imagePath && fs.existsSync(g.imagePath)) continue;
+    const hit = MC.get(MC.imageKey(g.imagePrompt, styleId || '', project.aspect || '9:16', engine));
+    if (!hit) continue;
+    try { fs.mkdirSync(mediaDir, { recursive: true }); const out = path.join(mediaDir, `${String(g.num).padStart(2, '0')}.${hit.ext}`); fs.copyFileSync(hit.file, out); g.imagePath = out; g.imageStatus = 'done'; n++; } catch {}
+  }
+  if (n) { log(`♻ 이미지 ${n}개 재활용(캐시)`); pushDtoUpdate(); }
+  return n;
+}
+// 생성 후 — 새로 만든 이미지를 캐시에 저장(다음 동일 작업 시 재활용).
+function cacheGeneratedImages(project, styleId, engine) {
+  const MC = require('./core/media-cache');
+  for (const g of project.groups) {
+    if (!g.imagePrompt || !g.imagePath || !fs.existsSync(g.imagePath)) continue;
+    MC.put(MC.imageKey(g.imagePrompt, styleId || '', project.aspect || '9:16', engine), g.imagePath, path.extname(g.imagePath).slice(1));
+  }
+}
+// 이미지 생성이 필요한(프롬프트 있고 아직 이미지 없는) 그룹 수.
+function imagesNeeded(project) {
+  return project.groups.filter((g) => g.imagePrompt && g.imagePrompt.trim() && !(g.imagePath && fs.existsSync(g.imagePath))).length;
+}
+
+// 생성된 영상을 1080p 로 업스케일 (Real-ESRGAN 애니 모델, 없으면 ffmpeg 폴백). videoPath 교체.
+async function maybeUpscale(project, logger, enabled) {
+  if (!enabled) return;
+  const targets = project.groups.filter((g) => g.videoPath && fs.existsSync(g.videoPath) && !/_1080\.mp4$/i.test(g.videoPath));
+  if (!targets.length) return;
+  const Upscaler = require('./core/upscaler');
+  const [W, H] = (project.aspect === '1:1') ? [1080, 1080] : (project.aspect === '16:9') ? [1920, 1080] : [1080, 1920];
+  for (const g of targets) {
+    if (S.abort) { logger('⏹ 업스케일 중단'); break; }
+    const out = g.videoPath.replace(/\.mp4$/i, '_1080.mp4');
+    try {
+      logger(`⬆ G${g.num} 영상 업스케일 → ${W}x${H}…`);
+      const r = await Upscaler.upscaleVideo(g.videoPath, out, { width: W, height: H, logger, abortSignal: () => S.abort });
+      if (r && r.ok) { g.videoPath = out; pushDtoUpdate(); }
+    } catch (e) { logger(`업스케일 실패 G${g.num}: ${e.message}`); }
+  }
+}
+
+// ComfyUI(LTX 등) i2v — 대상 그룹의 이미지를 ComfyUI API 로 영상화 → group.videoPath.
+async function runComfyVideos(project, mediaDir, logger, opts = {}) {
+  fs.mkdirSync(mediaDir, { recursive: true });
+  const { onlyNums = null } = opts;
+  const cfg = require('./core/comfy-config').load();
+  const { ComfyEngine } = require('./comfy-engine');
+  // 범위(onlyNums) 그룹만, 없으면 이미지 있는 전체. (랜덤 개수 방식 폐지)
+  const targets = (onlyNums && onlyNums.length)
+    ? project.groups.filter((g) => onlyNums.includes(g.num) && g.imagePath && fs.existsSync(g.imagePath))
+    : project.groups.filter((g) => g.imagePath && fs.existsSync(g.imagePath));
+  if (!targets.length) { logger('Comfy 영상: 이미지가 있는 대상 그룹이 없음 (먼저 이미지 생성)'); return; }
+  const eng = new ComfyEngine(cfg, logger);
+  const MC = require('./core/media-cache');
+  logger(`[Comfy] ${targets.length}개 영상 생성 (${cfg.baseUrl})…`);
+  for (const g of targets) {
+    if (S.abort) { logger('⏹ 중단'); break; }
+    if (g.videoPath && fs.existsSync(g.videoPath)) continue;
+    const outputPath = path.join(mediaDir, `${String(g.num).padStart(2, '0')}.mp4`);
+    const ck = MC.videoKey(g.videoPrompt || g.motionNote || '', g.imagePath, project.aspect || '9:16', 'comfy-ltx');
+    const hit = MC.get(ck);
+    if (hit) { try { fs.copyFileSync(hit.file, outputPath); g.videoPath = outputPath; g.videoSourceImage = g.imagePath; g.videoStatus = 'done'; logger(`♻ G${g.num} 영상 재활용(캐시)`); pushDtoUpdate(); continue; } catch {} }
+    g.videoStatus = 'generating'; pushDtoUpdate();
+    const wantDur = cfg.matchVideoToAudio === false ? null : (g.groupDurationSec || null); // 영상 길이를 그룹 음성에 맞춤
+    const res = await eng.imageToVideo({ imagePath: g.imagePath, prompt: g.videoPrompt || g.motionNote || null, outputPath, abortSignal: () => S.abort, aspect: project.aspect || '9:16', durationSec: wantDur });
+    if (res.success && res.videoPath) { g.videoPath = res.videoPath; g.videoSourceImage = g.imagePath; g.videoStatus = 'done'; MC.put(ck, res.videoPath, 'mp4'); logger(`✓ G${g.num} 영상`); }
+    else { g.videoStatus = 'fail'; logger(`✗ G${g.num} 영상 실패: ${res.error}`); }
+    pushDtoUpdate();
+  }
+}
+
+// 긴 대본 대응 — 그룹들을 "요청서 추정 크기" 기준 청크로 분할 (Set<"sn-num"> 배열).
+//   롱폼 한 편이 수만 자라 한 번에 보내면 LLM 컨텍스트를 초과(Ollama 기본 ~4K) → 응답이 깨짐.
+//   대본 길이 + 그룹당 오버헤드(라벨·이미지/영상 줄)를 합산해, 고정 규칙헤더 포함 maxReqChars 이하로 묶음.
+//   → 문장모드(작은 그룹 다수, 오버헤드가 큼)·H3모드(큰 그룹 소수) 둘 다 안전.
+const PROMPT_HEADER_CHARS = 1600;   // 고정 규칙 헤더 대략
+const PROMPT_PER_GROUP_OVERHEAD = 110; // 그룹당 라벨/플레이스홀더 줄
+function chunkGroupKeys(projects, maxReqChars = 4500, includeFn = null) {
+  const chunks = [];
+  let cur = new Set();
+  let curChars = PROMPT_HEADER_CHARS;
+  for (const pr of projects) {
+    for (const g of pr.groups) {
+      if (includeFn && !includeFn(g)) continue;   // 예: 프롬프트 없는 그룹만
+      const full = pr.getSentencesOfGroup(g).map((s) => s.text || '').join(' ');
+      const cost = full.length + PROMPT_PER_GROUP_OVERHEAD;
+      const key = `${pr.shortsNum}-${g.num}`;
+      if (cur.size > 0 && curChars + cost > maxReqChars) { chunks.push(cur); cur = new Set(); curChars = PROMPT_HEADER_CHARS; }
+      cur.add(key);
+      curChars += cost;
+    }
+  }
+  if (cur.size > 0) chunks.push(cur);
+  return chunks;
+}
+
+// 청크별로 LLM 호출 → 매핑 누적. callAnswer(reqText) → Promise<string>(LLM 답변).
+async function generatePromptsChunked(projects, opts, callAnswer, logger) {
+  const PromptIO = require('./core/prompt-io');
+  const chunks = chunkGroupKeys(projects, 4500, opts && opts.includeFn);
+  if (!chunks.length) { logger('대상 그룹 없음 (이미 프롬프트 보유)'); return { groups: 0, img: 0, vid: 0, sanitized: [] }; }
+  let groups = 0, img = 0, vid = 0; const sanitized = [];
+  for (let i = 0; i < chunks.length; i++) {
+    if (S.abort) { logger('⏹ 중단됨'); break; }
+    const reqText = PromptIO.buildPromptRequestText(projects, { ...(opts || {}), onlyKeys: chunks[i] });
+    if (chunks.length > 1) logger(`🧩 프롬프트 생성 ${i + 1}/${chunks.length} (${chunks[i].size}그룹)…`);
+    const answer = await callAnswer(reqText);
+    const r = PromptIO.applyPromptsToProjects(projects, answer);
+    groups += r.groups; img += r.img; vid += r.vid;
+    if (r.sanitized) sanitized.push(...r.sanitized);
+    pushDtoUpdate();
+  }
+  return { groups, img, vid, sanitized };
+}
+
+// 프롬프트 없는 그룹(prose/롱폼 대본 등) → 이미지 생성 전에 LLM 으로 내용 맞는 영어 프롬프트 자동 생성.
+// Ollama 1순위 → Gemini 키 → 나레이션 폴백. 이미 프롬프트 있으면 아무것도 안 함.
+async function autoFillPrompts(projects, logger) {
+  const need = projects.some((pr) => pr.groups.some((g) => !g.imagePrompt || !g.imagePrompt.trim()));
+  if (!need) return;
+  const PromptIO = require('./core/prompt-io');
+  // 1순위: 로컬/원격 Ollama (무료) — 도달 가능하면 사용
+  const oc = require('./core/ollama-config').load();
+  const tags = await ollamaTags(oc.baseUrl);
+  if (tags.ok) {
+    try {
+      logger(`🤖 프롬프트 없는 그룹 — Ollama(${oc.model})로 내용 맞는 프롬프트 자동 생성 중…`);
+      const r = await generatePromptsChunked(projects, { includeFn: (g) => !g.imagePrompt || !g.imagePrompt.trim() }, (req) => PromptIO.callLlmTextApi('ollama', '', req, { baseUrl: oc.baseUrl, model: oc.model }), logger);
+      logger(`📥 프롬프트 자동 생성 완료(Ollama) — ${r.groups}개 그룹 (🖼${r.img}·🎬${r.vid})`);
+      return;
+    } catch (e) { logger('Ollama 프롬프트 생성 실패: ' + e.message + ' — Gemini/나레이션으로 폴백'); }
+  }
+  // 2순위: Gemini 키
+  let key = '';
+  try { key = (require('./tts/secret-store').get('gemini') || {}).key || ''; } catch {}
+  if (!key.trim()) { logger('⚠ 프롬프트 없는 그룹 — Ollama 미도달 & Gemini 키 없음(⚙에서 설정 권장). 지금은 나레이션으로 진행됩니다.'); return; }
+  try {
+    logger('🤖 프롬프트 없는 그룹 — Gemini API로 내용 맞는 프롬프트 자동 생성 중…');
+    const r = await generatePromptsChunked(projects, { includeFn: (g) => !g.imagePrompt || !g.imagePrompt.trim() }, (req) => PromptIO.callLlmTextApi('gemini', key, req), logger);
+    logger(`📥 프롬프트 자동 생성 완료(Gemini) — ${r.groups}개 그룹 (🖼${r.img}·🎬${r.vid})`);
+  } catch (e) { logger('프롬프트 자동 생성 실패: ' + e.message + ' (나레이션으로 진행)'); }
+}
+
+ipcMain.handle('image-build', async (_e, args = {}) => {
+  if (!S.parsed) throw new Error('대본을 먼저 여세요.');
+  const { shortsNum = null, engine = 'genspark', styleId = null } = args;
+  S.abort = false;
+  const stylePrompt = styleId ? (require('./core/style-store').getPrompt(styleId) || '') : '';
+  // 프롬프트 없는 그룹 → API로 자동 생성 (내용 맞는 이미지)
+  await autoFillPrompts(S.parsed.projects.filter((p) => !shortsNum || p.shortsNum === shortsNum), log);
+  const _imgT0 = Date.now();
+  S.timings.image = 0;
+  for (const pr of S.parsed.projects) {
+    if (shortsNum && pr.shortsNum !== shortsNum) continue;
+    if (S.abort) { log('⏹ 중단됨'); break; }
+    log(`🖼 ${prLabel(pr)} 이미지 생성 (${engine}${styleId ? ', 스타일=' + styleId : ''})…`);
+    try {
+      const mediaDir = shortsDirs(S.outRoot, pr.shortsNum).media;
+      prefillImageCache(pr, mediaDir, styleId, engine); // ♻ 캐시에 있는 그룹은 먼저 채움(엔진이 건너뜀)
+      if (imagesNeeded(pr) === 0) {
+        log(`♻ ${prLabel(pr)} 전부 캐시 재활용 — 생성 생략`);
+      } else if (engine === 'flow') {
+        await runFlowImages(pr, mediaDir, log, styleId);
+      } else if (engine === 'comfy') {
+        await runComfyImages(pr, mediaDir, log, styleId);
+      } else {
+        await P.generateImagesGenspark(pr, mediaDir, log, () => S.abort, stylePrompt, null, pushDtoUpdate);
+      }
+      cacheGeneratedImages(pr, styleId, engine); // 새로 만든 이미지 캐시에 저장
+      log(`✓ ${prLabel(pr)} 이미지 완료`);
+    } catch (e) {
+      log(`✗ ${prLabel(pr)} 이미지 실패: ${e.message}`);
+    }
+    pushDtoUpdate(); // 생성된 이미지(g.imagePath)를 UI 썸네일에 즉시 반영
+  }
+  S.timings.image = (Date.now() - _imgT0) / 1000;
+  pushDtoUpdate();
+  return P.toDTO(S.parsed);
+});
+
+// 영상화할 그룹 번호 — 범위(fromNum~toNum) 안의 그룹. 범위 미지정이면 전체 그룹.
+//   (랜덤/개수 방식은 폐지 — 사용자가 N~N 범위로 지정)
+function rangeNums(project, fromNum, toNum) {
+  if (fromNum == null || toNum == null) return project.groups.map((g) => g.num);
+  const a = Math.min(Number(fromNum), Number(toNum)), b = Math.max(Number(fromNum), Number(toNum));
+  return project.groups.filter((g) => g.num >= a && g.num <= b).map((g) => g.num);
+}
+
+ipcMain.handle('video-build', async (_e, args = {}) => {
+  if (!S.parsed) throw new Error('대본을 먼저 여세요.');
+  const { shortsNum = null, fromNum = null, toNum = null, engine = 'grok', flowVideoModel = 'Veo 3.1 - Lite', flowCount = 'x1', upscale = false } = args;
+  S.abort = false;
+  const _vidT0 = Date.now();
+  S.timings.video = 0;
+  for (const pr of S.parsed.projects) {
+    if (shortsNum && pr.shortsNum !== shortsNum) continue;
+    if (S.abort) { log('⏹ 중단됨'); break; }
+    const videoDir = shortsDirs(S.outRoot, pr.shortsNum).media; // 영상도 media-N 폴더
+    const onlyNums = rangeNums(pr, fromNum, toNum); // N~N 범위 그룹 (랜덤 폐지)
+    const rangeLbl = ` · G${onlyNums[0]}~${onlyNums[onlyNums.length - 1]}`;
+    try {
+      if (engine === 'flow') {
+        log(`🎬 ${prLabel(pr)} 영상 생성 (Flow i2v${rangeLbl})…`);
+        await runFlowVideos(pr, videoDir, log, { model: flowVideoModel, count: flowCount, onlyNums });
+      } else if (engine === 'comfy') {
+        log(`🎬 ${prLabel(pr)} 영상 생성 (ComfyUI i2v${rangeLbl})…`);
+        await runComfyVideos(pr, videoDir, log, { onlyNums });
+      } else {
+        log(`🎬 ${prLabel(pr)} 영상 생성 (Grok ${grokDurOf(engine)}${rangeLbl})…`);
+        await P.generateHookVideosGrok(pr, videoDir, log, () => S.abort, 0, pushDtoUpdate, onlyNums, grokDurOf(engine));
+      }
+      await maybeUpscale(pr, log, true); // 모든 영상 1080p 업스케일
+      log(`✓ ${prLabel(pr)} 영상 완료`);
+    } catch (e) {
+      log(`✗ ${prLabel(pr)} 영상 실패: ${e.message}`);
+    }
+    pushDtoUpdate(); // 생성된 영상(g.videoPath)을 UI 썸네일에 즉시 반영
+  }
+  S.timings.video = (Date.now() - _vidT0) / 1000;
+  pushDtoUpdate();
+  return P.toDTO(S.parsed);
+});
+
+// 그룹에 이미지/비디오 직접 첨부 (썸네일 클릭 → 파일 선택)
+ipcMain.handle('attach-asset', async (_e, args = {}) => {
+  if (!S.parsed) throw new Error('대본을 먼저 여세요.');
+  const { shortsNum, groupNum } = args;
+  const r = await dialog.showOpenDialog(win, {
+    properties: ['openFile'],
+    filters: [{ name: '이미지/비디오', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'mp4', 'mov', 'webm', 'm4v'] }],
+  });
+  if (r.canceled || !r.filePaths[0]) return P.toDTO(S.parsed);
+  const fp = r.filePaths[0];
+  const pr = S.parsed.projects.find((p) => p.shortsNum === shortsNum);
+  const g = pr && pr.groups.find((x) => x.num === groupNum);
+  if (!g) return P.toDTO(S.parsed);
+  const ext = path.extname(fp).toLowerCase();
+  if (['.mp4', '.mov', '.webm', '.m4v'].includes(ext)) {
+    g.videoPath = fp; g.videoStatus = 'done';
+    log(`첨부(영상) ${pr.title} G${groupNum}: ${path.basename(fp)}`);
+  } else {
+    g.imagePath = fp; g.imageStatus = 'done';
+    log(`첨부(이미지) ${pr.title} G${groupNum}: ${path.basename(fp)}`);
+  }
+  return P.toDTO(S.parsed);
+});
+
+// 그룹 첨부 자산 삭제 (이미지/비디오 비우기)
+ipcMain.handle('clear-asset', (_e, args = {}) => {
+  if (!S.parsed) return null;
+  const { shortsNum, groupNum } = args;
+  const pr = S.parsed.projects.find((p) => p.shortsNum === shortsNum);
+  const g = pr && pr.groups.find((x) => x.num === groupNum);
+  if (g) {
+    g.imagePath = null; g.videoPath = null; g.imageStatus = 'idle'; g.videoStatus = 'idle'; g.videoSourceImage = null;
+    log(`자산 삭제: ${pr.title} G${groupNum}`);
+  }
+  return P.toDTO(S.parsed);
+});
+
+// 채널(프리셋) 편집
+ipcMain.handle('get-preset-detail', (_e, name) => {
+  const all = require('./tts/preset-store').loadAll();
+  return all.find((p) => p.name === name) || null;
+});
+ipcMain.handle('save-preset', (_e, args = {}) => {
+  const store = require('./tts/preset-store');
+  const p = store.loadAll().find((x) => x.name === args.name);
+  if (!p) throw new Error('프리셋을 찾을 수 없습니다.');
+  store.update(p.id, args.patch || {});
+  log(`채널 "${args.name}" 설정 저장`);
+  return store.loadAll().map((x) => ({ name: x.name, engine: x.engine, isDefault: !!x.isDefault }));
+});
+// Gemini API 키 (secret-store, gemini 엔진 공용) — GPU 없는 PC에서 음성 생성용
+ipcMain.handle('get-gemini-key', () => {
+  try { const s = require('./tts/secret-store').get('gemini'); return (s && s.key) || ''; } catch { return ''; }
+});
+ipcMain.handle('set-gemini-key', (_e, key) => {
+  try { require('./tts/secret-store').set('gemini', { key: String(key || '').trim() }); log('Gemini API 키 저장됨'); return true; }
+  catch (e) { log('Gemini 키 저장 실패: ' + e.message); return false; }
+});
+
+ipcMain.handle('pick-file', async (_e, args = {}) => {
+  const r = await dialog.showOpenDialog(win, { properties: ['openFile'], filters: args.filters || [{ name: 'All', extensions: ['*'] }] });
+  return (r.canceled || !r.filePaths[0]) ? null : r.filePaths[0];
+});
+ipcMain.handle('pick-dir', async () => {
+  const r = await dialog.showOpenDialog(win, { properties: ['openDirectory'] });
+  return (r.canceled || !r.filePaths[0]) ? null : r.filePaths[0];
+});
+
+// 일괄 첨부 — 이미지/영상 파일들을 직접 다중선택. 파일명 앞 숫자 = 그룹번호 매핑. 같은 번호면 영상 우선.
+ipcMain.handle('bulk-attach', async (_e, args = {}) => {
+  if (!S.parsed) throw new Error('대본을 먼저 여세요.');
+  const { shortsNum } = args;
+  const r = await dialog.showOpenDialog(win, {
+    properties: ['openFile', 'multiSelections'],
+    filters: [{ name: '이미지/영상', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'mp4', 'mov', 'webm', 'm4v'] }],
+  });
+  if (r.canceled || !r.filePaths.length) return P.toDTO(S.parsed);
+  const pr = S.parsed.projects.find((p) => p.shortsNum === shortsNum);
+  if (!pr) return P.toDTO(S.parsed);
+  const picked = r.filePaths; // 절대경로들
+  const baseOf = (f) => path.basename(f);
+  const isVid = (f) => /\.(mp4|mov|webm|m4v)$/i.test(f);
+  const isImg = (f) => /\.(png|jpe?g|webp|gif)$/i.test(f);
+  let cnt = 0;
+  for (const g of pr.groups) {
+    const matches = picked.filter((f) => {
+      const mm = baseOf(f).match(/^0*(\d+)/);
+      return mm && parseInt(mm[1], 10) === g.num && (isVid(f) || isImg(f));
+    });
+    if (!matches.length) continue;
+    const vid = matches.find(isVid);
+    const img = matches.find(isImg);
+    if (vid) { g.videoPath = vid; g.videoStatus = 'done'; cnt++; }
+    else if (img) { g.imagePath = img; g.imageStatus = 'done'; cnt++; }
+  }
+  log(`일괄첨부 ${pr.title}: 선택 ${picked.length}개 → ${cnt}개 그룹 매핑 (영상우선)`);
+  return P.toDTO(S.parsed);
+});
+
+// ── 자동저장(구글독스식) ──────────────────────────────────────────────
+//   변경이 멈추면 1.5초 뒤(또는 변경이 계속돼도 최대 8초마다) 스냅샷을 디스크에 기록.
+//   임시파일→rename 으로 원자적 교체 → 쓰다 만 파일로 깨지지 않음.
+//   재열기 시 자동복원(open-script)되므로 사용자가 저장 버튼을 누르지 않아도 작업이 보존됨.
+function snapshotFile() {
+  const projDir = path.join(os.homedir(), '.priming-maker', 'projects');
+  const base = P.sanitize(path.basename(S.scriptPath || 'project').replace(/\.md$/i, ''));
+  return { projDir, file: path.join(projDir, base + '.smproj.json') };
+}
+function buildSnapshot() {
+  return {
+    scriptPath: S.scriptPath, fileTitle: S.parsed.fileTitle, meta: S.parsed.meta, outRoot: S.outRoot, mode: currentMode(),
+    savedAt: Date.now(),
+    projects: S.parsed.projects.map((pr) => ({
+      shortsNum: pr.shortsNum, title: pr.title, aspect: pr.aspect, hookCaption: pr.hookCaption, voice: pr.voice,
+      titleLine1: pr.titleLine1, titleLine2: pr.titleLine2,
+      t1Size: pr.t1Size, t1Color: pr.t1Color, t1Align: pr.t1Align,
+      t2Size: pr.t2Size, t2Color: pr.t2Color, t2Align: pr.t2Align,
+      bgEnabled: pr.bgEnabled, bgFill: pr.bgFill, bgFillOp: pr.bgFillOp, bgStroke: pr.bgStroke,
+      bgStrokeOp: pr.bgStrokeOp, bgStrokeW: pr.bgStrokeW, bgRound: pr.bgRound, bgDashed: pr.bgDashed,
+      groups: pr.groups.map((g) => ({
+        num: g.num, phase: g.phase, mode: g.mode, isI2V: g.isI2V,
+        imagePrompt: g.imagePrompt, videoPrompt: g.videoPrompt, motionNote: g.motionNote,
+        imagePath: g.imagePath, videoPath: g.videoPath,
+        sentences: pr.getSentencesOfGroup(g).map((s) => ({ text: s.text, ttsAudioPath: s.ttsAudioPath, ttsDurationSec: s.ttsDurationSec })),
+      })),
+    })),
+  };
+}
+function writeSnapshotSync() {
+  if (!S.parsed) return null;
+  try {
+    const { projDir, file } = snapshotFile();
+    fs.mkdirSync(projDir, { recursive: true });
+    const tmp = file + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(buildSnapshot(), null, 2), 'utf8');
+    fs.renameSync(tmp, file);
+    return file;
+  } catch (e) { log('자동저장 실패: ' + (e && e.message)); return null; }
+}
+let _asTimer = null, _asPendingSince = 0;
+function scheduleAutoSave() {
+  if (!S.parsed) return;
+  const now = Date.now();
+  if (!_asPendingSince) _asPendingSince = now;
+  if (_asTimer) clearTimeout(_asTimer);
+  const wait = (now - _asPendingSince > 8000) ? 0 : 1500; // 최대 8초 안에는 무조건 기록(연속변경 기아 방지)
+  _asTimer = setTimeout(flushAutoSave, wait);
+}
+function flushAutoSave() {
+  if (_asTimer) { clearTimeout(_asTimer); _asTimer = null; }
+  _asPendingSince = 0;
+  const f = writeSnapshotSync();
+  if (f && win && !win.isDestroyed()) { try { win.webContents.send('autosaved', { file: f, at: Date.now() }); } catch {} }
+}
+// 스냅샷 JSON → Project[] 복원 (load-project / open-script 자동복원 공용)
+function projectsFromSnapshot(snap) {
+  const { Sentence, Group, Project, makeSentenceIder, finalizeGroupIds } = require('./core/project-model');
+  return (snap.projects || []).map((ps) => {
+    const sid = makeSentenceIder(); const sentences = []; const groups = [];
+    (ps.groups || []).forEach((gs) => {
+      const g = new Group({ num: gs.num, sentenceIds: [] });
+      Object.assign(g, { imagePrompt: gs.imagePrompt, videoPrompt: gs.videoPrompt, phase: gs.phase, title: gs.phase, mode: gs.mode, isI2V: gs.isI2V, motionNote: gs.motionNote, imagePath: gs.imagePath, videoPath: gs.videoPath });
+      (gs.sentences || []).forEach((ss) => {
+        const s = new Sentence({ id: sid(ss.text), num: sentences.length + 1, text: ss.text });
+        s.groupId = g.id; s.ttsAudioPath = ss.ttsAudioPath || null; s.ttsDurationSec = ss.ttsDurationSec || null;
+        g.sentenceIds.push(s.id); sentences.push(s);
+      });
+      groups.push(g);
+    });
+    finalizeGroupIds(groups, sentences);
+    const proj = new Project({ sentences, groups });
+    Object.assign(proj, { aspect: ps.aspect, title: ps.title, shortsNum: ps.shortsNum, hookCaption: ps.hookCaption, voice: ps.voice,
+      titleLine1: ps.titleLine1, titleLine2: ps.titleLine2,
+      t1Size: ps.t1Size, t1Color: ps.t1Color, t1Align: ps.t1Align, t2Size: ps.t2Size, t2Color: ps.t2Color, t2Align: ps.t2Align,
+      bgEnabled: ps.bgEnabled, bgFill: ps.bgFill, bgFillOp: ps.bgFillOp, bgStroke: ps.bgStroke,
+      bgStrokeOp: ps.bgStrokeOp, bgStrokeW: ps.bgStrokeW, bgRound: ps.bgRound, bgDashed: ps.bgDashed });
+    return proj;
+  });
+}
+// 새로 파싱한 대본 위에 스냅샷의 "작업물"만 덮어쓰기(대본을 수정한 경우 — 자산/프롬프트 최대한 이어받기).
+//   그룹번호 일치 + (문장 텍스트 동일할 때만) TTS 복원. 파일이 실제 존재하는 자산만 복원.
+function overlaySnapshot(parsed, snap) {
+  let touched = 0;
+  const byShorts = new Map();
+  (snap.projects || []).forEach((ps) => byShorts.set(ps.shortsNum, ps));
+  for (const pr of parsed.projects) {
+    const ps = byShorts.get(pr.shortsNum); if (!ps) continue;
+    for (const k of ['title','aspect','hookCaption','voice','titleLine1','titleLine2','t1Size','t1Color','t1Align','t2Size','t2Color','t2Align','bgEnabled','bgFill','bgFillOp','bgStroke','bgStrokeOp','bgStrokeW','bgRound','bgDashed']) {
+      if (ps[k] != null) pr[k] = ps[k];
+    }
+    const gmap = new Map(); (ps.groups || []).forEach((gs) => gmap.set(gs.num, gs));
+    for (const g of pr.groups) {
+      const gs = gmap.get(g.num); if (!gs) continue;
+      if (gs.imagePrompt != null) g.imagePrompt = gs.imagePrompt;
+      if (gs.videoPrompt != null) g.videoPrompt = gs.videoPrompt;
+      if (gs.motionNote != null) g.motionNote = gs.motionNote;
+      if (gs.imagePath && fs.existsSync(gs.imagePath)) { g.imagePath = gs.imagePath; g.imageStatus = 'done'; touched++; }
+      if (gs.videoPath && fs.existsSync(gs.videoPath)) { g.videoPath = gs.videoPath; g.videoStatus = 'done'; }
+      const sents = pr.getSentencesOfGroup(g);
+      (gs.sentences || []).forEach((ss, i) => {
+        const s = sents[i]; if (!s) return;
+        if (ss.text && s.text && ss.text.trim() !== s.text.trim()) return; // 대본 문장이 바뀜 → TTS 복원 skip
+        if (ss.ttsAudioPath && fs.existsSync(ss.ttsAudioPath)) { s.ttsAudioPath = ss.ttsAudioPath; s.ttsDurationSec = ss.ttsDurationSec || null; }
+      });
+    }
+  }
+  return touched;
+}
+
+// 프로젝트 저장/불러오기 (대본 1개 기준 스냅샷)
+ipcMain.handle('save-project', async () => {
+  if (!S.parsed) throw new Error('대본을 먼저 여세요.');
+  const file = writeSnapshotSync();
+  if (!file) throw new Error('저장 실패 — 로그를 확인하세요.');
+  log(`💾 프로젝트 저장: ${file}`);
+  return { file };
+});
+ipcMain.handle('load-project', async () => {
+  const projDir = path.join(os.homedir(), '.priming-maker', 'projects');
+  fs.mkdirSync(projDir, { recursive: true });
+  const r = await dialog.showOpenDialog(win, { properties: ['openFile'], defaultPath: projDir, filters: [{ name: 'Shots 프로젝트', extensions: ['json'] }] });
+  if (r.canceled || !r.filePaths[0]) return null;
+  const snap = JSON.parse(fs.readFileSync(r.filePaths[0], 'utf8'));
+  const projects = projectsFromSnapshot(snap);
+  S.scriptPath = snap.scriptPath; S.outRoot = snap.outRoot;
+  S.mode = (snap.mode === 'longform') ? 'longform' : 'shorts';
+  for (const pr of projects) pr.mode = S.mode;
+  S.parsed = { fileTitle: snap.fileTitle, meta: snap.meta, projects, format: 'grouped', mode: S.mode };
+  storeActive(); // 불러온 대본을 해당 모드 슬롯에 보관
+  log(`📂 프로젝트 불러오기(${S.mode}): ${r.filePaths[0]}`);
+  return { dto: P.toDTO(S.parsed), scriptPath: S.scriptPath, outRoot: S.outRoot, mode: S.mode };
+});
+
+// ⚡ 전체 만들기 — TTS + 이미지 동시 → I2V 영상 → .vrew → 출력폴더 열기
+ipcMain.handle('make-all', async (_e, args = {}) => {
+  if (!S.parsed) throw new Error('대본을 먼저 여세요.');
+  const { shortsNum = null, engine = 'genspark', presetName = null, speed = null, captionStyle = null, captionMaxChars = 7, styleId = null, fromNum = null, toNum = null, dry = false, videoEngine = 'grok', flowVideoModel = 'Veo 3.1 - Lite', flowCount = 'x1', upscale = false } = args;
+  const stylePrompt = styleId ? (require('./core/style-store').getPrompt(styleId) || '') : '';
+  let preset = P.getPreset(presetName);
+  // TTS 는 정속(1.0) — speed 값은 Vrew 배속(playbackRate)으로만 사용
+  S.preset = preset;
+  let ttsMgr = null;
+  if (!dry && preset) {
+    const { mgr, ok } = await P.makeTtsManager(log, preset.engine);
+    if (!ok) throw new Error(`TTS 엔진 '${preset.engine}' 미가동`);
+    ttsMgr = mgr;
+  }
+  S.abort = false;
+  try { fs.mkdirSync(S.outRoot, { recursive: true }); } catch {}
+  // 프롬프트 없는 그룹(prose 대본) → 이미지 전에 API로 자동 생성 (내용 맞는 이미지)
+  if (!dry) { await autoFillPrompts(S.parsed.projects.filter((p) => !shortsNum || p.shortsNum === shortsNum), log); }
+  const _makeT0 = Date.now();
+  S.timings = { tts: 0, image: 0, video: 0, make: 0 }; // 이번 작업 단계별 시간 (누적)
+  pushDtoUpdate();
+  for (const pr of S.parsed.projects) {
+    if (shortsNum && pr.shortsNum !== shortsNum) continue;
+    if (S.abort) { log('⏹ 중단됨'); break; }
+    const dirs = shortsDirs(S.outRoot, pr.shortsNum);
+    log(`⚡ ${pr.title} 전체 제작 시작…`);
+    if (!dry) prefillImageCache(pr, dirs.media, styleId, engine); // ♻ 캐시 재활용 먼저
+    // 지연 실행(thunk) — comfy 일 때 TTS 후 순차로 돌리려고 즉시 시작하지 않음.
+    const audioTask = () => dry ? Promise.resolve().then(() => P.fillSilent(pr, dirs.tts))
+      : P.fillTts(pr, preset, ttsMgr, dirs.tts, log, () => S.abort, speed, pushDtoUpdate);
+    const imgTask = () => dry || imagesNeeded(pr) === 0 ? Promise.resolve()
+      : (engine === 'flow') ? runFlowImages(pr, dirs.media, log, styleId)
+      : (engine === 'comfy') ? runComfyImages(pr, dirs.media, log, styleId)
+      : P.generateImagesGenspark(pr, dirs.media, log, () => S.abort, stylePrompt, null, pushDtoUpdate);
+    // 단계별 시간 측정(병렬이어도 각자 wall-clock 기록).
+    const runAudio = () => { const t0 = Date.now(); return Promise.resolve(audioTask()).finally(() => { S.timings.tts += (Date.now() - t0) / 1000; pushDtoUpdate(); }); };
+    const runImage = () => { const t0 = Date.now(); return Promise.resolve(imgTask()).catch((e) => log('이미지 오류: ' + e.message)).finally(() => { S.timings.image += (Date.now() - t0) / 1000; pushDtoUpdate(); }); };
+    if (engine === 'comfy' && !dry) {
+      // 이미지도 로컬 GPU(ComfyUI) → TTS(OmniVoice 로컬 GPU)와 동시 실행 시 VRAM 충돌(OOM) 우려.
+      // 같은 RTX3060 12GB 를 둘이 동시에 쓰지 않도록 TTS → 이미지 순차 실행.
+      log('🧠 이미지=ComfyUI(로컬 GPU) → VRAM 보호 위해 TTS 먼저, 이미지 다음(순차)');
+      await runAudio();
+      await runImage();
+    } else {
+      // 클라우드 이미지(Genspark/Flow) → GPU 충돌 없음, 병렬로 빠르게.
+      await Promise.allSettled([runAudio(), runImage()]);
+    }
+    if (!dry) cacheGeneratedImages(pr, styleId, engine);
+    pushDtoUpdate(); // TTS·이미지 매핑(g.imagePath) 결과를 UI 썸네일에 즉시 반영
+    if (S.abort) { log('⏹ 중단됨'); break; }
+    // I2V 범위(N~N) — 그 그룹만(도입부만 등). 미지정이면 전체. (랜덤 폐지)
+    const vOnly = rangeNums(pr, fromNum, toNum);
+    const _v0 = Date.now();
+    try {
+      if (videoEngine === 'flow') await runFlowVideos(pr, dirs.media, log, { model: flowVideoModel, count: flowCount, onlyNums: vOnly });
+      else if (videoEngine === 'comfy') await runComfyVideos(pr, dirs.media, log, { onlyNums: vOnly });
+      else await P.generateHookVideosGrok(pr, dirs.media, log, () => S.abort, 0, pushDtoUpdate, vOnly, grokDurOf(videoEngine));
+      await maybeUpscale(pr, log, true); // 모든 영상 1080p 업스케일
+    } catch (e) { log(`영상 실패: ${e.message}`); }
+    S.timings.video += (Date.now() - _v0) / 1000;
+    pushDtoUpdate(); // 생성된 영상(g.videoPath)도 UI 에 반영
+    let ep = preset;
+    if (ep && captionStyle) ep = { ...ep, captionStyle: { ...(ep.captionStyle || {}), ...captionStyle } };
+    ep = forceAiNoticeIfLongform(ep); // 롱폼 AI 고지 필수
+    const baseName = vrewBaseName(pr);
+    const vrewPath = path.join(S.outRoot, `${baseName}.vrew`);
+    try {
+      const res = await P.buildProjectVrew(pr, vrewPath, ep, log, captionMaxChars); // 배속은 음성에 이미 반영
+      P.writeSrt(pr, path.join(dirs.subtitles, `${baseName}.srt`), captionMaxChars);
+      log(`✓ ${pr.title}.vrew (clip ${res.clipCount})`);
+      shell.openPath(vrewPath);
+    } catch (e) { log(`vrew 실패: ${e.message}`); }
+  }
+  if (ttsMgr) { try { await ttsMgr.stop(); } catch {} }
+  S.timings.make = (Date.now() - _makeT0) / 1000;
+  pushDtoUpdate();
+  fs.mkdirSync(S.outRoot, { recursive: true });
+  shell.openPath(S.outRoot);
+  log(`⚡ 전체 제작 완료 (TTS ${S.timings.tts.toFixed(1)}s · 이미지 ${S.timings.image.toFixed(1)}s · 영상 ${S.timings.video.toFixed(1)}s · 전체 ${S.timings.make.toFixed(1)}s) — 출력폴더 열림`);
+  return P.toDTO(S.parsed);
+});
+
+const TITLE_FIELDS = new Set(['titleLine1', 'titleLine2', 't1Size', 't1Color', 't1Align', 't2Size', 't2Color', 't2Align',
+  'bgEnabled', 'bgFill', 'bgFillOp', 'bgStroke', 'bgStrokeOp', 'bgStrokeW', 'bgRound', 'bgDashed']);
+ipcMain.handle('set-title', (_e, args = {}) => {
+  if (!S.parsed) return;
+  const { shortsNum, field, value } = args;
+  if (!TITLE_FIELDS.has(field)) return;
+  const pr = S.parsed.projects.find((p) => p.shortsNum === shortsNum);
+  if (pr) pr[field] = value;
+});
+
+// 미리보기 오디오 — 파일을 base64 data URL 로 반환 (media:// fetch 가 렌더러에서 막히는 경우 우회)
+// 작업 중단 — generate 함수들의 abortSignal 이 S.abort 를 확인
+ipcMain.handle('abort', () => {
+  S.abort = true;
+  // Flow 엔진은 자체 _stopped 플래그로 멈춤 — abort 시 명시적으로 stop() 호출
+  try { if (S.flowEng && typeof S.flowEng.stop === 'function') S.flowEng.stop(); } catch {}
+  log('⏹ 중단 요청 — 현재 단계 마치는 대로 멈춥니다');
+});
+
+// 초기화 — 현재 모드의 대본만 비움 (다른 모드 대본은 유지)
+ipcMain.handle('reset-project', () => {
+  S.parsed = null; S.scriptPath = null; S.outRoot = null; S.abort = false;
+  S.modes[S.mode] = null;
+  log(`🆕 초기화(${S.mode}) — 새 대본을 여세요`);
+  return true;
+});
+
+// 그룹 1개만 TTS 변환 (그 그룹의 문장들)
+ipcMain.handle('tts-group', async (_e, args = {}) => {
+  if (!S.parsed) throw new Error('대본을 먼저 여세요.');
+  const { shortsNum, groupNum, presetName = null, speed = null } = args;
+  const pr = S.parsed.projects.find((p) => p.shortsNum === shortsNum);
+  const g = pr && pr.groups.find((x) => x.num === groupNum);
+  if (!g) return P.toDTO(S.parsed);
+  const preset = S.preset || P.getPreset(presetName);
+  if (!preset) throw new Error('프리셋을 찾을 수 없습니다.');
+  const { mgr, ok } = await P.makeTtsManager(log, preset.engine);
+  if (!ok) throw new Error(`TTS 엔진 '${preset.engine}' 미가동`);
+  const ttsDir = shortsDirs(S.outRoot, shortsNum).tts;
+  const sents = pr.getSentencesOfGroup(g);
+  S.abort = false;
+  log(`🎤 G${groupNum} TTS (${sents.length}문장)…`);
+  await P.fillTtsList(sents, preset, mgr, ttsDir, log, () => S.abort, (speed && Number(speed) > 0) ? Number(speed) : 1.0, `G${groupNum}`, pushDtoUpdate);
+  try { await mgr.stop(); } catch {}
+  pushDtoUpdate();
+  return P.toDTO(S.parsed);
+});
+
+// 그룹 1개만 영상 변환 (이미지 → i2v)
+ipcMain.handle('video-group', async (_e, args = {}) => {
+  if (!S.parsed) throw new Error('대본을 먼저 여세요.');
+  const { shortsNum, groupNum, engine = 'grok', flowVideoModel = 'Veo 3.1 - Lite', flowCount = 'x1', upscale = false } = args;
+  const pr = S.parsed.projects.find((p) => p.shortsNum === shortsNum);
+  const g = pr && pr.groups.find((x) => x.num === groupNum);
+  if (!g) return P.toDTO(S.parsed);
+  if (!g.imagePath || !fs.existsSync(g.imagePath)) { log(`G${groupNum}: 이미지가 없어 영상 생략 (먼저 이미지 생성)`); return P.toDTO(S.parsed); }
+  S.abort = false;
+  const videoDir = shortsDirs(S.outRoot, shortsNum).media;
+  log(`🎬 G${groupNum} 영상 생성 (${engine})…`);
+  // 단일 그룹 재생성 = 강제 새로 만들기 → 기존 영상·캐시 비우기.
+  try {
+    const MC = require('./core/media-cache');
+    const engTag = engine === 'comfy' ? 'comfy-ltx' : 'grok';
+    MC.del(MC.videoKey(g.videoPrompt || g.motionNote || '', g.imagePath, pr.aspect || '9:16', engTag));
+    g.videoPath = null; g.videoStatus = 'generating'; pushDtoUpdate();
+  } catch {}
+  try {
+    if (engine === 'flow') {
+      await runFlowVideos(pr, videoDir, log, { model: flowVideoModel, count: flowCount, onlyNums: [groupNum] });
+    } else if (engine === 'comfy') {
+      await runComfyVideos(pr, videoDir, log, { onlyNums: [groupNum] });
+    } else {
+      await P.generateHookVideosGrok(pr, videoDir, log, () => S.abort, 0, pushDtoUpdate, [groupNum], grokDurOf(engine));
+    }
+    await maybeUpscale(pr, log, true);
+    log(`✓ G${groupNum} 영상 완료`);
+  } catch (e) { log(`✗ G${groupNum} 영상 실패: ${e.message}`); }
+  pushDtoUpdate();
+  return P.toDTO(S.parsed);
+});
+
+// 빈(또는 특정) 그룹 1개만 이미지 재생성 (Genspark 단일)
+ipcMain.handle('regen-group', async (_e, args = {}) => {
+  if (!S.parsed) throw new Error('대본을 먼저 여세요.');
+  const { shortsNum, groupNum, styleId = null } = args;
+  const pr = S.parsed.projects.find((p) => p.shortsNum === shortsNum);
+  const g = pr && pr.groups.find((x) => x.num === groupNum);
+  if (!g) return P.toDTO(S.parsed);
+  if (!g.imagePrompt || !g.imagePrompt.trim()) { log(`G${groupNum}: 이미지 프롬프트 없음`); return P.toDTO(S.parsed); }
+  S.abort = false;
+  const stylePrompt = styleId ? (require('./core/style-store').getPrompt(styleId) || '') : '';
+  const mediaDir = shortsDirs(S.outRoot, shortsNum).media;
+  log(`🔄 ${prLabel(pr)} G${groupNum} 이미지 재생성 (Genspark)…`);
+  try {
+    g.imagePath = null; g.imageStatus = 'generating'; pushDtoUpdate(); // 강제 재생성(캐시 필터 우회)
+    await P.generateImagesGenspark(pr, mediaDir, log, () => S.abort, stylePrompt, [groupNum], pushDtoUpdate);
+    // 새 이미지를 캐시에 갱신(이후 재활용 시 이 결과 사용)
+    const MC = require('./core/media-cache');
+    if (g.imagePath && fs.existsSync(g.imagePath)) MC.put(MC.imageKey(g.imagePrompt, styleId || '', pr.aspect || '9:16', 'genspark'), g.imagePath, path.extname(g.imagePath).slice(1));
+    log(`✓ G${groupNum} 재생성 완료`);
+  } catch (e) { log(`✗ G${groupNum} 재생성 실패: ${e.message}`); }
+  return P.toDTO(S.parsed);
+});
+
+// ── 이미지 프롬프트 내보내기/가져오기/API (prompt-io) ──────────────
+const PromptIO = require('./core/prompt-io');
+
+// 내보내기 — 그룹별 대본 요청서 텍스트 생성(렌더러가 클립보드 복사)
+ipcMain.handle('export-prompts', (_e, args = {}) => {
+  if (!S.parsed) throw new Error('대본을 먼저 여세요.');
+  const { styleName = '' } = args;
+  const text = PromptIO.buildPromptRequestText(S.parsed.projects, { styleName });
+  log('📤 이미지 프롬프트 요청서 생성 — 웹 LLM(claude.ai 등)에 붙여넣으세요');
+  return text;
+});
+
+// 가져오기 — 웹 LLM 답변 텍스트 파싱 → 그룹 프롬프트 매핑
+ipcMain.handle('import-prompts', (_e, args = {}) => {
+  if (!S.parsed) throw new Error('대본을 먼저 여세요.');
+  const text = String((args && args.text) || '');
+  if (!text.trim()) { log('가져올 텍스트가 비어 있습니다'); return P.toDTO(S.parsed); }
+  const r = PromptIO.applyPromptsToProjects(S.parsed.projects, text);
+  if (r.groups > 0) {
+    log(`📥 가져오기 적용 — ${r.groups}개 그룹 (🖼 이미지 ${r.img} · 🎬 영상 ${r.vid})`);
+    if (r.sanitized.length) { log(`🛡 안전 치환 ${r.sanitized.length}건:`); r.sanitized.slice(0, 30).forEach((l) => log('   ' + l)); }
+  } else {
+    log('⚠ 인식된 프롬프트가 없습니다 — 답변에 `## [쇼츠-그룹]` 헤더가 그대로 있는지 확인하세요');
+  }
+  return P.toDTO(S.parsed);
+});
+
+// API 자동작성 — 등록된 LLM 키로 한 번에 프롬프트 작성 → 매핑
+ipcMain.handle('generate-prompts-api', async (_e, args = {}) => {
+  if (!S.parsed) throw new Error('대본을 먼저 여세요.');
+  const { provider = 'gemini', styleName = '' } = args;
+  S.abort = false;
+  let callAnswer, label = provider;
+  if (provider === 'ollama') {
+    const oc = require('./core/ollama-config').load();
+    const tags = await ollamaTags(oc.baseUrl);
+    if (tags.ok) {
+      log(`🤖 [ollama] ${oc.model} (${oc.baseUrl}) 프롬프트 자동 작성 시작…`);
+      callAnswer = (req) => PromptIO.callLlmTextApi('ollama', '', req, { baseUrl: oc.baseUrl, model: oc.model });
+    } else {
+      // Ollama 미도달 → Gemini 키 있으면 폴백
+      let key = ''; try { key = (require('./tts/secret-store').get('gemini') || {}).key || ''; } catch {}
+      if (!key.trim()) throw new Error(`Ollama 서버에 연결할 수 없습니다 (${oc.baseUrl}). ⚙ Ollama 설정에서 주소를 확인하거나, ⚙ 채널편집에서 Gemini 키를 등록하세요.`);
+      log(`⚠ Ollama 미도달(${oc.baseUrl}) → Gemini 폴백`);
+      label = 'gemini'; callAnswer = (req) => PromptIO.callLlmTextApi('gemini', key, req);
+    }
+  } else {
+    let key = '';
+    try { const s = require('./tts/secret-store').get(provider); key = (s && s.key) || ''; } catch {}
+    if (!key.trim()) throw new Error(`${provider.toUpperCase()} API 키가 없습니다 — ⚙ 채널편집에서 키를 등록하세요(현재 Gemini 키 입력 지원).`);
+    log(`🤖 [${provider}] API 프롬프트 자동 작성 시작 (${PromptIO.LLM_TEXT_MODELS[provider]})…`);
+    callAnswer = (req) => PromptIO.callLlmTextApi(provider, key, req);
+  }
+  // 긴 대본은 청크로 나눠 호출(컨텍스트 초과 방지) → 매핑 누적
+  const r = await generatePromptsChunked(S.parsed.projects, { styleName }, callAnswer, log);
+  if (r.groups > 0) {
+    log(`📥 [${label}] 적용 — ${r.groups}개 그룹 (🖼 ${r.img} · 🎬 ${r.vid})`);
+    if (r.sanitized.length) { log(`🛡 안전 치환 ${r.sanitized.length}건`); }
+  } else {
+    log(`⚠ [${label}] 응답에서 프롬프트를 인식하지 못했습니다`);
+  }
+  return P.toDTO(S.parsed);
+});
+
+// 그룹 합치기 — TTS 시간 8초 미만 그룹들을 한 그룹으로 묶음 (TTS 변환 후 사용)
+ipcMain.handle('merge-groups', (_e, args = {}) => {
+  if (!S.parsed) throw new Error('대본을 먼저 여세요.');
+  const { shortsNum = null } = args;
+  const clipMaxSec = (args.clipMaxSec && Number(args.clipMaxSec) > 0) ? Number(args.clipMaxSec) : 8.0;
+  let total = 0, done = 0;
+  for (const pr of S.parsed.projects) {
+    if (shortsNum && pr.shortsNum !== shortsNum) continue;
+    const hasTts = pr.sentences.some((s) => s.ttsDurationSec != null);
+    if (!hasTts) { log(`${prLabel(pr)}: TTS를 먼저 변환하세요 (시간 정보 없음)`); continue; }
+    const r = P.mergeGroupsByTts(pr, clipMaxSec);
+    log(`🔗 ${prLabel(pr)} 문장 기준 ${clipMaxSec}초 미만 단위 재구성: ${r.before}개 → ${r.after}개`);
+    total += Math.abs(r.merged); done++;
+  }
+  if (!done) log('합칠 대상이 없습니다 — TTS 변환을 먼저 하세요.');
+  return P.toDTO(S.parsed);
+});
+
+// 모드 전환 — 모드별로 보관된 대본을 활성화(재파싱·초기화 없음). 롱폼/쇼츠 대본은 독립.
+ipcMain.handle('set-mode', (_e, args = {}) => {
+  storeActive();                 // 현재 모드 작업물 보관
+  activateMode(args.mode);       // 새 모드 것으로 전환
+  log(`↔ 모드 전환: ${S.mode}${S.parsed ? '' : ' (이 모드 대본 없음 — 대본을 여세요)'}`);
+  return S.parsed ? P.toDTO(S.parsed) : null;
+});
+
+// 대본 수정 — 편집한 텍스트로 재파싱(+원본 .md 갱신).
+ipcMain.handle('get-script-text', () => {
+  try { return fs.readFileSync(S.scriptPath, 'utf8'); } catch { return ''; }
+});
+ipcMain.handle('apply-script-text', (_e, args = {}) => {
+  const text = String((args && args.text) || '');
+  if (!text.trim()) { log('대본 내용이 비어 있습니다'); return S.parsed ? P.toDTO(S.parsed) : null; }
+  S.parsed = P.parseScriptText(text, currentMode(), presetThresholds(S.preset));
+  storeActive();
+  if (S.scriptPath) { try { fs.writeFileSync(S.scriptPath, text, 'utf8'); } catch (e) { log('대본 파일 저장 실패: ' + e.message); } }
+  log(`✏ 대본 수정 적용 — 재파싱 (편 ${S.parsed.projects.length})`);
+  return P.toDTO(S.parsed);
+});
+
+ipcMain.handle('set-aspect', (_e, value) => {
+  if (!S.parsed) return null;
+  const a = (value === '1:1') ? '1:1' : (value === '16:9') ? '16:9' : '9:16';
+  for (const pr of S.parsed.projects) pr.aspect = a;
+  log(`이미지/영상 비율 → ${a}`);
+  return P.toDTO(S.parsed);
+});
+
+// 롱폼 재분할 — 분할옵션(도입부/본론/짧은/긴) 변경 시 대본을 새 임계값으로 다시 파싱.
+//   ⚠ 재파싱이라 기존 TTS/이미지 매핑은 초기화됨(PrimingFlow 자동 재분할과 동일).
+ipcMain.handle('resplit', (_e, args = {}) => {
+  if (!S.parsed || !S.scriptPath) throw new Error('대본을 먼저 여세요.');
+  if (currentMode() !== 'longform') return P.toDTO(S.parsed);
+  const splitMode = args.splitMode === 'sentence' ? 'sentence' : 'h3';
+  const th = { introSentenceSize: args.intro, mainSentenceSize: args.main, shortLen: args.short, longLen: args.long, splitMode };
+  S.parsed = P.parseScript(S.scriptPath, 'longform', th);
+  storeActive();
+  const g = S.parsed.projects[0] ? S.parsed.projects[0].groups.length : 0;
+  log(`🔁 롱폼 재분할(${splitMode === 'h3' ? 'H3 섹션' : '문장'}): 도입부 ${args.intro} · 본론 ${args.main} · 짧은 ${args.short} · 긴 ${args.long} → 그룹 ${g}개`);
+  return P.toDTO(S.parsed);
+});
+
+// 도입부 비디오 준비 — 도입부(phase 도입) 문장만 TTS → 16초 기준으로 도입부 그룹 재배치.
+ipcMain.handle('intro-video-prep', async (_e, args = {}) => {
+  if (!S.parsed) throw new Error('대본을 먼저 여세요.');
+  const pr = S.parsed.projects[0];
+  if (!pr) return P.toDTO(S.parsed);
+  const preset = S.preset || P.getPreset(args.presetName || null);
+  if (!preset) throw new Error('프리셋을 찾을 수 없습니다.');
+  const speed = (args.speed && Number(args.speed) > 0) ? Number(args.speed) : 1.0;
+  const introSents = pr.sentences.filter((s) => s.isIntro);
+  if (!introSents.length) { log('도입부 문장이 없습니다 — 대본에 "## 도입" 헤더가 필요합니다.'); return P.toDTO(S.parsed); }
+  S.abort = false;
+  log(`🎬 도입부 ${introSents.length}문장 TTS 후 10초 재배치…`);
+  const { mgr, ok } = await P.makeTtsManager(log, preset.engine);
+  if (!ok) throw new Error(`TTS 엔진 '${preset.engine}' 미가동`);
+  const ttsDir = shortsDirs(S.outRoot, pr.shortsNum).tts;
+  await P.fillTtsList(introSents, preset, mgr, ttsDir, log, () => S.abort, speed, '도입부', pushDtoUpdate);
+  try { await mgr.stop(); } catch {}
+  const { regroupIntroByTtsDuration } = require('./core/group-builder');
+  const res = regroupIntroByTtsDuration(pr, { maxSec: 10 });
+  log(`✓ 도입부 10초 재배치 완료 (10초 초과 그룹 ${res.overGroupIds.length}개)`);
+  pushDtoUpdate();
+  return P.toDTO(S.parsed);
+});
+
+ipcMain.handle('read-audio', (_e, p) => {
+  try {
+    const buf = fs.readFileSync(p);
+    const ext = path.extname(p).toLowerCase();
+    const mime = ext === '.wav' ? 'audio/wav' : (ext === '.mp3' || ext === '.mpga' || ext === '.mpeg') ? 'audio/mpeg' : 'application/octet-stream';
+    return `data:${mime};base64,${buf.toString('base64')}`;
+  } catch { return null; }
+});
+
+ipcMain.handle('open-folder', async () => {
+  if (!S.outRoot) return;
+  fs.mkdirSync(S.outRoot, { recursive: true });
+  shell.openPath(S.outRoot);
+});

@@ -1,0 +1,8 @@
+node_modules/
+output/
+dist/
+*.log
+*.vrew
+*.vrew.debug.json
+.DS_Store
+Thumbs.db
