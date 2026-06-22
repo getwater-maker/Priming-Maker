@@ -181,7 +181,8 @@ app.whenReady().then(() => {
       return new Response('not found', { status: 404 });
     }
   });
-  try { restoreWorkspace(); } catch (e) { /* 큐 복원 실패는 무시 */ } // 지난 세션 작업 큐 복원
+  // 시작은 항상 빈 화면(초기화 상태) — 지난 세션 큐 자동복원 안 함(사용자 요청). 대본은 직접 열기.
+  //   (각 대본의 작업물은 .smproj 자동저장에 남아 있어, 대본을 다시 열면 그 대본만 이어집니다.)
   createWindow();
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
   // 자동 업데이트는 bootstrap.js 의 auto-updater 모듈이 담당 (PrimingFlow 방식)
@@ -511,12 +512,12 @@ async function runFlowImages(project, imagesDir, logger, styleId, onlyNums) {
 
 // ── 이미지 순환(rotation) ── 순서대로 엔진을 돌며 '남은(미생성) 그룹'만 생성. 한 엔진이 한도면 다음 엔진으로 이어감.
 //   startEngine = 사용자가 고른 엔진(맨 앞 우선). ComfyUI 는 순환 제외(별도 단독).
-async function runRotatingImages(project, imagesDir, logger, styleId, startEngine) {
+async function runRotatingImages(project, imagesDir, logger, styleId, startEngine, onlyNums) {
   const Rot = require('./core/image-rotation');
   const order = Rot.activeOrder(startEngine);
   if (!order.length) { logger('⚠ 순환 엔진이 비어있음 — ⚙ 순환 설정 확인'); return; }
   const stylePrompt = styleId ? (require('./core/style-store').getPrompt(styleId) || '') : '';
-  const need = () => project.groups.filter((g) => g.imagePrompt && g.imagePrompt.trim() && !(g.imagePath && fs.existsSync(g.imagePath)));
+  const need = () => project.groups.filter((g) => g.imagePrompt && g.imagePrompt.trim() && !(g.imagePath && fs.existsSync(g.imagePath)) && (!onlyNums || onlyNums.includes(g.num)));
   logger(`🔄 이미지 순환: ${order.join(' → ')}`);
   for (const engineId of order) {
     if (S.abort) { logger('⏹ 중단됨'); break; }
@@ -556,7 +557,7 @@ async function runRotatingImages(project, imagesDir, logger, styleId, startEngin
 }
 
 // ComfyUI(SDXL) 이미지 — HTTP API(브라우저 X). 그룹별 g.imagePrompt 로 텍스트→이미지. 로컬/런팟 공용.
-async function runComfyImages(project, imagesDir, logger, styleId) {
+async function runComfyImages(project, imagesDir, logger, styleId, onlyNums) {
   fs.mkdirSync(imagesDir, { recursive: true });
   const cfg = require('./core/comfy-config').load();
   const { ComfyEngine } = require('./comfy-engine');
@@ -567,6 +568,7 @@ async function runComfyImages(project, imagesDir, logger, styleId) {
   let done = 0, total = 0;
   for (const g of project.groups) {
     if (S.abort) { logger('⏹ 중단됨'); break; }
+    if (onlyNums && !onlyNums.includes(g.num)) continue;     // 범위 지정 시 그 그룹만
     if (!g.imagePrompt || !g.imagePrompt.trim()) continue; // 프롬프트 없으면 건너뜀(autoFillPrompts 가 먼저 채움)
     if (g.imagePath && fs.existsSync(g.imagePath)) continue; // 이미 있음(캐시 프리필/이전 생성)
     total++;
@@ -866,7 +868,7 @@ function rangeNums(project, fromNum, toNum) {
 
 ipcMain.handle('video-build', async (_e, args = {}) => {
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
-  const { shortsNum = null, fromNum = null, toNum = null, engine = 'grok', flowVideoModel = 'Veo 3.1 - Lite', flowCount = 'x1', upscale = false } = args;
+  const { shortsNum = null, fromNum = null, toNum = null, engine = 'grok', flowVideoModel = 'Veo 3.1 - Lite', flowCount = 'x1', upscale = false, imgEngine = 'rotate', styleId = null } = args;
   S.abort = false;
   const _vidT0 = Date.now();
   S.timings.video = 0;
@@ -876,6 +878,18 @@ ipcMain.handle('video-build', async (_e, args = {}) => {
     const videoDir = shortsDirs(S.outRoot, pr.shortsNum).media; // 영상도 media-N 폴더
     const onlyNums = rangeNums(pr, fromNum, toNum); // N~N 범위 그룹 (랜덤 폐지)
     const rangeLbl = ` · G${onlyNums[0]}~${onlyNums[onlyNums.length - 1]}`;
+    // 영상은 이미지가 있어야 함 — 범위 그룹 중 이미지 없는 게 있으면 먼저 생성(비어있는 것만 채움).
+    const needImg = pr.groups.filter((g) => onlyNums.includes(g.num) && g.imagePrompt && g.imagePrompt.trim() && !(g.imagePath && fs.existsSync(g.imagePath)));
+    if (needImg.length && !S.abort) {
+      log(`🖼 영상 전 — 이미지 없는 ${needImg.length}개 그룹 먼저 생성 (그룹 ${needImg.map((g) => g.num).join(',')})`);
+      try {
+        prefillImageCache(pr, videoDir, styleId, imgEngine);
+        if (imgEngine === 'comfy') await runComfyImages(pr, videoDir, log, styleId, onlyNums);
+        else await runRotatingImages(pr, videoDir, log, styleId, imgEngine, onlyNums);
+        cacheGeneratedImages(pr, styleId, imgEngine);
+      } catch (e) { log(`이미지 선행 생성 오류: ${e.message}`); }
+      pushDtoUpdate();
+    }
     try {
       if (engine === 'flow') {
         log(`🎬 ${prLabel(pr)} 영상 생성 (Flow i2v${rangeLbl})…`);
@@ -1411,13 +1425,25 @@ ipcMain.handle('tts-group', async (_e, args = {}) => {
 // 그룹 1개만 영상 변환 (이미지 → i2v)
 ipcMain.handle('video-group', async (_e, args = {}) => {
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
-  const { shortsNum, groupNum, engine = 'grok', flowVideoModel = 'Veo 3.1 - Lite', flowCount = 'x1', upscale = false } = args;
+  const { shortsNum, groupNum, engine = 'grok', flowVideoModel = 'Veo 3.1 - Lite', flowCount = 'x1', upscale = false, imgEngine = 'rotate', styleId = null } = args;
   const pr = S.parsed.projects.find((p) => p.shortsNum === shortsNum);
   const g = pr && pr.groups.find((x) => x.num === groupNum);
   if (!g) return P.toDTO(S.parsed);
-  if (!g.imagePath || !fs.existsSync(g.imagePath)) { log(`G${groupNum}: 이미지가 없어 영상 생략 (먼저 이미지 생성)`); return P.toDTO(S.parsed); }
   S.abort = false;
   const videoDir = shortsDirs(S.outRoot, shortsNum).media;
+  // 이미지가 없으면 먼저 생성(비어있는 것 채움) → 그 이미지로 영상.
+  if (!g.imagePath || !fs.existsSync(g.imagePath)) {
+    if (!g.imagePrompt || !g.imagePrompt.trim()) { log(`G${groupNum}: 이미지·프롬프트 없어 영상 생략`); return P.toDTO(S.parsed); }
+    log(`🖼 G${groupNum} 이미지 없음 — 먼저 생성 후 영상`);
+    try {
+      prefillImageCache(pr, videoDir, styleId, imgEngine);
+      if (imgEngine === 'comfy') await runComfyImages(pr, videoDir, log, styleId, [groupNum]);
+      else await runRotatingImages(pr, videoDir, log, styleId, imgEngine, [groupNum]);
+      cacheGeneratedImages(pr, styleId, imgEngine);
+    } catch (e) { log(`이미지 선행 생성 오류: ${e.message}`); }
+    pushDtoUpdate();
+    if (!g.imagePath || !fs.existsSync(g.imagePath)) { log(`G${groupNum}: 이미지 생성 실패 — 영상 생략`); return P.toDTO(S.parsed); }
+  }
   log(`🎬 G${groupNum} 영상 생성 (${engine})…`);
   // 단일 그룹 재생성 = 강제 새로 만들기 → 기존 영상·캐시 비우기.
   try {

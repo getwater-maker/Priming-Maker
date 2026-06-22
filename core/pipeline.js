@@ -174,6 +174,8 @@ async function fillTtsList(sentences, preset, ttsMgr, workDir, onLine, abortSign
   };
   for (const s of sentences) {
     if (abortSignal && abortSignal()) { if (onLine) onLine('⏹ TTS 중단'); break; }
+    // 이미 음성이 있으면 건너뜀 — '비어있는 것만' 채움. (분할 등으로 재구성돼도 문장은 그대로라 재사용)
+    if (s.ttsAudioPath && fs.existsSync(s.ttsAudioPath)) { if (onProgress) { try { onProgress(); } catch {} } continue; }
     const _genT0 = Date.now(); // 생성 소요시간 측정 (RTF = 생성시간/음성길이)
     // ♻ 캐시 재활용 — 같은 (문장+배속+목소리) 면 재합성 없이 캐시에서 복사.
     const cacheKey = TtsCache.keyFor(s.text, sf, synthOpts);

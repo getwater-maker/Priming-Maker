@@ -286,7 +286,7 @@ export default function App() {
   async function runVid(shortsNum) {
     if (!ensurePromptsFilled(shortsNum)) return;
     setStatus(`영상 생성중(G${vidFrom}~${vidTo})…`);
-    try { const d = await api.videoBuild({ shortsNum, fromNum: parseInt(vidFrom, 10) || 1, toNum: parseInt(vidTo, 10) || 1, engine: videoEngine, flowVideoModel, flowCount }); setDto(d); setStatus('영상 완료'); }
+    try { const d = await api.videoBuild({ shortsNum, fromNum: parseInt(vidFrom, 10) || 1, toNum: parseInt(vidTo, 10) || 1, engine: videoEngine, flowVideoModel, flowCount, imgEngine, styleId: styleId || null }); setDto(d); setStatus('영상 완료'); }
     catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
   }
   async function runBulk(shortsNum) {
@@ -355,7 +355,7 @@ export default function App() {
   }
   async function runGroupVid(shortsNum, groupNum) {
     setStatus(`G${groupNum} 영상…`);
-    try { const d = await api.videoGroup({ shortsNum, groupNum, engine: videoEngine, flowVideoModel, flowCount }); setDto(d); setStatus(`G${groupNum} 영상 완료`); }
+    try { const d = await api.videoGroup({ shortsNum, groupNum, engine: videoEngine, flowVideoModel, flowCount, imgEngine, styleId: styleId || null }); setDto(d); setStatus(`G${groupNum} 영상 완료`); }
     catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
   }
   function playFrom(shortsNum, groupNum) {
