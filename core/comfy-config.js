@@ -34,8 +34,8 @@ const DEFAULTS = {
   videoHeightNodeId: '',
   // i2v 영상 길이 = 그룹 TTS 길이에 맞춤. Duration 노드(초) 설정. 빈값이면 title 'Duration' 자동탐지.
   videoDurationNodeId: '',
-  videoMaxSec: 10,        // 영상 최대 길이(초) — 그룹 음성이 더 길어도 이 값으로 캡(LTX 부담·시간 제한)
-  matchVideoToAudio: true, // 영상 길이를 그룹 음성 길이에 맞출지
+  videoMaxSec: 0,         // 영상 최대 길이(초) — 0 = 캡 없음(그룹 TTS 길이 그대로). >0 이면 그 값으로 상한.
+  matchVideoToAudio: true, // 영상 길이를 그룹 TTS 재생시간에 맞춤 (ComfyUI/LTX)
 };
 
 function load() {

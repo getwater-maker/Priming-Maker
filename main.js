@@ -741,7 +741,7 @@ async function runComfyVideos(project, mediaDir, logger, opts = {}) {
     //   (groupDurationSec 은 모델 그룹에 없음 → 문장에서 직접 계산)
     const ttsLen = project.getSentencesOfGroup(g).reduce((a, s) => a + (s.ttsDurationSec || 0), 0);
     const wantDur = cfg.matchVideoToAudio === false ? null : (ttsLen > 0 ? ttsLen : null);
-    if (wantDur) logger(`[Comfy] G${g.num} 영상 길이 = 음성 ${ttsLen.toFixed(1)}초 (캡 ${cfg.videoMaxSec || 10}초)`);
+    if (wantDur) logger(`[Comfy] G${g.num} 영상 길이 = 그룹 TTS ${ttsLen.toFixed(1)}초${cfg.videoMaxSec > 0 ? ` (캡 ${cfg.videoMaxSec}초)` : ' (캡 없음)'}`);
     const res = await eng.imageToVideo({ imagePath: g.imagePath, prompt: g.videoPrompt || g.motionNote || null, outputPath, abortSignal: () => S.abort, aspect: project.aspect || '9:16', durationSec: wantDur });
     if (res.success && res.videoPath) { g.videoPath = res.videoPath; g.videoSourceImage = g.imagePath; g.videoStatus = 'done'; MC.put(ck, res.videoPath, 'mp4'); logger(`✓ G${g.num} 영상`); }
     else { g.videoStatus = 'fail'; logger(`✗ G${g.num} 영상 실패: ${res.error}`); }

@@ -54,7 +54,7 @@ class ComfyEngine {
     this.videoWidthNodeId = cfg.videoWidthNodeId || '';   // i2v 해상도 노드(빈값=title 자동탐지)
     this.videoHeightNodeId = cfg.videoHeightNodeId || '';
     this.videoDurationNodeId = cfg.videoDurationNodeId || ''; // i2v 길이(초) 노드
-    this.videoMaxSec = Number(cfg.videoMaxSec) > 0 ? Number(cfg.videoMaxSec) : 10;
+    this.videoMaxSec = Number(cfg.videoMaxSec) > 0 ? Number(cfg.videoMaxSec) : 0; // 0 = 캡 없음(그룹 TTS 길이 그대로)
     this.clientId = 'priming_' + Math.random().toString(36).slice(2, 10);
     this.log = logger;
   }
@@ -103,9 +103,10 @@ class ComfyEngine {
       else if (!hDone && /height/.test(t)) { n.inputs.value = d.h; hDone = true; }
     }
   }
-  // i2v 길이(초) — Duration 노드를 그룹 음성 길이(캡 적용)로 설정.
+  // i2v 길이(초) — Duration 노드를 그룹 TTS 재생시간 그대로 설정. videoMaxSec>0 일 때만 상한 적용(기본 캡 없음).
   _setVideoDuration(graph, durSec) {
-    const sec = Math.max(1, Math.min(this.videoMaxSec, Math.ceil(Number(durSec) || 0)));
+    const ceil = Math.max(1, Math.ceil(Number(durSec) || 0));
+    const sec = this.videoMaxSec > 0 ? Math.min(this.videoMaxSec, ceil) : ceil;
     const setVal = (id) => { if (id && graph[id] && graph[id].inputs && 'value' in graph[id].inputs) { graph[id].inputs.value = sec; return true; } return false; };
     if (setVal(this.videoDurationNodeId)) return sec;
     for (const id of Object.keys(graph)) {
@@ -329,7 +330,7 @@ class ComfyEngine {
     try {
       if (!(await this.health())) return { success: false, error: `ComfyUI 연결 실패 (${this.baseUrl}) — 실행 여부/주소 확인` };
       const uploadName = await this._uploadImage(imagePath);
-      const wantSec = durationSec ? Math.max(1, Math.min(this.videoMaxSec, Math.ceil(durationSec))) : null;
+      const wantSec = durationSec ? (this.videoMaxSec > 0 ? Math.min(this.videoMaxSec, Math.max(1, Math.ceil(durationSec))) : Math.max(1, Math.ceil(durationSec))) : null;
       this.log(`[Comfy] 업로드: ${uploadName} → 큐 등록 (${aspect || '9:16'}${wantSec ? `, ${wantSec}초` : ''})…`);
       const graph = this._buildGraph(uploadName, prompt, aspect, durationSec);
       const promptId = await this._queue(graph);
