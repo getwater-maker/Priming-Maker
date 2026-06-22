@@ -61,21 +61,49 @@ let win = null;
 const S = { parsed: null, scriptPath: null, outRoot: null, preset: null, ttsMgr: null, flowEng: null, flowEngProfileDir: null, abort: false, mode: 'longform',
   // 작업 소요시간(초) — 백엔드에서 단계별 측정해 DTO 로 전송(make-all 의 각 단계 시간도 실시간 표시).
   timings: { tts: 0, image: 0, video: 0, make: 0 },
-  // 모드별 대본을 독립 보관 — 롱폼/쇼츠 각각 따로 첨부·작업. 전환 시 해당 모드 것으로 활성화(재파싱 없음).
-  modes: { longform: null, shorts: null } };
-// 현재 활성 대본을 S.modes[현재모드] 에 저장
+  // 모드별 작업 큐 — 각 모드(롱폼/쇼츠)가 대본 여러 개(items)를 순서대로 보관.
+  //   item = { id, parsed, scriptPath, outRoot, settings, status }. activeId = 현재 편집/표시 중인 항목.
+  //   S.parsed/scriptPath/outRoot 는 '활성 항목'의 미러 — 기존 코드 전부 그대로 동작.
+  modes: { longform: { items: [], activeId: null }, shorts: { items: [], activeId: null } } };
+
+let _qSeq = 0;
+const newItemId = () => 'q' + (++_qSeq);
+function activeItem() {
+  const q = S.modes[S.mode]; if (!q) return null;
+  return q.items.find((x) => x.id === q.activeId) || null;
+}
+// 활성 항목 → S.parsed/scriptPath/outRoot 미러 동기화 (없으면 비움)
+function syncActiveToS() {
+  const it = activeItem();
+  S.parsed = it ? it.parsed : null;
+  S.scriptPath = it ? it.scriptPath : null;
+  S.outRoot = it ? it.outRoot : null;
+}
+// 현재 S.* 를 활성 항목에 반영(제자리 편집 저장). 항목이 없으면 새로 만들지 않음.
 function storeActive() {
-  if (!S.parsed) { S.modes[S.mode] = null; return; }
-  S.modes[S.mode] = { parsed: S.parsed, scriptPath: S.scriptPath, outRoot: S.outRoot };
+  const it = activeItem();
+  if (it && S.parsed) { it.parsed = S.parsed; it.scriptPath = S.scriptPath; it.outRoot = S.outRoot; }
   scheduleAutoSave(); // set-aspect/merge-groups 등 pushDtoUpdate 안 거치는 변경도 자동저장
 }
-// 지정 모드의 보관 대본을 활성으로 (없으면 비움)
+// 현재 모드 큐에 항목 추가 + 활성화 + S.* 미러 갱신.
+function addItem(parsed, scriptPath, outRoot, settings) {
+  const q = S.modes[S.mode];
+  const it = { id: newItemId(), parsed, scriptPath, outRoot, settings: settings || null, status: 'idle' };
+  q.items.push(it); q.activeId = it.id;
+  S.parsed = parsed; S.scriptPath = scriptPath; S.outRoot = outRoot;
+  scheduleAutoSave();
+  return it;
+}
+// (Step1) 모드당 1개 유지 — 큐를 비우고 새 항목 1개로 교체. (Step2 에서 append 로 전환 예정)
+function setSingleItem(parsed, scriptPath, outRoot) {
+  const q = S.modes[S.mode];
+  q.items = []; q.activeId = null;
+  return addItem(parsed, scriptPath, outRoot);
+}
+// 지정 모드로 전환 — 그 모드 활성 항목을 S.* 로 복원(재파싱 없음).
 function activateMode(m) {
   S.mode = (m === 'longform') ? 'longform' : 'shorts';
-  const st = S.modes[S.mode];
-  S.parsed = st ? st.parsed : null;
-  S.scriptPath = st ? st.scriptPath : null;
-  S.outRoot = st ? st.outRoot : null;
+  syncActiveToS();
 }
 
 function createWindow() {
@@ -268,7 +296,7 @@ ipcMain.handle('open-script', async (_e, args = {}) => {
     }
   }
   ensureDirs(S.outRoot); // media/tts/subtitles 먼저 생성
-  storeActive(); // 현재 모드 슬롯에 보관 (롱폼/쇼츠 독립)
+  setSingleItem(S.parsed, S.scriptPath, S.outRoot); // 현재 모드 큐에 보관 (Step1: 1개 유지)
   log(`대본 열기(${S.mode}): ${S.parsed.fileTitle}`);
   if (restoreNote) log(restoreNote);
   log(`편수 ${S.parsed.projects.length} · 출력 ${S.outRoot}`);
@@ -995,7 +1023,7 @@ ipcMain.handle('load-project', async () => {
   S.mode = (snap.mode === 'longform') ? 'longform' : 'shorts';
   for (const pr of projects) pr.mode = S.mode;
   S.parsed = { fileTitle: snap.fileTitle, meta: snap.meta, projects, format: 'grouped', mode: S.mode };
-  storeActive(); // 불러온 대본을 해당 모드 슬롯에 보관
+  setSingleItem(S.parsed, S.scriptPath, S.outRoot); // 현재 모드 큐에 보관 (Step1: 1개 유지)
   log(`📂 프로젝트 불러오기(${S.mode}): ${r.filePaths[0]}`);
   return { dto: P.toDTO(S.parsed), scriptPath: S.scriptPath, outRoot: S.outRoot, mode: S.mode };
 });
@@ -1103,8 +1131,10 @@ ipcMain.handle('abort', () => {
 
 // 초기화 — 현재 모드의 대본만 비움 (다른 모드 대본은 유지)
 ipcMain.handle('reset-project', () => {
-  S.parsed = null; S.scriptPath = null; S.outRoot = null; S.abort = false;
-  S.modes[S.mode] = null;
+  S.abort = false;
+  const q = S.modes[S.mode]; if (q) { q.items = []; q.activeId = null; } // 현재 모드 큐 비움
+  syncActiveToS(); // S.parsed=null
+  scheduleAutoSave();
   log(`🆕 초기화(${S.mode}) — 새 대본을 여세요`);
   return true;
 });
