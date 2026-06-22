@@ -523,9 +523,10 @@ class GensparkEngine {
   async generateImagesBatch({ prompts, outputPaths, abortSignal, onSaved }) {
     const N = prompts.length;
     const fail = (msg) => prompts.map(() => ({ error: msg }));
+    const limited = (msg) => prompts.map(() => ({ limit: true, error: msg })); // 한도/제한 — 순환에서 다음 엔진으로
 
     const limit = GensparkStore.checkDailyLimit();
-    if (!limit.allowed) return fail(limit.reason);
+    if (!limit.allowed) return limited(limit.reason);
     if (!N) return [];
 
     // 브라우저 + 설정 보장
@@ -621,7 +622,7 @@ class GensparkEngine {
         // 진단: Failure 타일/결과 카드 구조를 로그에 남김 → "성공분만 부분 저장" 개선의 근거 수집.
         await this._dumpResultCards();
         if (limitMsg) {
-          return fail(`Genspark 사용 한도/제한으로 보임: "${limitMsg}" — 잠시 후(보통 몇 시간) 다시 시도하세요.`);
+          return limited(`Genspark 사용 한도/제한으로 보임: "${limitMsg}" — 잠시 후(보통 몇 시간) 다시 시도하세요.`);
         }
         if (nsfwSeen) {
           // 모더레이션 차단 — 같은 프롬프트 재시도는 무의미. 상위에서 순화/대체엔진으로 우회하도록 blocked 표시.

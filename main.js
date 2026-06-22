@@ -414,49 +414,95 @@ function getFlowEng(profileDir) {
   return S.flowEng;
 }
 
-async function runFlowImages(project, imagesDir, logger, styleId) {
+async function runFlowImages(project, imagesDir, logger, styleId, onlyNums) {
   fs.mkdirSync(imagesDir, { recursive: true });
+  // 대상 = (onlyNums 있으면 그 그룹만) + 아직 이미지 없는 그룹. 순환에서 '남은 것만' 이어 만들 때 사용.
+  const targets = project.groups.filter((g) => (!onlyNums || onlyNums.includes(g.num)) && !(g.imagePath && fs.existsSync(g.imagePath)));
+  if (!targets.length) { logger('[Flow] 생성할 그룹 없음 (이미 채워짐)'); return; }
   const workDir = path.join(os.tmpdir(), `sm_flow_${project.shortsNum}_${Date.now().toString(36)}`);
   fs.mkdirSync(workDir, { recursive: true });
-  // 멀티계정 순환 — 오늘 한도 안 찬 첫 계정 선택. 전부 소진이면 중단.
+  // 멀티계정 순환 — 오늘 한도 안 찬 첫 계정 선택. 전부 소진이면 중단(throw → 상위 순환이 다음 엔진으로).
   const FlowAccounts = require('./core/flow-accounts');
   const acc = FlowAccounts.pickActive();
   if (!acc) throw new Error('모든 Flow 계정의 오늘 한도가 찼습니다 — ⚙Flow 계정에서 한도를 늘리거나 계정을 추가하세요.');
   const cap = FlowAccounts.load().dailyCap;
   const used = FlowAccounts.list().accounts.find((a) => a.id === acc.id);
-  logger(`🔑 Flow 계정: ${acc.label} (오늘 ${used ? used.used : 0}/${cap})`);
+  logger(`🔑 Flow 계정: ${acc.label} (오늘 ${used ? used.used : 0}/${cap}) · 대상 ${targets.length}장`);
   const profileDir = flowProfileDir(acc.id);
   const eng = getFlowEng(profileDir);
   const stylePrompt = styleId ? (require('./core/style-store').getPrompt(styleId) || '') : '';
-  const pfx = stylePrompt ? `${stylePrompt}, ` : ''; // 커스텀 프롬프트(이미지 프롬프트 있는 그룹)용 스타일 접두어
-  // 그룹 나레이션(전체 문장) — 프롬프트 없을 때 Flow 가 이걸 영어 시각 프롬프트로 변환(내용 반영).
-  const paragraphs = project.groups.map((g) => project.getSentencesOfGroup(g).map((s) => s.text).join(' ').trim() || `cut${g.num}`);
-  // 프롬프트 있으면 스타일+프롬프트 그대로, 없으면 null → Flow 가 나레이션을 번역(스타일은 엔진이 별도 적용).
-  const customPrompts = project.groups.map((g) => (g.imagePrompt && g.imagePrompt.trim()) ? (pfx + g.imagePrompt) : null);
+  // 대상 그룹만 제출. 나레이션(프롬프트 없을 때 Flow 가 번역) + 커스텀 프롬프트(있으면 공통 빌더로 동일 프롬프트).
+  const paragraphs = targets.map((g) => project.getSentencesOfGroup(g).map((s) => s.text).join(' ').trim() || `cut${g.num}`);
+  const customPrompts = targets.map((g) => (g.imagePrompt && g.imagePrompt.trim()) ? P.buildImagePrompt(stylePrompt, g.imagePrompt) : null);
   const imgDir = path.join(workDir, 'images');
-  // 생성 중 폴더를 폴링 → 새 이미지가 나타나면 즉시 그룹에 붙이고 화면 실시간 갱신.
-  const poll = setInterval(() => {
-    const n = mapFlowImagesOnce(project, imgDir, imagesDir, false);
-    if (n > 0) pushDtoUpdate();
-  }, 2500);
+  // 대상(targets) 순서로 매핑 — Flow 출력은 제출 순서(01,02…) = targets 순서. 이미 채워진 그룹은 건드리지 않음.
+  const mapOnce = (final) => {
+    let files = [];
+    try { files = fs.readdirSync(imgDir).filter((f) => /\.(png|jpe?g|webp)$/i.test(f)).sort(); } catch { return 0; }
+    let n = 0;
+    targets.forEach((g, i) => {
+      if (g.imagePath && g.imagePath.startsWith(imagesDir) && fs.existsSync(g.imagePath)) return;
+      let f = files.find((x) => x.startsWith(String(i + 1).padStart(2, '0')));
+      if (!f && final) f = files[i];
+      if (!f) return;
+      const ext = path.extname(f).toLowerCase().replace('.jpeg', '.jpg');
+      const dest = path.join(imagesDir, `${String(g.num).padStart(2, '0')}${ext}`);
+      try { fs.copyFileSync(path.join(imgDir, f), dest); g.imagePath = dest; g.imageStatus = 'done'; n++; if (final && logger) logger(`[Flow] G${g.num} 이미지 첨부`); }
+      catch (e) { if (logger) logger(`이미지 복사 실패 G${g.num}: ${e.message}`); }
+    });
+    return n;
+  };
+  const poll = setInterval(() => { if (mapOnce(false) > 0) pushDtoUpdate(); }, 2500);
   try {
     await eng.run({
       paragraphs, customPrompts, mediaType: 'image',
-      ratio: project.aspect || '9:16', outputDir: workDir, style: styleId || 'cinematic', // 나레이션 번역 경로에 스타일 적용
-      withSubtitle: false, vrewOnly: false, skipVrew: true, // 우리 앱이 .vrew 를 만드므로 Flow 자체 .vrew 빌드 생략
-      antiDetect: { enabled: true, preset: '기본' }, profileId: acc.id, // 계정별 휴먼 페이싱·카운팅
+      ratio: project.aspect || '9:16', outputDir: workDir, style: styleId || 'cinematic',
+      withSubtitle: false, vrewOnly: false, skipVrew: true,
+      antiDetect: { enabled: true, preset: '기본' }, profileId: acc.id,
     });
   } finally {
     clearInterval(poll);
   }
-  // 최종 매핑(순서 폴백 포함) + 화면 갱신
-  const total = mapFlowImagesOnce(project, imgDir, imagesDir, true, logger);
-  logger(`[Flow] 이미지 매핑 완료 ${total}/${project.groups.length}`);
-  // 이 계정의 오늘 사용량 누적(보수적: 시도한 그룹 수). 한도 도달 시 다음 실행부터 다음 계정으로.
-  const usedNow = FlowAccounts.markUsed(acc.id, project.groups.length);
+  const total = mapOnce(true);
+  logger(`[Flow] 이미지 매핑 완료 ${total}/${targets.length}`);
+  const usedNow = FlowAccounts.markUsed(acc.id, targets.length);
   if (usedNow >= cap) logger(`⚠ Flow 계정 "${acc.label}" 오늘 한도(${cap}) 도달 → 다음 실행은 다른 계정 사용`);
   pushDtoUpdate();
   try { fs.rmSync(workDir, { recursive: true, force: true }); } catch {}
+}
+
+// ── 이미지 순환(rotation) ── 순서대로 엔진을 돌며 '남은(미생성) 그룹'만 생성. 한 엔진이 한도면 다음 엔진으로 이어감.
+//   startEngine = 사용자가 고른 엔진(맨 앞 우선). ComfyUI 는 순환 제외(별도 단독).
+async function runRotatingImages(project, imagesDir, logger, styleId, startEngine) {
+  const Rot = require('./core/image-rotation');
+  const order = Rot.activeOrder(startEngine);
+  if (!order.length) { logger('⚠ 순환 엔진이 비어있음 — ⚙ 순환 설정 확인'); return; }
+  const stylePrompt = styleId ? (require('./core/style-store').getPrompt(styleId) || '') : '';
+  const need = () => project.groups.filter((g) => g.imagePrompt && g.imagePrompt.trim() && !(g.imagePath && fs.existsSync(g.imagePath)));
+  logger(`🔄 이미지 순환: ${order.join(' → ')}`);
+  for (const engineId of order) {
+    if (S.abort) { logger('⏹ 중단됨'); break; }
+    const remaining = need();
+    if (!remaining.length) break;
+    const nums = remaining.map((g) => g.num);
+    logger(`🔄 [${engineId}] 남은 ${remaining.length}장 생성 시도 (그룹 ${nums.join(',')})`);
+    try {
+      if (engineId === 'genspark') {
+        const r = await P.generateImagesGenspark(project, imagesDir, logger, () => S.abort, stylePrompt, nums, pushDtoUpdate);
+        if (r && r.limitReached) { logger('⚠ Genspark 한도 도달 — 다음 엔진으로 이어감'); continue; }
+      } else if (engineId === 'flow') {
+        await runFlowImages(project, imagesDir, logger, styleId, nums);
+      } else if (engineId === 'comfy') {
+        await runComfyImages(project, imagesDir, logger, styleId);
+      } else { logger(`(건너뜀) 알 수 없는 엔진: ${engineId}`); }
+    } catch (e) {
+      logger(`⚠ ${engineId} 중단(${e.message}) — 다음 엔진으로 이어감`);
+      continue;
+    }
+  }
+  const left = need();
+  if (left.length) logger(`⚠ 순환 엔진 모두 소진 — ${left.length}장 미생성 (그룹 ${left.map((g) => g.num).join(',')})`);
+  else logger('✅ 순환 이미지 생성 완료');
 }
 
 // ComfyUI(SDXL) 이미지 — HTTP API(브라우저 X). 그룹별 g.imagePrompt 로 텍스트→이미지. 로컬/런팟 공용.
@@ -739,12 +785,10 @@ ipcMain.handle('image-build', async (_e, args = {}) => {
       prefillImageCache(pr, mediaDir, styleId, engine); // ♻ 캐시에 있는 그룹은 먼저 채움(엔진이 건너뜀)
       if (imagesNeeded(pr) === 0) {
         log(`♻ ${prLabel(pr)} 전부 캐시 재활용 — 생성 생략`);
-      } else if (engine === 'flow') {
-        await runFlowImages(pr, mediaDir, log, styleId);
       } else if (engine === 'comfy') {
-        await runComfyImages(pr, mediaDir, log, styleId);
+        await runComfyImages(pr, mediaDir, log, styleId); // ComfyUI 는 단독(순환 제외)
       } else {
-        await P.generateImagesGenspark(pr, mediaDir, log, () => S.abort, stylePrompt, null, pushDtoUpdate);
+        await runRotatingImages(pr, mediaDir, log, styleId, engine); // genspark/flow → 순환(한도 시 자동 이어감)
       }
       cacheGeneratedImages(pr, styleId, engine); // 새로 만든 이미지 캐시에 저장
       log(`✓ ${prLabel(pr)} 이미지 완료`);
@@ -1133,9 +1177,9 @@ async function runMakeAllCore(opts = {}) {
     const audioTask = () => dry ? Promise.resolve().then(() => P.fillSilent(pr, dirs.tts))
       : P.fillTts(pr, preset, ttsMgr, dirs.tts, log, () => S.abort, speed, pushDtoUpdate);
     const imgTask = () => dry || imagesNeeded(pr) === 0 ? Promise.resolve()
-      : (engine === 'flow') ? runFlowImages(pr, dirs.media, log, styleId)
-      : (engine === 'comfy') ? runComfyImages(pr, dirs.media, log, styleId)
-      : P.generateImagesGenspark(pr, dirs.media, log, () => S.abort, stylePrompt, null, pushDtoUpdate);
+      : (engine === 'comfy') ? runComfyImages(pr, dirs.media, log, styleId)        // ComfyUI 단독
+      : runRotatingImages(pr, dirs.media, log, styleId, engine);                    // genspark/flow → 순환
+
     // 단계별 시간 측정(병렬이어도 각자 wall-clock 기록).
     const runAudio = () => { const t0 = Date.now(); return Promise.resolve(audioTask()).finally(() => { S.timings.tts += (Date.now() - t0) / 1000; pushDtoUpdate(); }); };
     const runImage = () => { const t0 = Date.now(); return Promise.resolve(imgTask()).catch((e) => log('이미지 오류: ' + e.message)).finally(() => { S.timings.image += (Date.now() - t0) / 1000; pushDtoUpdate(); }); };

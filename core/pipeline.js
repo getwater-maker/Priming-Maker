@@ -290,6 +290,14 @@ async function buildProjectVrew(project, vrewPath, preset, logger, captionMaxCha
 
 // ── 이미지 생성 ─────────────────────────────────────────
 // group.imagePrompt 를 "그대로" 투입. 컷 num → cut{num}.png. 결과를 group.imagePath 에 매핑.
+// 모든 이미지 엔진(Genspark/Flow/…) 공통 최종 프롬프트 빌더 — 엔진이 달라도 동일 프롬프트 보장.
+//   `<스타일>, <대본 이미지프롬프트>, no text, no watermark`
+function buildImagePrompt(stylePrompt, imagePrompt) {
+  const style = stylePrompt ? String(stylePrompt).trim().replace(/[,\s]+$/, '') + ', ' : '';
+  const body = String(imagePrompt || '').trim().replace(/[,\s]+$/, '');
+  return `${style}${body}, no text, no watermark`;
+}
+
 // 모더레이션(NSFW) 우회용 프롬프트 순화 — 무기/폭력/유혈/선정 표현을 완화.
 //   내용이 다소 바뀌어도 검은 화면보다 낫다(로그로 알림). 한국사 장면(군졸·추격 등)이 자주 걸림.
 function softenForModeration(prompt) {
@@ -321,9 +329,8 @@ async function generateImagesGenspark(project, imagesDir, logger, abortSignal, s
   if (onProgress) { try { onProgress(); } catch {} }
 
   const log = logger || (() => {});
-  // PrimingFlow 방식: 스타일을 앞, 대본 이미지 프롬프트를 뒤에 둠.
-  const pfx = stylePrompt ? `${stylePrompt}, ` : '';
-  const prompts = idx.map((i) => pfx + groups[i].imagePrompt);
+  // 모든 엔진(Genspark/Flow/…) 공통 최종 프롬프트 — 스타일 앞 + 대본 + no text/no watermark.
+  const prompts = idx.map((i) => buildImagePrompt(stylePrompt, groups[i].imagePrompt));
   const outputPaths = idx.map((i) => path.join(imagesDir, `${String(groups[i].num).padStart(2, '0')}.png`));
 
   const { GensparkEngine } = require('../genspark-engine');
@@ -336,9 +343,11 @@ async function generateImagesGenspark(project, imagesDir, logger, abortSignal, s
   const BATCH = 6;
   const MAX_SINGLE_TRY = 2;
   const results = new Array(idx.length);
+  let limitReached = false; // 사용 한도/제한 도달 → 순환에서 다음 엔진으로 넘기는 신호
   try {
     for (let start = 0; start < idx.length; start += BATCH) {
       if (abortSignal && abortSignal()) break;
+      if (limitReached) break;
       const ps = prompts.slice(start, start + BATCH);
       const ops = outputPaths.slice(start, start + BATCH);
       const saved = new Array(ps.length).fill(null);
@@ -349,6 +358,7 @@ async function generateImagesGenspark(project, imagesDir, logger, abortSignal, s
       };
       log(`[Genspark] 배치 ${Math.floor(start / BATCH) + 1}: ${ps.length}장 한 번에 제출`);
       const r = await eng.generateImagesBatch({ prompts: ps, outputPaths: ops, abortSignal: abortSignal || (() => false), onSaved: mapSave });
+      if (r.some((x) => x && x.limit)) { limitReached = true; log('[Genspark] ⚠ 사용 한도/제한 도달 — 남은 이미지는 순환의 다음 엔진으로'); break; }
       for (let k = 0; k < ps.length; k++) if (r[k] && r[k].path) saved[k] = r[k];
 
       // 빠진 컷 → 단건 재생성 (6장이 다 나올 때까지)
@@ -358,6 +368,7 @@ async function generateImagesGenspark(project, imagesDir, logger, abortSignal, s
         log(`[Genspark] ⚠ 배치 미완료 — 빠진 ${missing.length}장을 단건으로 재생성`);
         for (const k of missing) {
           if (abortSignal && abortSignal()) break;
+          if (limitReached) break;
           const num = groups[idx[start + k]].num;
           let prevBlocked = false;
           for (let attempt = 1; attempt <= MAX_SINGLE_TRY; attempt++) {
@@ -366,6 +377,7 @@ async function generateImagesGenspark(project, imagesDir, logger, abortSignal, s
             log(`[Genspark] 단건 재생성 G${num} (시도 ${attempt}/${MAX_SINGLE_TRY})${prevBlocked ? ' · 프롬프트 순화' : ''}`);
             const rr = await eng.generateImagesBatch({ prompts: [usePrompt], outputPaths: [ops[k]], abortSignal: abortSignal || (() => false), onSaved: (_kk, p) => mapSave(k, p) });
             if (rr[0] && rr[0].path) { saved[k] = rr[0]; break; }
+            if (rr[0] && rr[0].limit) { limitReached = true; break; } // 한도 → 단건 중단
             prevBlocked = !!(rr[0] && rr[0].blocked);
             if (prevBlocked) log(`[Genspark] G${num} NSFW 차단 감지 — 다음 시도는 프롬프트 순화`);
             else if (attempt < MAX_SINGLE_TRY) log(`[Genspark] G${num} 단건 실패 — 재시도`);
@@ -391,7 +403,7 @@ async function generateImagesGenspark(project, imagesDir, logger, abortSignal, s
   if (onProgress) { try { onProgress(); } catch {} }
   const ok = results.filter((r) => r && r.path).length;
   log(`이미지 ${ok}/${idx.length} 생성 (쇼츠${project.shortsNum})`);
-  return results;
+  return { results, ok, total: idx.length, limitReached };
 }
 
 // 엔진 분기 (현재 genspark 구현, flow는 main.js에서 win 필요로 별도 처리)
@@ -547,5 +559,5 @@ module.exports = {
   parseScript, parseScriptText, toDTO, getPreset, listPresets,
   makeTtsManager, fillTts, fillTtsList, fillSilent, buildProjectVrew, sanitize,
   generateImages, generateImagesGenspark, generateHookVideosGrok, writeSrt,
-  mergeGroupsByTts,
+  mergeGroupsByTts, buildImagePrompt,
 };
