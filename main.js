@@ -737,7 +737,11 @@ async function runComfyVideos(project, mediaDir, logger, opts = {}) {
     const hit = MC.get(ck);
     if (hit) { try { fs.copyFileSync(hit.file, outputPath); g.videoPath = outputPath; g.videoSourceImage = g.imagePath; g.videoStatus = 'done'; logger(`♻ G${g.num} 영상 재활용(캐시)`); pushDtoUpdate(); continue; } catch {} }
     g.videoStatus = 'generating'; pushDtoUpdate();
-    const wantDur = cfg.matchVideoToAudio === false ? null : (g.groupDurationSec || null); // 영상 길이를 그룹 음성에 맞춤
+    // 영상 길이 = 그룹 TTS 음성 길이(문장 합산). videoMaxSec(기본 10초)로 상한은 comfy-engine 이 적용.
+    //   (groupDurationSec 은 모델 그룹에 없음 → 문장에서 직접 계산)
+    const ttsLen = project.getSentencesOfGroup(g).reduce((a, s) => a + (s.ttsDurationSec || 0), 0);
+    const wantDur = cfg.matchVideoToAudio === false ? null : (ttsLen > 0 ? ttsLen : null);
+    if (wantDur) logger(`[Comfy] G${g.num} 영상 길이 = 음성 ${ttsLen.toFixed(1)}초 (캡 ${cfg.videoMaxSec || 10}초)`);
     const res = await eng.imageToVideo({ imagePath: g.imagePath, prompt: g.videoPrompt || g.motionNote || null, outputPath, abortSignal: () => S.abort, aspect: project.aspect || '9:16', durationSec: wantDur });
     if (res.success && res.videoPath) { g.videoPath = res.videoPath; g.videoSourceImage = g.imagePath; g.videoStatus = 'done'; MC.put(ck, res.videoPath, 'mp4'); logger(`✓ G${g.num} 영상`); }
     else { g.videoStatus = 'fail'; logger(`✗ G${g.num} 영상 실패: ${res.error}`); }
