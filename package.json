@@ -32,6 +32,7 @@
   "build": {
     "appId": "com.user.priming",
     "productName": "Priming",
+    "artifactName": "${productName}-Setup-${version}.${ext}",
     "asar": true,
     "files": [
       "**/*",
