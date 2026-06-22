@@ -1069,7 +1069,9 @@ function buildParsedForScript(scriptPath, mode, preset) {
   return { parsed, note };
 }
 // .md 의 '도입부' 영역(splitHybrid)에서 도입 문장 텍스트를 뽑아, 그룹의 문장과 매칭해 isIntro 재설정.
-//   스냅샷 구조(분할/병합)와 무관하게 텍스트 기준으로 정확. 롱폼 전용.
+//   ★ 도입부는 대본 '앞쪽 연속 블록' — 도입 영역을 벗어나면 거기서 끝낸다(한 번 벗어나면 다시 도입 아님).
+//     그룹의 '모든' 문장이 도입 문장일 때만 도입으로 판정 → 결말에서 도입 문구를 반복해도 오인식 안 함.
+//   롱폼 전용. 스냅샷 구조(분할/병합)와 무관하게 정확.
 function applyIntroFromScript(parsed, scriptPath, mode) {
   try {
     if (mode !== 'longform' || !parsed || !parsed.projects) return;
@@ -1079,9 +1081,12 @@ function applyIntroFromScript(parsed, scriptPath, mode) {
     const introSet = new Set(splitHybrid(txt).items.filter((it) => it.isIntro).map((it) => norm(it.text)));
     if (!introSet.size) return; // 도입부 헤더 없음 → 변경 안 함
     for (const pr of parsed.projects) {
+      let inIntro = true; // 도입부는 앞쪽 연속 — 벗어나면 false 로 고정
       for (const g of pr.groups) {
         const sents = pr.getSentencesOfGroup(g);
-        g.isIntro = sents.length > 0 && sents.some((s) => introSet.has(norm(s.text)));
+        const isIntro = inIntro && sents.length > 0 && sents.every((s) => introSet.has(norm(s.text)));
+        g.isIntro = isIntro;
+        if (!isIntro) inIntro = false;
       }
     }
   } catch (e) { /* 실패 시 기존 값 유지 */ }
