@@ -107,6 +107,19 @@ export default function App() {
   const capCharsN = Math.max(2, parseInt(capChars, 10) || 7);
   // 자막 한 줄 글자수 — 쇼츠는 클립글자수, 롱폼은 분할옵션의 '긴 n자'(longLen) 기준.
   const effCap = isLf ? Math.max(2, parseInt(splitOpts.long, 10) || 20) : capCharsN;
+  // 제작 진행률(완료/전체) — TTS(문장 audio) · 이미지(group imagePath) · 영상(I2V 그룹 videoPath). PrimingFlow 진행률 패널 이식.
+  const prog = (() => {
+    let ttsD = 0, ttsT = 0, imgD = 0, imgT = 0, vidD = 0, vidT = 0;
+    for (const pr of ((dto && dto.projects) || [])) {
+      for (const c of (pr.cuts || [])) {
+        const sents = c.sentences || [];
+        ttsT += sents.length; ttsD += sents.filter((s) => s.audio).length;
+        imgT += 1; if (c.imagePath) imgD += 1;
+        if (c.isI2V || c.videoPrompt) { vidT += 1; if (c.videoPath) vidD += 1; }
+      }
+    }
+    return { ttsD, ttsT, imgD, imgT, vidD, vidT };
+  })();
   const _clipMaxSec = () => (videoEngine === 'flow' ? 8.0 : videoEngine === 'grok10' ? 10.0 : videoEngine === 'comfy' ? 8.0 : 6.0);
   const capOverride = useCallback(() => {
     const baseY = parseFloat(capPos) || 0;
@@ -192,7 +205,7 @@ export default function App() {
     catch (e) { logline('재분할 오류: ' + e.message); }
   }
   async function runIntroVideo() {
-    setStatus('도입부 TTS + 16초 재배치…');
+    setStatus('도입부 TTS + 10초 재배치…');
     try { const d = await api.introVideoPrep({ presetName: presetName || null, speed: ttsSpeed || null }); if (d) setDto(d); setStatus('도입부 재배치 완료'); }
     catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
   }
@@ -916,8 +929,8 @@ export default function App() {
         {splitBar}
         {!isLf && <button className="ghost" title="TTS 후 캡 미만 그룹들을 한 그룹으로 합치기" onClick={mergeGroups}>🔗 합치기</button>}
         <span className="hdiv" />
-        <span className="worktimes" title="마지막 작업 소요시간">
-          ⏱ TTS {fmtSec(timings.tts)} · 이미지 {fmtSec(timings.image)} · 영상 {fmtSec(timings.video)} · <b>합계 {fmtSec(timings.tts + timings.image + timings.video)}</b>
+        <span className="worktimes" title="진행률(완료/전체) · 괄호=마지막 작업 소요시간">
+          ⏱ TTS {prog.ttsD}/{prog.ttsT} ({fmtSec(timings.tts)}) · 이미지 {prog.imgD}/{prog.imgT} ({fmtSec(timings.image)}) · 영상 {prog.vidD}/{prog.vidT} ({fmtSec(timings.video)}) · <b>합계 {fmtSec(timings.tts + timings.image + timings.video)}</b>
           {timings.make > 0 && <> · ⚡전체 {fmtSec(timings.make)}</>}
         </span>
       </div>

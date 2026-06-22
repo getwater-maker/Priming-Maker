@@ -457,8 +457,8 @@ function buildGroupsHybrid(items, thresholds) {
   return { sentences, groups };
 }
 
-// 도입부 클립 길이 한도 — 16초 (사용자 설정: 1클립 ≈ 16초 근처로 묶음). 방식은 동일, 시간만 9→16.
-const INTRO_VIDEO_MAX_SEC_DEFAULT = 16;
+// 도입부 클립 길이 한도 — 10초 (I2V/LTX 최대 생성 길이 = 10초에 맞춤. 2026-06-22 사용자 지정 16→10).
+const INTRO_VIDEO_MAX_SEC_DEFAULT = 10;
 
 /**
  * 도입부 그룹을 TTS 실제 재생 시간 기준으로 재배치.

@@ -1732,7 +1732,7 @@ ipcMain.handle('resplit', (_e, args = {}) => {
   return P.toDTO(S.parsed);
 });
 
-// 도입부 비디오 준비 — 도입부(phase 도입) 문장만 TTS → 16초 기준으로 도입부 그룹 재배치.
+// 도입부 비디오 준비 — 도입부(phase 도입) 문장만 TTS → 10초 기준으로 도입부 그룹 재배치(I2V/LTX 10초 한계).
 ipcMain.handle('intro-video-prep', async (_e, args = {}) => {
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
   const pr = S.parsed.projects[0];
