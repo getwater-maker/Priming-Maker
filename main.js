@@ -1065,7 +1065,26 @@ function buildParsedForScript(scriptPath, mode, preset) {
     parsed = P.parseScript(scriptPath, mode, presetThresholds(preset));
     if (sameMode) { const n = overlaySnapshot(parsed, snap); if (n) note = `♻ 대본 수정 감지 — 기존 자산 ${n}개 복원`; }
   }
+  applyIntroFromScript(parsed, scriptPath, mode); // 도입부(isIntro)는 .md 가 출처 — 항상 재계산(복원 대본 색 누락 방지)
   return { parsed, note };
+}
+// .md 의 '도입부' 영역(splitHybrid)에서 도입 문장 텍스트를 뽑아, 그룹의 문장과 매칭해 isIntro 재설정.
+//   스냅샷 구조(분할/병합)와 무관하게 텍스트 기준으로 정확. 롱폼 전용.
+function applyIntroFromScript(parsed, scriptPath, mode) {
+  try {
+    if (mode !== 'longform' || !parsed || !parsed.projects) return;
+    const txt = fs.readFileSync(scriptPath, 'utf8');
+    const { splitHybrid } = require('./core/sentence-splitter');
+    const norm = (t) => String(t || '').replace(/\s+/g, ' ').trim();
+    const introSet = new Set(splitHybrid(txt).items.filter((it) => it.isIntro).map((it) => norm(it.text)));
+    if (!introSet.size) return; // 도입부 헤더 없음 → 변경 안 함
+    for (const pr of parsed.projects) {
+      for (const g of pr.groups) {
+        const sents = pr.getSentencesOfGroup(g);
+        g.isIntro = sents.length > 0 && sents.some((s) => introSet.has(norm(s.text)));
+      }
+    }
+  } catch (e) { /* 실패 시 기존 값 유지 */ }
 }
 function buildSnapshot() {
   return {
