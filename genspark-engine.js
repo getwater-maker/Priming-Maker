@@ -484,6 +484,17 @@ class GensparkEngine {
     }
   }
 
+  /** NSFW/Failure(모더레이션 차단) 타일이 결과에 떴는지 — 떴으면 그 컷은 재시도해도 안 나옴.
+   *  리프 요소 중 텍스트가 정확히 "NSFW"/"Failure" 인 것 탐지(큰 컨테이너 오탐 방지). */
+  async _hasNsfwTile() {
+    try {
+      return await this.page.evaluate(() => {
+        const els = [...document.querySelectorAll('div,span,p')].filter((el) => el.children.length === 0);
+        return els.some((el) => { const t = (el.textContent || '').trim(); return /^nsfw$/i.test(t) || /^failure$/i.test(t); });
+      });
+    } catch (_) { return false; }
+  }
+
   /** 사용 한도/차단/플랜 관련 안내 메시지 감지 — 발견 시 텍스트 반환, 없으면 null.
    *  (예: "5시간 제한에 근접했습니다.", "limit reached", "더 이상 ..." 등) */
   async _detectLimitMessage() {
@@ -565,6 +576,7 @@ class GensparkEngine {
       let newSrcs = [];
       let limitMsg = null;
       let _gracedLogged = false;
+      let nsfwSeen = false, nsfwAt = 0;
       while (true) {
         if (abortSignal && abortSignal()) return fail('사용자 중단');
         await this.page.waitForTimeout(POLL);
@@ -586,6 +598,12 @@ class GensparkEngine {
             break;
           }
         }
+        // 🚫 NSFW/Failure(모더레이션) 타일 감지 → 막힌 컷은 영영 안 나옴. 감지 후 잠깐만(다른 장 마무리)
+        //   더 기다리고 종료 → 450초 헛대기 방지. 어느 컷인지·우회(순화/대체)는 상위(pipeline)에서 처리.
+        if (newSrcs.length < N && !nsfwSeen && elapsed >= 12) {
+          if (await this._hasNsfwTile()) { nsfwSeen = true; nsfwAt = elapsedMs; this.log(`[Genspark] ⚠️ NSFW(모더레이션) 타일 감지 — 막힌 컷은 생성 불가`); }
+        }
+        if (nsfwSeen && (elapsedMs - nsfwAt) > 12000) { this.log('[Genspark] NSFW로 일부 미완료 — 대기 종료'); break; }
         // ⏱ 막판 유예 — 5장(N-1) 이상 완료됐는데 마지막 1~2장이 안 끝나면, 기본 타임아웃에서
         //   멈추지 말고 GRACE_MS 까지 더 기다린다. (이전: 6장 중 5장 떠도 타임아웃에 6장 통째로 버림)
         const almostDone = N >= 2 && newSrcs.length >= N - 1;
@@ -604,6 +622,10 @@ class GensparkEngine {
         await this._dumpResultCards();
         if (limitMsg) {
           return fail(`Genspark 사용 한도/제한으로 보임: "${limitMsg}" — 잠시 후(보통 몇 시간) 다시 시도하세요.`);
+        }
+        if (nsfwSeen) {
+          // 모더레이션 차단 — 같은 프롬프트 재시도는 무의미. 상위에서 순화/대체엔진으로 우회하도록 blocked 표시.
+          return prompts.map(() => ({ blocked: true, reason: 'NSFW/모더레이션 차단' }));
         }
         return fail(`배치 미완료 — ${N}장 중 ${newSrcs.length}장만 확인 (재시도 필요)`);
       }

@@ -290,6 +290,24 @@ async function buildProjectVrew(project, vrewPath, preset, logger, captionMaxCha
 
 // ── 이미지 생성 ─────────────────────────────────────────
 // group.imagePrompt 를 "그대로" 투입. 컷 num → cut{num}.png. 결과를 group.imagePath 에 매핑.
+// 모더레이션(NSFW) 우회용 프롬프트 순화 — 무기/폭력/유혈/선정 표현을 완화.
+//   내용이 다소 바뀌어도 검은 화면보다 낫다(로그로 알림). 한국사 장면(군졸·추격 등)이 자주 걸림.
+function softenForModeration(prompt) {
+  let p = ' ' + String(prompt || '') + ' ';
+  const rules = [
+    [/\b(spears?|swords?|blades?|knives?|knife|daggers?|weapons?|arrows?|bows?|guns?|rifles?)\b/gi, 'wooden staff'],
+    [/\b(blood|bloody|gore|gory|wounds?|wounded|injur(?:y|ies|ed))\b/gi, ' '],
+    [/\b(killing|killed|kills?|murder\w*|slay\w*|stab\w*|attack\w*|fight\w*|battle|combat|violence|violent|assault\w*)\b/gi, 'confront'],
+    [/\b(chase|chasing|hunt\w*|pursu\w*|capture|capturing|arrest\w*)\b/gi, 'follow'],
+    [/\b(corpse|dead body|death|dying|execution|behead\w*)\b/gi, 'fallen figure'],
+    [/\b(naked|nude|nudity|sexy|seductive|erotic|cleavage|lingerie)\b/gi, 'fully clothed'],
+    [/\b(torture\w*|whip\w*|beating|beaten|punish\w*)\b/gi, 'scene'],
+  ];
+  for (const [re, to] of rules) p = p.replace(re, to);
+  p = p.replace(/\s{2,}/g, ' ').trim();
+  return p + ', wholesome historical illustration, safe for work, no violence, no weapons';
+}
+
 async function generateImagesGenspark(project, imagesDir, logger, abortSignal, stylePrompt, onlyNums, onProgress) {
   fs.mkdirSync(imagesDir, { recursive: true });
   const groups = project.groups;
@@ -340,13 +358,23 @@ async function generateImagesGenspark(project, imagesDir, logger, abortSignal, s
         log(`[Genspark] ⚠ 배치 미완료 — 빠진 ${missing.length}장을 단건으로 재생성`);
         for (const k of missing) {
           if (abortSignal && abortSignal()) break;
+          const num = groups[idx[start + k]].num;
+          let prevBlocked = false;
           for (let attempt = 1; attempt <= MAX_SINGLE_TRY; attempt++) {
-            log(`[Genspark] 단건 재생성 G${groups[idx[start + k]].num} (시도 ${attempt}/${MAX_SINGLE_TRY})`);
-            const rr = await eng.generateImagesBatch({ prompts: [ps[k]], outputPaths: [ops[k]], abortSignal: abortSignal || (() => false), onSaved: (_kk, p) => mapSave(k, p) });
+            // 직전이 NSFW 차단이면 프롬프트를 순화해 우회. transient 실패면 원본 그대로 재시도.
+            const usePrompt = prevBlocked ? softenForModeration(ps[k]) : ps[k];
+            log(`[Genspark] 단건 재생성 G${num} (시도 ${attempt}/${MAX_SINGLE_TRY})${prevBlocked ? ' · 프롬프트 순화' : ''}`);
+            const rr = await eng.generateImagesBatch({ prompts: [usePrompt], outputPaths: [ops[k]], abortSignal: abortSignal || (() => false), onSaved: (_kk, p) => mapSave(k, p) });
             if (rr[0] && rr[0].path) { saved[k] = rr[0]; break; }
-            if (attempt < MAX_SINGLE_TRY) log(`[Genspark] G${groups[idx[start + k]].num} 단건 실패 — 재시도`);
+            prevBlocked = !!(rr[0] && rr[0].blocked);
+            if (prevBlocked) log(`[Genspark] G${num} NSFW 차단 감지 — 다음 시도는 프롬프트 순화`);
+            else if (attempt < MAX_SINGLE_TRY) log(`[Genspark] G${num} 단건 실패 — 재시도`);
           }
-          if (!(saved[k] && saved[k].path)) log(`[Genspark] ✗ G${groups[idx[start + k]].num} 최종 실패 — 프롬프트가 막혔을 수 있음(순화 권장)`);
+          if (!(saved[k] && saved[k].path)) {
+            const g = groups[idx[start + k]];
+            if (prevBlocked) { g.imageStatus = 'blocked'; log(`[Genspark] ⛔ G${num} 모더레이션(NSFW)으로 막힘 — 순화로도 실패. 프롬프트 수정 또는 다른 엔진(ComfyUI) 필요`); }
+            else log(`[Genspark] ✗ G${num} 최종 실패`);
+          }
         }
       }
       for (let k = 0; k < ps.length; k++) results[start + k] = saved[k] || { error: '생성 실패(재시도 소진)' };
