@@ -95,6 +95,7 @@ export default function App() {
   const [flowAcc, setFlowAcc] = useState(null);          // { dailyCap, accounts:[{id,label,used}] }
   const [imgRotOpen, setImgRotOpen] = useState(false);
   const [imgRot, setImgRot] = useState(null);            // { order:[], enabled:{} } 이미지 순환 설정
+  const [lora, setLora] = useState(null);                // LoRA 수집 설정 { enabled, dir, trigger, count }
   const [gsAccOpen, setGsAccOpen] = useState(false);
   const [gsAcc, setGsAcc] = useState(null);              // Genspark 멀티계정
   const [grokAccOpen, setGrokAccOpen] = useState(false);
@@ -474,9 +475,14 @@ export default function App() {
   }
   // 이미지 순환 설정
   async function openImgRotation() {
-    try { const c = await api.getImageRotation(); setImgRot(c || { order: ['genspark', 'flow'], enabled: { genspark: true, flow: true } }); setImgRotOpen(true); }
-    catch (e) { logline('순환 설정 읽기 오류: ' + e.message); }
+    try {
+      const c = await api.getImageRotation(); setImgRot(c || { order: ['genspark', 'flow'], enabled: { genspark: true, flow: true } });
+      try { setLora(await api.getLoraCollect()); } catch (_) {}
+      setImgRotOpen(true);
+    } catch (e) { logline('순환 설정 읽기 오류: ' + e.message); }
   }
+  async function saveLora(patch) { try { setLora(await api.setLoraCollect(patch)); } catch (e) { logline('LoRA 설정 오류: ' + e.message); } }
+  async function pickLoraDir() { try { const r = await api.pickLoraDir(); if (r) setLora(r); } catch (e) { logline(e.message); } }
   async function saveImgRot(next) { setImgRot(next); try { await api.setImageRotation(next); } catch (e) { logline('순환 저장 오류: ' + e.message); } }
   function toggleRotEngine(id) { const en = { ...(imgRot.enabled || {}) }; en[id] = en[id] === false; saveImgRot({ ...imgRot, enabled: en }); }
   function moveRotEngine(id, dir) {
@@ -1096,6 +1102,24 @@ export default function App() {
               ))}
             </div>
             <div className="meta">⚠ 여러 계정/엔진으로 한도를 우회하는 것은 각 서비스 약관 위반·정지 위험이 있습니다. 보수적으로.</div>
+            {lora && (
+              <div style={{ borderTop: '1px solid var(--line)', marginTop: 10, paddingTop: 8 }}>
+                <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontWeight: 700 }}>
+                  <input type="checkbox" checked={lora.enabled !== false} onChange={(e) => saveLora({ enabled: e.target.checked })} />
+                  📦 LoRA 학습용 이미지 수집 <span className="meta">(Genspark/Flow만 · 누적 {lora.count || 0}장)</span>
+                </label>
+                <div className="meta" style={{ marginTop: 4 }}>한국사 이미지를 모아 → 나중에 LoRA 학습 → SDXL로 한국사 이미지 생성. ComfyUI 결과는 제외.</div>
+                <div className="frow" style={{ marginTop: 4 }}>
+                  <label>트리거</label>
+                  <input style={{ width: 110 }} value={lora.trigger || 'joseon'} onChange={(e) => setLora({ ...lora, trigger: e.target.value })} onBlur={(e) => saveLora({ trigger: e.target.value })} />
+                  <span className="meta" style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={lora.dir}>📁 {lora.dir}</span>
+                </div>
+                <div className="mbtns" style={{ marginTop: 4 }}>
+                  <button className="ghost" onClick={pickLoraDir}>폴더 변경</button>
+                  <button className="ghost" onClick={() => api.openLoraFolder()}>📂 데이터셋 열기</button>
+                </div>
+              </div>
+            )}
             <div className="mbtns"><button className="ghost" onClick={() => setImgRotOpen(false)}>닫기</button></div>
           </div>
         </div>

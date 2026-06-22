@@ -248,6 +248,16 @@ ipcMain.handle('list-ollama-models', async () => {
 ipcMain.handle('get-image-rotation', () => require('./core/image-rotation').load());
 ipcMain.handle('set-image-rotation', (_e, patch) => require('./core/image-rotation').save(patch || {}));
 
+// LoRA 데이터셋 수집 설정 — Genspark/Flow 이미지를 학습용으로 적립
+ipcMain.handle('get-lora-collect', () => { const L = require('./core/lora-collect'); return { ...L.load(), count: L.count() }; });
+ipcMain.handle('set-lora-collect', (_e, patch) => { const L = require('./core/lora-collect'); const c = L.save(patch || {}); return { ...c, count: L.count() }; });
+ipcMain.handle('pick-lora-dir', async () => {
+  const r = await dialog.showOpenDialog(win, { properties: ['openDirectory', 'createDirectory'] });
+  if (r.canceled || !r.filePaths[0]) return null;
+  const L = require('./core/lora-collect'); const c = L.save({ dir: r.filePaths[0] }); return { ...c, count: L.count() };
+});
+ipcMain.handle('open-lora-folder', () => { try { const dir = require('./core/lora-collect').load().dir; fs.mkdirSync(dir, { recursive: true }); shell.openPath(dir); } catch (e) { log('LoRA 폴더 열기 오류: ' + e.message); } return true; });
+
 // Flow 멀티계정 — 목록/추가/삭제/한도/로그인
 ipcMain.handle('get-flow-accounts', () => require('./core/flow-accounts').list());
 ipcMain.handle('add-flow-account', (_e, label) => { require('./core/flow-accounts').add(label); return require('./core/flow-accounts').list(); });
@@ -554,6 +564,22 @@ async function runRotatingImages(project, imagesDir, logger, styleId, startEngin
   const left = need();
   if (left.length) logger(`⚠ 순환 엔진 모두 소진 — ${left.length}장 미생성 (그룹 ${left.map((g) => g.num).join(',')})`);
   else logger('✅ 순환 이미지 생성 완료');
+  collectForLora(project, styleId, logger); // 📦 Genspark/Flow 이미지를 LoRA 데이터셋에 적립
+}
+
+// 📦 LoRA 학습용 데이터셋 적립 — Genspark/Flow 이미지만(ComfyUI 제외), 중복은 해시로 1회.
+function collectForLora(project, styleId, logger) {
+  let Lora; try { Lora = require('./core/lora-collect'); } catch { return; }
+  if (!Lora.load().enabled) return;
+  let n = 0;
+  for (const g of project.groups) {
+    if (!g.imagePath || !fs.existsSync(g.imagePath)) continue;
+    if (g.imageEngine === 'comfy') continue;          // ComfyUI 결과는 학습 오염 방지로 제외
+    if (!g.imagePrompt || !g.imagePrompt.trim()) continue;
+    const r = Lora.collect({ imagePath: g.imagePath, prompt: g.imagePrompt, styleId, script: (S.parsed && S.parsed.fileTitle) || '', num: g.num, engine: g.imageEngine || null });
+    if (r && r.added) n++;
+  }
+  if (n && logger) logger(`📦 LoRA 수집: ${n}장 적립 (총 ${Lora.count()}장)`);
 }
 
 // ComfyUI(SDXL) 이미지 — HTTP API(브라우저 X). 그룹별 g.imagePrompt 로 텍스트→이미지. 로컬/런팟 공용.
@@ -575,7 +601,7 @@ async function runComfyImages(project, imagesDir, logger, styleId, onlyNums) {
     const out = path.join(imagesDir, `${String(g.num).padStart(2, '0')}.png`);
     logger(`🖼 ComfyUI(SDXL) G${g.num} 생성…`);
     const r = await eng.textToImage({ prompt: pfx + g.imagePrompt, aspect: project.aspect || '9:16', outputPath: out, abortSignal: () => S.abort });
-    if (r.success) { g.imagePath = out; g.imageStatus = 'done'; done++; pushDtoUpdate(); }
+    if (r.success) { g.imagePath = out; g.imageStatus = 'done'; g.imageEngine = 'comfy'; done++; pushDtoUpdate(); } // comfy 표시 → LoRA 수집 제외
     else logger(`✗ G${g.num} 실패: ${r.error}`);
   }
   logger(`[ComfyUI] 이미지 ${done}/${total} 완료`);
