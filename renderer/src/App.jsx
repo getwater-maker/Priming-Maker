@@ -167,19 +167,21 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [presetName, mode, modeProfiles]);
 
-  // I2V 범위 기본값 — 새 대본 로드/모드 전환 시: 롱폼=도입부 그룹 끝까지, 쇼츠=처음~끝.
+  // I2V 범위 기본값 — 롱폼=도입부 그룹 끝까지, 쇼츠=처음~끝.
+  //   도입부(isIntro)·그룹수가 바뀌면(로드/복원/재분할) 다시 계산 → 도입부 인식이 늦게 채워져도 반영.
+  const _cuts0 = (dto && dto.projects && dto.projects[0] && dto.projects[0].cuts) || [];
+  const _introSig = isLf ? _cuts0.filter((c) => c.isIntro).map((c) => c.num).join(',') : '';
+  const _lastNum = _cuts0.length ? _cuts0[_cuts0.length - 1].num : 0;
   useEffect(() => {
-    const cuts = (dto && dto.projects && dto.projects[0] && dto.projects[0].cuts) || [];
-    if (!cuts.length) return;
-    const lastNum = cuts[cuts.length - 1].num;
+    if (!_cuts0.length) return;
     if (isLf) {
-      const introNums = cuts.filter((c) => c.isIntro).map((c) => c.num);
-      setVidFrom(1); setVidTo(introNums.length ? Math.max(...introNums) : lastNum);
+      const introNums = _cuts0.filter((c) => c.isIntro).map((c) => c.num);
+      setVidFrom(1); setVidTo(introNums.length ? Math.max(...introNums) : _lastNum);
     } else {
-      setVidFrom(1); setVidTo(lastNum);
+      setVidFrom(1); setVidTo(_lastNum);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dto && dto.fileTitle, isLf]);
+  }, [dto && dto.fileTitle, isLf, _introSig, _lastNum]);
 
   // 분할옵션 변경 → 즉시 롱폼 재분할 (대본 로드 상태에서만).
   async function changeSplit(key, val) {
@@ -279,13 +281,13 @@ export default function App() {
     } catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
   }
   async function runImg(shortsNum) {
-    if (!ensurePromptsFilled(shortsNum)) return;
+    if (!ensurePromptsFilled(shortsNum, { image: 'all', video: 'none' })) return; // 이미지 버튼=이미지 프롬프트만
     setStatus(`이미지 생성중(${imgEngine})…`);
     try { const d = await api.imageBuild({ shortsNum, engine: imgEngine, styleId: styleId || null }); setDto(d); setStatus('이미지 완료'); }
     catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
   }
   async function runVid(shortsNum) {
-    if (!ensurePromptsFilled(shortsNum)) return;
+    if (!ensurePromptsFilled(shortsNum, { image: 'range', video: 'range' })) return; // 영상=범위 그룹 이미지+i2v
     setStatus(`영상 생성중(G${vidFrom}~${vidTo})…`);
     try { const d = await api.videoBuild({ shortsNum, fromNum: parseInt(vidFrom, 10) || 1, toNum: parseInt(vidTo, 10) || 1, engine: videoEngine, flowVideoModel, flowCount, imgEngine, styleId: styleId || null }); setDto(d); setStatus('영상 완료'); }
     catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
@@ -302,7 +304,7 @@ export default function App() {
       fromNum: parseInt(vidFrom, 10) || 1, toNum: parseInt(vidTo, 10) || 1,
       dry: false, videoEngine, clipMaxSec: _clipMaxSec(), flowVideoModel, flowCount,
     };
-    if (!ensurePromptsFilled(shortsNum)) return;
+    if (!ensurePromptsFilled(shortsNum, { image: 'all', video: 'range' })) return; // 만들기=전체 이미지 + 범위 i2v
     setStatus('⚡ 전체 제작중… (TTS+이미지→영상→.vrew)');
     try { const d = await api.makeAll(args); setDto(d); setStatus('전체 제작 완료'); }
     catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
@@ -318,7 +320,7 @@ export default function App() {
       if (Sh[i]) plan.push({ mode: 'shorts', id: Sh[i].id, settings: Sh[i].settings || null });
     }
     if (!plan.length) { setStatus('큐에 대본이 없습니다'); return; }
-    if (!ensurePromptsFilled(null)) return; // 현재 표시 대본 기준 빈 프롬프트 검사
+    if (!ensurePromptsFilled(null, { image: 'all', video: 'range' })) return; // 현재 표시 대본 기준 빈 프롬프트 검사
     const order = plan.map((p) => (p.mode === 'longform' ? '롱' : '쇼')).join(' → ');
     if (!window.confirm(`큐 ${plan.length}개 대본을 순차 제작합니다.\n순서: ${order}\n(각 대본은 자기 설정으로, GPU 한 대라 한 번에 하나씩)\n계속할까요?`)) return;
     setStatus(`⚡⚡ 큐 순차 제작중… (${plan.length}개)`);
@@ -386,7 +388,7 @@ export default function App() {
     if (!dto) { setStatus('대본을 먼저 여세요'); return; }
     setImpBusy(true); setStatus('✍ 빈 프롬프트 자동작성 중… (Ollama)');
     try {
-      const d = await api.generatePromptsApi({ provider: 'ollama', styleName: styleName() });
+      const d = await api.generatePromptsApi({ provider: 'ollama', styleName: styleName(), fromNum: parseInt(vidFrom, 10) || 1, toNum: parseInt(vidTo, 10) || 1 });
       setDto(d); setStatus('✍ 빈 프롬프트 작성 완료');
     } catch (e) { logline('프롬프트작성 오류: ' + e.message); setStatus('프롬프트작성 실패 — ⚙에서 Ollama 확인'); alert('프롬프트 작성 실패:\n' + e.message); }
     finally { setImpBusy(false); }
@@ -396,15 +398,24 @@ export default function App() {
     try { const d = await api.splitGroup({ shortsNum, groupNum }); setDto(d); setStatus('✂ 그룹 분할 — 두 그룹 프롬프트 초기화됨. ✍프롬프트작성으로 채우세요'); }
     catch (e) { logline('분할 오류: ' + e.message); alert('분할 실패:\n' + e.message); }
   }
-  // 제작 전 검사 — 이미지/ i2v 프롬프트가 빈 그룹이 있으면 목록 팝업 + 진행 차단. (shortsNum=null → 전체)
-  function ensurePromptsFilled(shortsNum) {
+  // 제작 전 검사 — 빈 프롬프트 있으면 목록 팝업 + 진행 차단. (shortsNum=null → 전체)
+  //   opts.image/video = 'all'|'range'|'none' — 어느 그룹에 그 프롬프트가 필요한지.
+  //   i2v 는 '영상 범위(vidFrom~vidTo)' 그룹만 필요(롱폼=도입부만). 범위 밖은 영상 안 만드니 i2v 불요.
+  function ensurePromptsFilled(shortsNum, opts = {}) {
     if (!dto) return false;
+    const image = opts.image || 'all';
+    const video = opts.video || 'range';
+    const vf = parseInt(vidFrom, 10) || 1, vt = parseInt(vidTo, 10) || 1;
+    const lo = Math.min(vf, vt), hi = Math.max(vf, vt);
+    const inRange = (n) => n >= lo && n <= hi;
     const projs = dto.projects.filter((p) => shortsNum == null || p.shortsNum === shortsNum);
     const missing = [];
     for (const p of projs) {
       for (const c of p.cuts) {
-        const noImg = !c.imagePrompt || !c.imagePrompt.trim();
-        const noVid = !c.videoPrompt || !c.videoPrompt.trim();
+        const needImg = image === 'all' || (image === 'range' && inRange(c.num));
+        const needVid = video === 'all' || (video === 'range' && inRange(c.num));
+        const noImg = needImg && (!c.imagePrompt || !c.imagePrompt.trim());
+        const noVid = needVid && (!c.videoPrompt || !c.videoPrompt.trim());
         if (noImg || noVid) missing.push(`${p.title} G${c.num}: ${[noImg ? '이미지' : null, noVid ? 'i2v' : null].filter(Boolean).join('·')} 없음`);
       }
     }

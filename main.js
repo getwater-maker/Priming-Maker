@@ -1624,7 +1624,7 @@ ipcMain.handle('split-group', (_e, args = {}) => {
 
 ipcMain.handle('generate-prompts-api', async (_e, args = {}) => {
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
-  const { provider = 'gemini', styleName = '' } = args;
+  const { provider = 'gemini', styleName = '', fromNum = null, toNum = null } = args;
   S.abort = false;
   let callAnswer, label = provider;
   if (provider === 'ollama') {
@@ -1649,7 +1649,11 @@ ipcMain.handle('generate-prompts-api', async (_e, args = {}) => {
   }
   // 빈 프롬프트만 채움 — 이미지 OR i2v(영상) 프롬프트가 비어있는 그룹만 (분할로 초기화된 그룹 등).
   //   이미 둘 다 있는 그룹은 건너뜀(덮어쓰지 않음).
-  const includeFn = (g) => (!g.imagePrompt || !g.imagePrompt.trim()) || (!g.videoPrompt || !g.videoPrompt.trim());
+  // 빈 프롬프트만 채움 — 이미지는 모든 그룹, i2v(영상)는 '영상 범위' 그룹만(롱폼=도입부). 범위 밖은 i2v 불요.
+  const _lo = (fromNum != null && toNum != null) ? Math.min(Number(fromNum), Number(toNum)) : null;
+  const _hi = (fromNum != null && toNum != null) ? Math.max(Number(fromNum), Number(toNum)) : null;
+  const _inRange = (g) => (_lo == null) ? true : (g.num >= _lo && g.num <= _hi);
+  const includeFn = (g) => (!g.imagePrompt || !g.imagePrompt.trim()) || (_inRange(g) && (!g.videoPrompt || !g.videoPrompt.trim()));
   const r = await generatePromptsChunked(S.parsed.projects, { styleName, includeFn }, callAnswer, log);
   if (r.groups > 0) {
     log(`📥 [${label}] 적용 — ${r.groups}개 그룹 (🖼 ${r.img} · 🎬 ${r.vid})`);
