@@ -115,6 +115,7 @@ export default function App() {
     api.onDtoUpdate((d) => { if (d) { setDto(d); if (d.timings) setTimings(d.timings); if (d.queue) setQueue(d.queue); } });
     api.onAutosaved((info) => setAutoSavedAt((info && info.at) || Date.now()));
     loadPresets().then(loadStyles);
+    api.listQueue().then((q) => { if (q) setQueue(q); }).catch(() => {}); // 재로드(Ctrl+R) 시 큐 복원
     // 모드별 기본 음성배속을 mode-profiles 에서 가져와 현재 모드 기본값으로 세팅
     api.getModeProfiles().then((mp) => {
       if (!mp) return;
@@ -214,16 +215,38 @@ export default function App() {
   }
 
   // ── 액션 핸들러 ──────────────────────────────────────────
+  // 대본별 생성 설정 묶음(채널·스타일·배속·엔진·영상범위) — 큐 항목마다 개별 저장.
+  function currentSettings() {
+    return { presetName, styleId, ttsSpeed, imgEngine, videoEngine, vidFrom, vidTo, flowVideoModel, flowCount };
+  }
+  function applySettings(s) {
+    if (!s) return;
+    if (s.presetName != null) setPresetName(s.presetName);
+    if (s.styleId != null) setStyleId(s.styleId);
+    if (s.ttsSpeed != null) setTtsSpeed(s.ttsSpeed);
+    if (s.imgEngine != null) setImgEngine(s.imgEngine);
+    if (s.videoEngine != null) setVideoEngine(s.videoEngine);
+    if (s.vidFrom != null) setVidFrom(s.vidFrom);
+    if (s.vidTo != null) setVidTo(s.vidTo);
+    if (s.flowVideoModel != null) setFlowVideoModel(s.flowVideoModel);
+    if (s.flowCount != null) setFlowCount(s.flowCount);
+  }
   async function openScript() {
     const r = await api.openScript({ presetName: presetName || null, mode });
     if (!r) return;
     setDto(r.dto); setFtitle(r.dto.fileTitle); if (r.queue) setQueue(r.queue);
+    try { await api.setQueueSettings(currentSettings()); } catch (_) {} // 이 대본의 설정을 현재 헤더값으로 캡처
     setStatus(`${r.dto.projects.length}편 로드 · 큐에 추가`);
   }
-  // 큐에서 대본 선택 → 활성화
+  // 큐에서 대본 선택 → 활성화 + 그 대본의 설정을 헤더에 로드
   async function selectQueueItem(id) {
-    try { const r = await api.selectQueueItem(id); if (r.queue) setQueue(r.queue); setDto(r.dto || null); setFtitle(r.dto ? (r.dto.fileTitle || '') : ''); }
-    catch (e) { logline('대본 선택 오류: ' + e.message); }
+    try {
+      const r = await api.selectQueueItem(id);
+      if (r.queue) setQueue(r.queue);
+      setDto(r.dto || null); setFtitle(r.dto ? (r.dto.fileTitle || '') : '');
+      const it = r.queue && r.queue[mode] && r.queue[mode].items.find((x) => x.id === id);
+      if (it && it.settings) applySettings(it.settings);
+    } catch (e) { logline('대본 선택 오류: ' + e.message); }
   }
   // 큐에서 대본 제거
   async function removeQueueItem(id) {
@@ -263,6 +286,27 @@ export default function App() {
     setStatus('⚡ 전체 제작중… (TTS+이미지→영상→.vrew)');
     try { const d = await api.makeAll(args); setDto(d); setStatus('전체 제작 완료'); }
     catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
+  }
+  // ⚡⚡ 큐 전체 순차 제작 — 교차 순서(L1→S1→L2→S2…), 각 대본은 자기 설정으로.
+  async function runBatchAll() {
+    const L = (queue && queue.longform && queue.longform.items) || [];
+    const Sh = (queue && queue.shorts && queue.shorts.items) || [];
+    const plan = [];
+    const n = Math.max(L.length, Sh.length);
+    for (let i = 0; i < n; i++) {
+      if (L[i]) plan.push({ mode: 'longform', id: L[i].id, settings: L[i].settings || null });
+      if (Sh[i]) plan.push({ mode: 'shorts', id: Sh[i].id, settings: Sh[i].settings || null });
+    }
+    if (!plan.length) { setStatus('큐에 대본이 없습니다'); return; }
+    const order = plan.map((p) => (p.mode === 'longform' ? '롱' : '쇼')).join(' → ');
+    if (!window.confirm(`큐 ${plan.length}개 대본을 순차 제작합니다.\n순서: ${order}\n(각 대본은 자기 설정으로, GPU 한 대라 한 번에 하나씩)\n계속할까요?`)) return;
+    setStatus(`⚡⚡ 큐 순차 제작중… (${plan.length}개)`);
+    try {
+      const r = await api.runBatch({ plan, common: { captionStyle: capOverride(), captionMaxChars: effCap } });
+      if (r && r.queue) setQueue(r.queue);
+      if (r && r.dto) { setDto(r.dto); setFtitle(r.dto.fileTitle || ''); }
+      setStatus('⚡⚡ 큐 제작 완료');
+    } catch (e) { logline('큐 제작 오류: ' + e.message); setStatus('큐 제작 오류'); }
   }
   async function runVrew(shortsNum) {
     setStatus('.vrew 내보내는 중…');
@@ -350,7 +394,9 @@ export default function App() {
   async function loadProject() {
     const r = await api.loadProject(); if (!r) return;
     if (r.mode && r.mode !== mode) { setMode(r.mode); setAspect(r.mode === 'longform' ? '16:9' : '9:16'); }
-    setDto(r.dto); setFtitle(r.dto.fileTitle); if (r.queue) setQueue(r.queue); setStatus(`${r.dto.projects.length}편 불러옴`);
+    setDto(r.dto); setFtitle(r.dto.fileTitle); if (r.queue) setQueue(r.queue);
+    try { await api.setQueueSettings(currentSettings()); } catch (_) {} // 불러온 항목 설정 캡처
+    setStatus(`${r.dto.projects.length}편 불러옴`);
   }
   async function openComfy() {
     try { const c = await api.getComfyConfig(); setComfy(c || {}); setComfyOpen(true); }
@@ -669,6 +715,14 @@ export default function App() {
   }
   // 자막 옵션 변경 시 재생 중이면 즉시 반영
   useEffect(() => { if (playerOpen) applyCaptionStyle(); /* eslint-disable-next-line */ }, [capPos, capFine, capAlign, capSize, capYAlign, playerOpen]);
+  // 헤더 생성설정 변경 → 현재 활성 큐 항목에 저장(디바운스). 대본별 개별 설정 보존.
+  useEffect(() => {
+    const aid = queue && queue[mode] ? queue[mode].activeId : null;
+    if (!aid) return;
+    const t = setTimeout(() => { api.setQueueSettings(currentSettings()).catch(() => {}); }, 300);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [presetName, styleId, ttsSpeed, imgEngine, videoEngine, vidFrom, vidTo, flowVideoModel, flowCount]);
 
   async function copyLog() {
     try { await navigator.clipboard.writeText(logText || ''); setStatus('로그 복사됨'); }
@@ -761,7 +815,10 @@ export default function App() {
             <button className="ghost" disabled={!loaded || impBusy} title="각 그룹 내용을 분석해 이미지 프롬프트를 자동 작성·적용 (Ollama)" onClick={runMakePrompts}>{impBusy ? '⏳ 작성중…' : '✍ 프롬프트작성'}</button>
             <button className="ghost" disabled={!loaded} title="Ollama 서버·모델 설정 / 웹 LLM 답변 붙여넣기(고급)" style={{ padding: '6px 9px' }} onClick={openOllama}>⚙</button>
             <button className="ghost" disabled={!loaded} title="모든 편을 이어서 미리보기 재생" onClick={() => playShorts(null)}>▶ 미리보기</button>
-            <button disabled={!loaded} title="TTS+이미지 동시 → 영상 → .vrew → 폴더열기" onClick={() => runMake(null)}>⚡ 만들기</button>
+            <button disabled={!loaded} title="현재 대본만 TTS+이미지 → 영상 → .vrew → 폴더열기" onClick={() => runMake(null)}>⚡ 만들기</button>
+            {(() => { const qc = (queue && queue.longform ? queue.longform.items.length : 0) + (queue && queue.shorts ? queue.shorts.items.length : 0); return (
+              <button disabled={qc < 1} title="롱폼·쇼츠 큐 전체를 교차 순서(롱1→쇼1→롱2→쇼2…)로 순차 제작" onClick={runBatchAll}>⚡⚡ 큐 전체 ({qc})</button>
+            ); })()}
             <button className="ghost" title="진행 중인 작업 중단" onClick={abort}>■ 중단</button>
             <button disabled={!loaded} onClick={() => runVrew(null)}>💾 .vrew</button>
             <button className="ghost" disabled={!loaded} onClick={() => api.openFolder()}>📁 출력폴더</button>

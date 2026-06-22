@@ -39,6 +39,8 @@ contextBridge.exposeInMainWorld('api', {
   listQueue: () => ipcRenderer.invoke('list-queue'),
   selectQueueItem: (id) => ipcRenderer.invoke('select-queue-item', { id }),
   removeQueueItem: (id) => ipcRenderer.invoke('remove-queue-item', { id }),
+  setQueueSettings: (settings) => ipcRenderer.invoke('set-queue-settings', { settings }),
+  runBatch: (args) => ipcRenderer.invoke('run-batch', args),
   setTitle: (args) => ipcRenderer.invoke('set-title', args),
   readAudio: (p) => ipcRenderer.invoke('read-audio', p),
   setAspect: (value) => ipcRenderer.invoke('set-aspect', value),

@@ -578,6 +578,7 @@ function queueDTO() {
         file: it.scriptPath ? path.basename(it.scriptPath) : '',
         projects: (it.parsed && it.parsed.projects) ? it.parsed.projects.length : 0,
         status: it.status || 'idle',
+        settings: it.settings || null, // 대본별 생성 설정(채널·스타일·배속·엔진·영상범위)
         active: it.id === q.activeId,
       })),
     };
@@ -1051,9 +1052,11 @@ ipcMain.handle('load-project', async () => {
 });
 
 // ⚡ 전체 만들기 — TTS + 이미지 동시 → I2V 영상 → .vrew → 출력폴더 열기
-ipcMain.handle('make-all', async (_e, args = {}) => {
+// 전체 제작 코어 — 현재 활성 대본(S.parsed/S.outRoot)에 대해 TTS→이미지→영상→.vrew.
+//   make-all(단건)·run-batch(순차 큐)가 공용. opts.openVrew/openFolder 로 자동열기 제어(큐 실행 시 끔).
+async function runMakeAllCore(opts = {}) {
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
-  const { shortsNum = null, engine = 'genspark', presetName = null, speed = null, captionStyle = null, captionMaxChars = 7, styleId = null, fromNum = null, toNum = null, dry = false, videoEngine = 'grok', flowVideoModel = 'Veo 3.1 - Lite', flowCount = 'x1', upscale = false } = args;
+  const { shortsNum = null, engine = 'genspark', presetName = null, speed = null, captionStyle = null, captionMaxChars = 7, styleId = null, fromNum = null, toNum = null, dry = false, videoEngine = 'grok', flowVideoModel = 'Veo 3.1 - Lite', flowCount = 'x1', openVrew = true, openFolder = true } = opts;
   const stylePrompt = styleId ? (require('./core/style-store').getPrompt(styleId) || '') : '';
   let preset = P.getPreset(presetName);
   // TTS 는 정속(1.0) — speed 값은 Vrew 배속(playbackRate)으로만 사용
@@ -1120,16 +1123,65 @@ ipcMain.handle('make-all', async (_e, args = {}) => {
       const res = await P.buildProjectVrew(pr, vrewPath, ep, log, captionMaxChars); // 배속은 음성에 이미 반영
       P.writeSrt(pr, path.join(dirs.subtitles, `${baseName}.srt`), captionMaxChars);
       log(`✓ ${pr.title}.vrew (clip ${res.clipCount})`);
-      shell.openPath(vrewPath);
+      if (openVrew) shell.openPath(vrewPath);
     } catch (e) { log(`vrew 실패: ${e.message}`); }
   }
   if (ttsMgr) { try { await ttsMgr.stop(); } catch {} }
   S.timings.make = (Date.now() - _makeT0) / 1000;
   pushDtoUpdate();
-  fs.mkdirSync(S.outRoot, { recursive: true });
-  shell.openPath(S.outRoot);
-  log(`⚡ 전체 제작 완료 (TTS ${S.timings.tts.toFixed(1)}s · 이미지 ${S.timings.image.toFixed(1)}s · 영상 ${S.timings.video.toFixed(1)}s · 전체 ${S.timings.make.toFixed(1)}s) — 출력폴더 열림`);
+  try { fs.mkdirSync(S.outRoot, { recursive: true }); } catch {}
+  if (openFolder) shell.openPath(S.outRoot);
+  log(`⚡ 전체 제작 완료 (TTS ${S.timings.tts.toFixed(1)}s · 이미지 ${S.timings.image.toFixed(1)}s · 영상 ${S.timings.video.toFixed(1)}s · 전체 ${S.timings.make.toFixed(1)}s)`);
+}
+
+ipcMain.handle('make-all', async (_e, args = {}) => {
+  await runMakeAllCore({ ...args, openVrew: true, openFolder: true });
   return P.toDTO(S.parsed);
+});
+
+// ── 큐 순차 제작 ── 교차 순서(L1→S1→L2→S2…)는 렌더러가 plan 으로 전달. 한 항목씩 runMakeAllCore.
+//   실패해도 해당 항목만 '실패' 표시 후 다음 진행. 자동열기는 끔(.vrew·폴더 폭주 방지).
+ipcMain.handle('run-batch', async (_e, args = {}) => {
+  const plan = Array.isArray(args.plan) ? args.plan : [];
+  const common = args.common || {};
+  if (!plan.length) throw new Error('실행할 대본이 큐에 없습니다.');
+  S.abort = false;
+  log(`⚡⚡ 큐 순차 제작 시작 — 총 ${plan.length}개`);
+  let okN = 0, failN = 0;
+  for (let i = 0; i < plan.length; i++) {
+    if (S.abort) { log('⏹ 큐 중단됨 — 남은 대본 보존'); break; }
+    const entry = plan[i] || {};
+    storeActive(); // 직전 항목 편집분 저장
+    S.mode = (entry.mode === 'longform') ? 'longform' : 'shorts';
+    const q = S.modes[S.mode];
+    const it = q.items.find((x) => x.id === entry.id);
+    if (!it) { log(`(건너뜀) 큐 항목 없음 [${i + 1}/${plan.length}]`); continue; }
+    q.activeId = it.id; syncActiveToS();
+    if (!S.parsed) { log(`(건너뜀) 대본 비어있음 [${i + 1}/${plan.length}]`); continue; }
+    it.status = 'running'; pushDtoUpdate();
+    const label = (S.parsed.fileTitle) || (it.scriptPath || '');
+    log(`▶ [${i + 1}/${plan.length}] ${S.mode === 'longform' ? '롱폼' : '쇼츠'} · ${label}`);
+    const s = entry.settings || {};
+    try {
+      await runMakeAllCore({
+        engine: s.imgEngine || 'genspark', presetName: s.presetName || null, speed: s.ttsSpeed || null,
+        styleId: s.styleId || null,
+        fromNum: (s.vidFrom != null && s.vidFrom !== '') ? parseInt(s.vidFrom, 10) : null,
+        toNum: (s.vidTo != null && s.vidTo !== '') ? parseInt(s.vidTo, 10) : null,
+        videoEngine: s.videoEngine || 'grok', flowVideoModel: s.flowVideoModel || 'Veo 3.1 - Lite', flowCount: s.flowCount || 'x1',
+        captionStyle: common.captionStyle || null, captionMaxChars: common.captionMaxChars || 7,
+        dry: false, openVrew: false, openFolder: false,
+      });
+      it.status = 'done'; okN++;
+    } catch (e) {
+      it.status = 'failed'; failN++;
+      log(`✗ 실패: ${label} — ${e.message} (다음 대본 계속)`);
+    }
+    pushDtoUpdate();
+  }
+  log(`⚡⚡ 큐 제작 종료 — 성공 ${okN} · 실패 ${failN}`);
+  try { if (S.outRoot) shell.openPath(S.outRoot); } catch {}
+  return { dto: S.parsed ? P.toDTO(S.parsed) : null, queue: queueDTO() };
 });
 
 const TITLE_FIELDS = new Set(['titleLine1', 'titleLine2', 't1Size', 't1Color', 't1Align', 't2Size', 't2Color', 't2Align',
@@ -1180,6 +1232,12 @@ ipcMain.handle('remove-queue-item', (_e, args = {}) => {
   scheduleAutoSave();
   log(`🗑 대본 제거 (남은 ${q.items.length}개)`);
   return { dto: S.parsed ? P.toDTO(S.parsed) : null, queue: queueDTO() };
+});
+// 활성 항목의 생성 설정 저장(대본별 개별). 렌더러 헤더 변경 시 디바운스로 전송.
+ipcMain.handle('set-queue-settings', (_e, args = {}) => {
+  const it = activeItem();
+  if (it) { it.settings = (args && args.settings) || null; scheduleAutoSave(); }
+  return true;
 });
 
 // 그룹 1개만 TTS 변환 (그 그룹의 문장들)
