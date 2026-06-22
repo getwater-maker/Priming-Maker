@@ -115,7 +115,16 @@ export default function App() {
     api.onDtoUpdate((d) => { if (d) { setDto(d); if (d.timings) setTimings(d.timings); if (d.queue) setQueue(d.queue); } });
     api.onAutosaved((info) => setAutoSavedAt((info && info.at) || Date.now()));
     loadPresets().then(loadStyles);
-    api.listQueue().then((q) => { if (q) setQueue(q); }).catch(() => {}); // 재로드(Ctrl+R) 시 큐 복원
+    // 시작/재로드 시 큐 복원 — 지난 세션 큐 + 활성 대본 화면 복구
+    api.listQueue().then((r) => {
+      if (!r) return;
+      if (r.queue) setQueue(r.queue);
+      if (r.mode) { setMode(r.mode); setAspect(r.mode === 'longform' ? '16:9' : '9:16'); }
+      if (r.dto) { setDto(r.dto); setFtitle(r.dto.fileTitle || ''); }
+      const m = r.mode || 'longform';
+      const it = r.queue && r.queue[m] && r.queue[m].items.find((x) => x.active);
+      if (it && it.settings) applySettings(it.settings);
+    }).catch(() => {});
     // 모드별 기본 음성배속을 mode-profiles 에서 가져와 현재 모드 기본값으로 세팅
     api.getModeProfiles().then((mp) => {
       if (!mp) return;

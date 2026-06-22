@@ -94,7 +94,7 @@ function addItem(parsed, scriptPath, outRoot, settings) {
   else { it = { id: newItemId(), parsed, scriptPath, outRoot, settings: settings || null, status: 'idle' }; q.items.push(it); }
   q.activeId = it.id;
   S.parsed = parsed; S.scriptPath = scriptPath; S.outRoot = outRoot;
-  scheduleAutoSave();
+  scheduleAutoSave(); writeWorkspace();
   return it;
 }
 // (Step1) 모드당 1개 유지 — 큐를 비우고 새 항목 1개로 교체. (Step2 에서 append 로 전환 예정)
@@ -181,13 +181,14 @@ app.whenReady().then(() => {
       return new Response('not found', { status: 404 });
     }
   });
+  try { restoreWorkspace(); } catch (e) { /* 큐 복원 실패는 무시 */ } // 지난 세션 작업 큐 복원
   createWindow();
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
   // 자동 업데이트는 bootstrap.js 의 auto-updater 모듈이 담당 (PrimingFlow 방식)
 });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
 app.on('before-quit', () => {
-  try { writeSnapshotSync(); } catch {} // 종료 직전 마지막 변경 보장
+  try { writeSnapshotSync(); writeWorkspace(); } catch {} // 종료 직전 마지막 변경·큐 구성 보장
   try { if (S.flowEng && S.flowEng.context) S.flowEng.context.close(); } catch {}
 });
 
@@ -277,27 +278,9 @@ ipcMain.handle('open-script', async (_e, args = {}) => {
   S.preset = preset;
   S.outRoot = computeOutRoot(scriptPath, preset, S.mode);
 
-  // ── 자동저장 복원 ── 같은 대본의 작업본(스냅샷)이 있으면 이어받기(구글독스식).
-  //   • 대본(.md)을 스냅샷 이후 수정하지 않았으면 → 작업본 전체 복원(이미지/음성/프롬프트 그대로).
-  //   • 대본을 수정했으면 → 새로 파싱한 위에 자산/프롬프트만 최대한 덮어쓰기(overlaySnapshot).
-  let restoreNote = '';
-  let snap = null;
-  try { const { file } = snapshotFile(); if (fs.existsSync(file)) snap = JSON.parse(fs.readFileSync(file, 'utf8')); } catch {}
-  const sameMode = snap && ((snap.mode === 'longform' ? 'longform' : 'shorts') === S.mode);
-  let mdMtime = 0; try { mdMtime = fs.statSync(scriptPath).mtimeMs; } catch {}
-  if (sameMode && snap.savedAt && snap.savedAt >= mdMtime) {
-    // 대본 수정 없음 → 작업본 그대로 이어받기
-    const projects = projectsFromSnapshot(snap);
-    for (const pr of projects) pr.mode = S.mode;
-    S.parsed = { fileTitle: snap.fileTitle, meta: snap.meta, projects, format: 'grouped', mode: S.mode };
-    restoreNote = `♻ 자동저장된 작업본을 이어서 불러왔습니다 (${new Date(snap.savedAt).toLocaleString()}).`;
-  } else {
-    S.parsed = P.parseScript(scriptPath, S.mode, presetThresholds(preset));
-    if (sameMode) {
-      const n = overlaySnapshot(S.parsed, snap);
-      if (n) restoreNote = `♻ 대본 수정 감지 — 새로 파싱 후 기존 자산 ${n}개 복원.`;
-    }
-  }
+  // 자동저장 복원 포함 파싱(구글독스식 이어받기)
+  const { parsed, note: restoreNote } = buildParsedForScript(scriptPath, S.mode, preset);
+  S.parsed = parsed;
   ensureDirs(S.outRoot); // media/tts/subtitles 먼저 생성
   // 큐에 추가(append) + 활성화. (이전 항목은 같은 객체 참조라 이미 최신 — storeActive 불필요)
   addItem(S.parsed, S.scriptPath, S.outRoot);
@@ -921,10 +904,30 @@ ipcMain.handle('bulk-attach', async (_e, args = {}) => {
 //   변경이 멈추면 1.5초 뒤(또는 변경이 계속돼도 최대 8초마다) 스냅샷을 디스크에 기록.
 //   임시파일→rename 으로 원자적 교체 → 쓰다 만 파일로 깨지지 않음.
 //   재열기 시 자동복원(open-script)되므로 사용자가 저장 버튼을 누르지 않아도 작업이 보존됨.
-function snapshotFile() {
+function snapshotFile(scriptPath) {
+  const sp = scriptPath || S.scriptPath;
   const projDir = path.join(os.homedir(), '.priming-maker', 'projects');
-  const base = P.sanitize(path.basename(S.scriptPath || 'project').replace(/\.md$/i, ''));
+  const base = P.sanitize(path.basename(sp || 'project').replace(/\.md$/i, ''));
   return { projDir, file: path.join(projDir, base + '.smproj.json') };
+}
+// 대본(.md) 1개 → parsed 빌드(+자동저장 스냅샷 복원). open-script·큐복원 공용.
+//   대본 미수정 → 작업본 그대로, 수정됨 → 새로 파싱 후 자산 overlay.
+function buildParsedForScript(scriptPath, mode, preset) {
+  let note = '', snap = null;
+  try { const { file } = snapshotFile(scriptPath); if (fs.existsSync(file)) snap = JSON.parse(fs.readFileSync(file, 'utf8')); } catch {}
+  const sameMode = snap && ((snap.mode === 'longform' ? 'longform' : 'shorts') === mode);
+  let mdMtime = 0; try { mdMtime = fs.statSync(scriptPath).mtimeMs; } catch {}
+  let parsed;
+  if (sameMode && snap.savedAt && snap.savedAt >= mdMtime) {
+    const projects = projectsFromSnapshot(snap);
+    for (const pr of projects) pr.mode = mode;
+    parsed = { fileTitle: snap.fileTitle, meta: snap.meta, projects, format: 'grouped', mode };
+    note = `♻ 작업본 이어받기 (${new Date(snap.savedAt).toLocaleString()})`;
+  } else {
+    parsed = P.parseScript(scriptPath, mode, presetThresholds(preset));
+    if (sameMode) { const n = overlaySnapshot(parsed, snap); if (n) note = `♻ 대본 수정 감지 — 기존 자산 ${n}개 복원`; }
+  }
+  return { parsed, note };
 }
 function buildSnapshot() {
   return {
@@ -970,7 +973,53 @@ function flushAutoSave() {
   if (_asTimer) { clearTimeout(_asTimer); _asTimer = null; }
   _asPendingSince = 0;
   const f = writeSnapshotSync();
+  writeWorkspace(); // 큐 구성(목록/설정/상태)도 함께 저장
   if (f && win && !win.isDestroyed()) { try { win.webContents.send('autosaved', { file: f, at: Date.now() }); } catch {} }
+}
+
+// ── 작업 큐(워크스페이스) 영속 ── 어떤 대본들이 적재됐는지(목록/설정/상태/활성)를 저장.
+//   대본 작업 내용 자체는 각 .smproj.json 에 있고, 여기엔 scriptPath·settings·status 만 기록.
+function workspaceFile() { return path.join(os.homedir(), '.priming-maker', 'workspace.json'); }
+function writeWorkspace() {
+  try {
+    const ser = (mode) => {
+      const q = S.modes[mode];
+      return { activeId: q.activeId, items: q.items.map((it) => ({ id: it.id, scriptPath: it.scriptPath, settings: it.settings || null, status: it.status || 'idle' })) };
+    };
+    const ws = { version: 1, mode: S.mode, longform: ser('longform'), shorts: ser('shorts') };
+    const f = workspaceFile(); const tmp = f + '.tmp';
+    fs.mkdirSync(path.dirname(f), { recursive: true });
+    fs.writeFileSync(tmp, JSON.stringify(ws, null, 2), 'utf8'); fs.renameSync(tmp, f);
+  } catch { /* ignore */ }
+}
+// 앱 시작 시 큐 복원 — 저장된 대본들을 다시 파싱(+작업본 복원)해 큐 재구성.
+function restoreWorkspace() {
+  try {
+    const f = workspaceFile(); if (!fs.existsSync(f)) return;
+    const ws = JSON.parse(fs.readFileSync(f, 'utf8')); if (!ws) return;
+    let restored = 0;
+    for (const mode of ['longform', 'shorts']) {
+      const wq = ws[mode]; if (!wq || !Array.isArray(wq.items)) continue;
+      const q = S.modes[mode]; let activeNewId = null;
+      for (const wi of wq.items) {
+        if (!wi.scriptPath || !fs.existsSync(wi.scriptPath)) continue; // 사라진 대본 skip
+        try {
+          const preset = (wi.settings && wi.settings.presetName) ? P.getPreset(wi.settings.presetName) : null;
+          const { parsed } = buildParsedForScript(wi.scriptPath, mode, preset);
+          for (const pr of parsed.projects) pr.mode = mode;
+          const outRoot = computeOutRoot(wi.scriptPath, preset, mode);
+          const it = { id: newItemId(), parsed, scriptPath: wi.scriptPath, outRoot, settings: wi.settings || null,
+            status: (wi.status === 'running' ? 'idle' : (wi.status || 'idle')) }; // 중단된 running 은 idle 로
+          q.items.push(it); restored++;
+          if (wi.id === wq.activeId) activeNewId = it.id;
+        } catch (e) { log(`큐 항목 복원 실패(${path.basename(wi.scriptPath)}): ${e.message}`); }
+      }
+      q.activeId = activeNewId || (q.items.length ? q.items[q.items.length - 1].id : null);
+    }
+    S.mode = (ws.mode === 'longform') ? 'longform' : 'shorts';
+    syncActiveToS();
+    if (restored) log(`♻ 작업 큐 복원: ${restored}개 대본 (${S.mode})`);
+  } catch (e) { log('큐 복원 실패: ' + (e && e.message)); }
 }
 // 스냅샷 JSON → Project[] 복원 (load-project / open-script 자동복원 공용)
 function projectsFromSnapshot(snap) {
@@ -1208,18 +1257,18 @@ ipcMain.handle('reset-project', () => {
   S.abort = false;
   const q = S.modes[S.mode]; if (q) { q.items = []; q.activeId = null; } // 현재 모드 큐 비움
   syncActiveToS(); // S.parsed=null
-  scheduleAutoSave();
+  scheduleAutoSave(); writeWorkspace();
   log(`🆕 초기화(${S.mode}) — 현재 모드 큐 비움`);
   return { dto: null, queue: queueDTO() };
 });
 
-// ── 작업 큐 ── 현재 모드의 적재 대본 목록 조회/선택/제거
-ipcMain.handle('list-queue', () => queueDTO());
+// ── 작업 큐 ── 현재 모드의 적재 대본 목록 조회/선택/제거. (mount 복원용 dto/mode 포함)
+ipcMain.handle('list-queue', () => ({ queue: queueDTO(), dto: S.parsed ? P.toDTO(S.parsed) : null, mode: S.mode }));
 ipcMain.handle('select-queue-item', (_e, args = {}) => {
   const id = args && args.id;
   const q = S.modes[S.mode];
   if (!q.items.find((x) => x.id === id)) return { dto: S.parsed ? P.toDTO(S.parsed) : null, queue: queueDTO() };
-  q.activeId = id; syncActiveToS();
+  q.activeId = id; syncActiveToS(); writeWorkspace();
   log(`↔ 대본 선택: ${(S.parsed && S.parsed.fileTitle) || ''}`);
   return { dto: S.parsed ? P.toDTO(S.parsed) : null, queue: queueDTO() };
 });
@@ -1229,14 +1278,14 @@ ipcMain.handle('remove-queue-item', (_e, args = {}) => {
   q.items = q.items.filter((x) => x.id !== id);
   if (q.activeId === id) q.activeId = q.items.length ? q.items[q.items.length - 1].id : null;
   syncActiveToS();
-  scheduleAutoSave();
+  scheduleAutoSave(); writeWorkspace();
   log(`🗑 대본 제거 (남은 ${q.items.length}개)`);
   return { dto: S.parsed ? P.toDTO(S.parsed) : null, queue: queueDTO() };
 });
 // 활성 항목의 생성 설정 저장(대본별 개별). 렌더러 헤더 변경 시 디바운스로 전송.
 ipcMain.handle('set-queue-settings', (_e, args = {}) => {
   const it = activeItem();
-  if (it) { it.settings = (args && args.settings) || null; scheduleAutoSave(); }
+  if (it) { it.settings = (args && args.settings) || null; scheduleAutoSave(); writeWorkspace(); }
   return true;
 });
 
@@ -1403,6 +1452,7 @@ ipcMain.handle('merge-groups', (_e, args = {}) => {
 ipcMain.handle('set-mode', (_e, args = {}) => {
   storeActive();                 // 현재 모드 작업물 보관
   activateMode(args.mode);       // 새 모드 것으로 전환
+  writeWorkspace();
   log(`↔ 모드 전환: ${S.mode}${S.parsed ? '' : ' (이 모드 대본 없음 — 대본을 여세요)'}`);
   return { dto: S.parsed ? P.toDTO(S.parsed) : null, queue: queueDTO() };
 });
