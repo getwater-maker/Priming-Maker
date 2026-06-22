@@ -312,22 +312,44 @@ async function generateImagesGenspark(project, imagesDir, logger, abortSignal, s
   const eng = new GensparkEngine({ profileId: 'default', logger: log });
   eng._aspectRatio = project.aspect || '9:16'; // 9:16 비율 강제 (config ratio override)
 
-  // Genspark 는 한 번 제출에 최대 6장 → 6개씩 묶어 배치 제출 (한 장씩 X).
+  // Genspark 는 한 번 제출에 최대 6장 → 6개씩 묶어 배치 제출.
+  //   배치가 6장 중 일부만 나오면 engine 이 순서 오매칭 방지로 통째 버림 → 여기서 재시도.
+  //   1) 배치 1회 → 2) 빠진 컷은 단건(1장)으로 재생성(매핑 안전·막힌 컷 격리). 단건도 MAX_SINGLE_TRY 회.
   const BATCH = 6;
+  const MAX_SINGLE_TRY = 2;
   const results = new Array(idx.length);
   try {
     for (let start = 0; start < idx.length; start += BATCH) {
       if (abortSignal && abortSignal()) break;
       const ps = prompts.slice(start, start + BATCH);
       const ops = outputPaths.slice(start, start + BATCH);
-      log(`[Genspark] 배치 ${start / BATCH + 1}: ${ps.length}장 한 번에 제출`);
-      // 저장되는 즉시 그룹에 매핑 → UI 갱신 (한 배치 안에서도 한 장씩 붙음)
-      const onSaved = (k, p) => {
+      const saved = new Array(ps.length).fill(null);
+      // 저장되는 즉시 그룹에 매핑 → UI 갱신
+      const mapSave = (k, p) => {
         const g = groups[idx[start + k]];
         if (g && p) { g.imagePath = p; g.imageStatus = 'done'; if (onProgress) { try { onProgress(); } catch {} } }
       };
-      const r = await eng.generateImagesBatch({ prompts: ps, outputPaths: ops, abortSignal: abortSignal || (() => false), onSaved });
-      for (let k = 0; k < ps.length; k++) results[start + k] = r[k];
+      log(`[Genspark] 배치 ${Math.floor(start / BATCH) + 1}: ${ps.length}장 한 번에 제출`);
+      const r = await eng.generateImagesBatch({ prompts: ps, outputPaths: ops, abortSignal: abortSignal || (() => false), onSaved: mapSave });
+      for (let k = 0; k < ps.length; k++) if (r[k] && r[k].path) saved[k] = r[k];
+
+      // 빠진 컷 → 단건 재생성 (6장이 다 나올 때까지)
+      const missing = [];
+      for (let k = 0; k < ps.length; k++) if (!(saved[k] && saved[k].path)) missing.push(k);
+      if (missing.length && !(abortSignal && abortSignal())) {
+        log(`[Genspark] ⚠ 배치 미완료 — 빠진 ${missing.length}장을 단건으로 재생성`);
+        for (const k of missing) {
+          if (abortSignal && abortSignal()) break;
+          for (let attempt = 1; attempt <= MAX_SINGLE_TRY; attempt++) {
+            log(`[Genspark] 단건 재생성 G${groups[idx[start + k]].num} (시도 ${attempt}/${MAX_SINGLE_TRY})`);
+            const rr = await eng.generateImagesBatch({ prompts: [ps[k]], outputPaths: [ops[k]], abortSignal: abortSignal || (() => false), onSaved: (_kk, p) => mapSave(k, p) });
+            if (rr[0] && rr[0].path) { saved[k] = rr[0]; break; }
+            if (attempt < MAX_SINGLE_TRY) log(`[Genspark] G${groups[idx[start + k]].num} 단건 실패 — 재시도`);
+          }
+          if (!(saved[k] && saved[k].path)) log(`[Genspark] ✗ G${groups[idx[start + k]].num} 최종 실패 — 프롬프트가 막혔을 수 있음(순화 권장)`);
+        }
+      }
+      for (let k = 0; k < ps.length; k++) results[start + k] = saved[k] || { error: '생성 실패(재시도 소진)' };
     }
   } finally {
     try { await eng.stop(); } catch {}
