@@ -69,6 +69,7 @@ export default function App() {
   const [ftitle, setFtitle] = useState('');
   const [status, setStatus] = useState('');
   const [autoSavedAt, setAutoSavedAt] = useState(0); // 마지막 자동저장 시각(ms)
+  const [appVersion, setAppVersion] = useState(''); // 앱 버전 (타이틀 표시)
   const [logText, setLogText] = useState('');
   const [logCollapsed, setLogCollapsed] = useState(false);
 
@@ -135,6 +136,7 @@ export default function App() {
     api.onLog((line) => logline(line));
     api.onDtoUpdate((d) => { if (d) { setDto(d); if (d.timings) setTimings(d.timings); if (d.queue) setQueue(d.queue); } });
     api.onAutosaved((info) => setAutoSavedAt((info && info.at) || Date.now()));
+    api.getAppVersion().then((v) => { if (v) setAppVersion(v); }).catch(() => {});
     loadPresets().then(loadStyles);
     // 시작/재로드 시 큐 복원 — 지난 세션 큐 + 활성 대본 화면 복구
     api.listQueue().then((r) => {
@@ -850,7 +852,7 @@ export default function App() {
         {/* 상단 행 — 1영역(좌: 타이틀·모드·채널·대본) | 2영역(우: 배속·TTS·이미지·영상 생성컨트롤) */}
         <div className="hrow">
           <div className="hleft">
-            <h1>🎬 Priming</h1>
+            <h1>🎬 Priming{appVersion ? <span className="ver">v{appVersion}</span> : null}</h1>
             <span className="modetoggle">
               <button className={isLf ? 'active' : ''} onClick={() => switchMode('longform')}>롱폼 16:9</button>
               <button className={!isLf ? 'active' : ''} onClick={() => switchMode('shorts')}>쇼츠 9:16</button>
@@ -882,6 +884,7 @@ export default function App() {
               <option value="grok10">Grok(10초)</option><option value="grok">Grok(6초)</option><option value="flow">Flow(8초)</option><option value="comfy">ComfyUI(LTX)</option>
             </select>
             {videoEngine === 'comfy' && <button className="ghost" title="ComfyUI i2v 설정" style={{ padding: '6px 9px' }} onClick={openComfy}>⚙ Comfy</button>}
+            {(videoEngine === 'grok10' || videoEngine === 'grok') && <button className="ghost" title="Grok(X) 멀티계정 등록·로그인·한도" style={{ padding: '6px 9px' }} onClick={openGrokAcc}>⚙ 계정</button>}
             {videoEngine === 'flow' && (
               <span title="Flow 영상 옵션">
                 <select style={{ width: 'auto' }} value={flowVideoModel} onChange={(e) => setFlowVideoModel(e.target.value)}>

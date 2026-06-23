@@ -195,6 +195,8 @@ app.on('before-quit', () => {
 
 const log = (line) => { if (win && !win.isDestroyed()) win.webContents.send('log', String(line)); };
 
+ipcMain.handle('get-app-version', () => { try { return app.getVersion(); } catch { return ''; } });
+
 ipcMain.handle('list-presets', () => {
   try { return P.listPresets(); } catch (e) { return []; }
 });

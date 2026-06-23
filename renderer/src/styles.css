@@ -85,6 +85,7 @@ main{flex:1;overflow:auto;padding:14px 16px}
 .genoverlay .spin{width:30px;height:30px;border:3px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin 1s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 .autosave-ind{font-size:11px;color:#7a8a6a;align-self:center;white-space:nowrap;margin-left:2px}
+h1 .ver{font-size:11px;font-weight:600;color:#a89878;margin-left:6px;vertical-align:middle}
 .dur.over{color:#c0392b;font-weight:800}
 .gprev.split{color:#c0392b;border-color:#e0a0a0;font-weight:700}
 .gprev.split:hover{background:#fbeaea}
