@@ -160,7 +160,15 @@ function parseShortsBlockGrouped(lines) {
     }
   }
 
-  return { hookCaption, groups };
+  // 훅 자막을 슬래시(/)로 2줄 분할 → titleLine1/titleLine2 (첫 프레임 제목 2줄 렌더)
+  let titleLine1 = null, titleLine2 = null, caption = hookCaption;
+  if (hookCaption && hookCaption.includes('/')) {
+    const i = hookCaption.indexOf('/');
+    titleLine1 = hookCaption.slice(0, i).trim();
+    titleLine2 = hookCaption.slice(i + 1).trim();
+    caption = (titleLine1 + ' ' + titleLine2).trim();
+  }
+  return { hookCaption: caption, titleLine1, titleLine2, groups };
 }
 
 function buildProjectModelGrouped(groupsData) {

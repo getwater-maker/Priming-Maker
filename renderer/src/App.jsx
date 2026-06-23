@@ -62,6 +62,7 @@ export default function App() {
   const [capYAlign, setCapYAlign] = useState('bottom'); // 세로 기준 (middle/bottom/top) — 모드별
   const [capChars, setCapChars] = useState(7);
   const [ttsSpeed, setTtsSpeed] = useState('1.15');
+  const [aiNotice, setAiNotice] = useState(false); // 쇼츠 AI 고지: 기본 OFF (롱폼은 항상 표시·필수)
   const [modeProfiles, setModeProfiles] = useState(null); // mode-profiles.js (음성배속 등 모드 기본값 출처)
   // 롱폼 분할옵션(도입부/본론/짧은/긴) — 프리셋에서 초기화, capbar 패널에서 조절 시 재분할.
   const [splitOpts, setSplitOpts] = useState({ intro: 3, main: 10, short: 10, long: 20, mode: 'h3' });
@@ -71,7 +72,7 @@ export default function App() {
   const [autoSavedAt, setAutoSavedAt] = useState(0); // 마지막 자동저장 시각(ms)
   const [appVersion, setAppVersion] = useState(''); // 앱 버전 (타이틀 표시)
   const [logText, setLogText] = useState('');
-  const [logCollapsed, setLogCollapsed] = useState(false);
+  const [logCollapsed, setLogCollapsed] = useState(true); // 최소화로 시작 — 로그바 클릭 시 펼침
 
   // 모달/플레이어 상태
   const [chOpen, setChOpen] = useState(false);
@@ -175,6 +176,7 @@ export default function App() {
       setTtsSpeed(String(sp != null ? sp : (prof.defaultTtsSpeed != null ? prof.defaultTtsSpeed : 1.0)));
       const st = mode === 'longform' ? p.styleLong : p.styleShort;
       setStyleId(st || p.styleId || 'chibi');
+      setAiNotice(mode === 'longform'); // AI 고지 기본값: 롱폼 ON · 쇼츠 OFF (사용자가 토글로 변경)
       const sl = p.split || { introSentenceSize: p.introSentenceSize, mainSentenceSize: p.mainSentenceSize, shortLen: p.shortLen, longLen: p.longLen };
       setSplitOpts({ intro: sl.introSentenceSize || 3, main: sl.mainSentenceSize || 10, short: sl.shortLen || 10, long: sl.longLen || 20, mode: sl.splitMode === 'sentence' ? 'sentence' : 'h3' });
     }).catch(() => {});
@@ -251,7 +253,7 @@ export default function App() {
   // ── 액션 핸들러 ──────────────────────────────────────────
   // 대본별 생성 설정 묶음(채널·스타일·배속·엔진·영상범위) — 큐 항목마다 개별 저장.
   function currentSettings() {
-    return { presetName, styleId, ttsSpeed, imgEngine, videoEngine, vidFrom, vidTo, flowVideoModel, flowCount };
+    return { presetName, styleId, ttsSpeed, imgEngine, videoEngine, vidFrom, vidTo, flowVideoModel, flowCount, aiNotice };
   }
   function applySettings(s) {
     if (!s) return;
@@ -264,6 +266,7 @@ export default function App() {
     if (s.vidTo != null) setVidTo(s.vidTo);
     if (s.flowVideoModel != null) setFlowVideoModel(s.flowVideoModel);
     if (s.flowCount != null) setFlowCount(s.flowCount);
+    if (s.aiNotice != null) setAiNotice(!!s.aiNotice);
   }
   async function openScript() {
     const r = await api.openScript({ presetName: presetName || null, mode });
@@ -318,6 +321,7 @@ export default function App() {
       captionStyle: capOverride(), captionMaxChars: effCap, styleId: styleId || null,
       fromNum: parseInt(vidFrom, 10) || 1, toNum: parseInt(vidTo, 10) || 1,
       dry: false, videoEngine, clipMaxSec: _clipMaxSec(), flowVideoModel, flowCount,
+      aiNotice, // 양쪽 모드 사용자 선택 (기본값 롱폼 ON / 쇼츠 OFF 는 토글이 보유)
     };
     if (!ensurePromptsFilled(shortsNum, { image: 'all', video: 'range' })) return; // 만들기=전체 이미지 + 범위 i2v
     setStatus('⚡ 전체 제작중… (TTS+이미지→영상→.vrew)');
@@ -348,7 +352,7 @@ export default function App() {
   }
   async function runVrew(shortsNum) {
     setStatus('.vrew 내보내는 중…');
-    try { const r = await api.exportVrew({ shortsNum, presetName: presetName || null, captionStyle: capOverride(), captionMaxChars: effCap }); setStatus(`.vrew ${r.outs.length}개`); }
+    try { const r = await api.exportVrew({ shortsNum, presetName: presetName || null, captionStyle: capOverride(), captionMaxChars: effCap, aiNotice }); setStatus(`.vrew ${r.outs.length}개`); }
     catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
   }
   async function attachAsset(shortsNum, groupNum) {
@@ -824,7 +828,7 @@ export default function App() {
     const t = setTimeout(() => { api.setQueueSettings(currentSettings()).catch(() => {}); }, 300);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [presetName, styleId, ttsSpeed, imgEngine, videoEngine, vidFrom, vidTo, flowVideoModel, flowCount]);
+  }, [presetName, styleId, ttsSpeed, imgEngine, videoEngine, vidFrom, vidTo, flowVideoModel, flowCount, aiNotice]);
 
   async function copyLog() {
     try { await navigator.clipboard.writeText(logText || ''); setStatus('로그 복사됨'); }
@@ -933,6 +937,7 @@ export default function App() {
         <span className="grow" />
         {splitBar}
         {!isLf && <button className="ghost" title="TTS 후 캡 미만 그룹들을 한 그룹으로 합치기" onClick={mergeGroups}>🔗 합치기</button>}
+        <label className="chk" title="AI 고지 자막 — 체크 시 .vrew 에 삽입. 기본값: 롱폼 표시 · 쇼츠 미표시 (언제든 변경 가능)" style={{ display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" style={{ width: 'auto' }} checked={aiNotice} onChange={(e) => setAiNotice(e.target.checked)} />AI 고지</label>
         <span className="hdiv" />
         <span className="worktimes" title="진행률(완료/전체) · 괄호=마지막 작업 소요시간">
           ⏱ TTS {prog.ttsD}/{prog.ttsT} ({fmtSec(timings.tts)}) · 이미지 {prog.imgD}/{prog.imgT} ({fmtSec(timings.image)}) · 영상 {prog.vidD}/{prog.vidT} ({fmtSec(timings.video)}) · <b>합계 {fmtSec(timings.tts + timings.image + timings.video)}</b>
@@ -1041,7 +1046,7 @@ export default function App() {
             <div className="frow"><label>롱폼 출력</label><input placeholder="롱폼 .vrew 출력 폴더" value={ch.outLong} onChange={(e) => setCh({ ...ch, outLong: e.target.value })} /><button className="ghost" style={{ flex: '0 0 auto' }} onClick={pickOutLong}>찾기</button></div>
             <div className="frow"><label>쇼츠 출력</label><input placeholder="쇼츠 .vrew 출력 폴더" value={ch.outShort} onChange={(e) => setCh({ ...ch, outShort: e.target.value })} /><button className="ghost" style={{ flex: '0 0 auto' }} onClick={pickOutShort}>찾기</button></div>
             <div className="frow"><label>Gemini 키</label><input placeholder="제미나이 음성용 API 키" value={ch.gemini} onChange={(e) => setCh({ ...ch, gemini: e.target.value })} /></div>
-            <div className="frow chk"><label>AI 고지</label><input type="checkbox" style={{ flex: '0 0 auto', width: 'auto' }} checked={ch.aiNotice} onChange={(e) => setCh({ ...ch, aiNotice: e.target.checked })} /> <span className="meta">쇼츠 선택사항 · <b>롱폼은 항상 표시(필수)</b></span></div>
+            <div className="frow chk"><label>AI 고지</label><input type="checkbox" style={{ flex: '0 0 auto', width: 'auto' }} checked={ch.aiNotice} onChange={(e) => setCh({ ...ch, aiNotice: e.target.checked })} /> <span className="meta">실제 표시는 작업바의 <b>'AI 고지'</b> 토글로 결정 — 기본값 <b>롱폼 표시 · 쇼츠 미표시</b> (언제든 변경)</span></div>
             <div className="mbtns"><button onClick={saveChannel}>저장</button><button className="ghost" onClick={() => setChOpen(false)}>취소</button></div>
           </div>
         </div>
@@ -1051,8 +1056,12 @@ export default function App() {
         <div className="modal-bg show" onClick={(e) => { if (e.target.classList.contains('modal-bg')) setComfyOpen(false); }}>
           <div className="modal-card">
             <h3>⚙ ComfyUI 설정 (SDXL 이미지 · LTX 영상)</h3>
-            <div className="meta" style={{ marginBottom: 8 }}>로컬 PC 또는 RunPod 의 ComfyUI 주소. RunPod 전환 시 <b>서버 주소만</b> 바꾸면 됩니다.</div>
-            <div className="frow"><label>서버 주소</label><input placeholder="http://127.0.0.1:8188" value={comfy.baseUrl} onChange={(e) => setComfy({ ...comfy, baseUrl: e.target.value })} /><button className="ghost" style={{ flex: '0 0 auto' }} onClick={testComfyConn}>연결테스트</button></div>
+            <div className="meta" style={{ marginBottom: 8 }}>로컬 PC / RunPod / <b>ComfyUI 클라우드(comfy.org)</b>. 클라우드는 GPU·설치 불필요 — 체크 후 API 키만 넣으면 됩니다.</div>
+            <div className="frow"><label>클라우드 모드</label><label style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1 }}><input type="checkbox" style={{ width: 'auto' }} checked={!!comfy.cloud} onChange={(e) => setComfy({ ...comfy, cloud: e.target.checked, baseUrl: e.target.checked && /127\.0\.0\.1|localhost/.test(comfy.baseUrl || '') ? 'https://cloud.comfy.org' : comfy.baseUrl })} /><span className="meta">comfy.org 공식 클라우드 사용 (Standard 이상 구독 필요)</span></label></div>
+            {comfy.cloud && (
+              <div className="frow"><label>API 키</label><input type="password" placeholder="X-API-Key (계정 대시보드에서 발급)" value={comfy.apiKey || ''} onChange={(e) => setComfy({ ...comfy, apiKey: e.target.value })} /></div>
+            )}
+            <div className="frow"><label>서버 주소</label><input placeholder={comfy.cloud ? 'https://cloud.comfy.org' : 'http://127.0.0.1:8188'} value={comfy.baseUrl} onChange={(e) => setComfy({ ...comfy, baseUrl: e.target.value })} /><button className="ghost" style={{ flex: '0 0 auto' }} onClick={testComfyConn}>연결테스트</button></div>
             <div className="subhead">🖼 이미지 (SDXL t2i)</div>
             <div className="frow"><label>SDXL 체크포인트</label><input placeholder="dreamshaperXL_sfwLightningDPMSDE.safetensors" value={comfy.imageCheckpoint || ''} onChange={(e) => setComfy({ ...comfy, imageCheckpoint: e.target.value })} /></div>
             <div className="frow"><label>스텝/CFG</label><input className="n" type="number" style={{ width: 60 }} value={comfy.imageSteps} onChange={(e) => setComfy({ ...comfy, imageSteps: e.target.value })} /><input className="n" type="number" step="0.5" style={{ width: 60 }} value={comfy.imageCfg} onChange={(e) => setComfy({ ...comfy, imageCfg: e.target.value })} /><span className="meta">Lightning 기본 8 / 2 (dpmpp_sde·karras)</span></div>
@@ -1122,7 +1131,7 @@ export default function App() {
         <div className="modal-bg show" onClick={(e) => { if (e.target.classList.contains('modal-bg')) setImgRotOpen(false); }}>
           <div className="modal-card">
             <h3>⚙ 이미지 순환 설정</h3>
-            <div className="meta" style={{ marginBottom: 8 }}>위에서부터 순서대로 시도하고, 한 엔진이 <b>한도</b>(Genspark 5시간/일일캡, Flow 계정한도)에 걸리면 <b>다음 엔진</b>이 남은 이미지를 이어 만듭니다. 체크 해제 시 순환에서 제외. (ComfyUI는 순환과 별개 단독)</div>
+            <div className="meta" style={{ marginBottom: 8 }}>위에서부터 순서대로 시도하고, 한 엔진이 <b>한도</b>(Genspark가 보내는 휴식/한도 메시지, Flow 계정한도)에 걸리면 <b>다음 엔진</b>이 남은 이미지를 이어 만듭니다. 체크 해제 시 순환에서 제외. (ComfyUI는 순환과 별개 단독)</div>
             <div style={{ margin: '8px 0' }}>
               {(imgRot.order || []).map((id, i) => (
                 <div key={id} className="frow" style={{ alignItems: 'center', gap: 4 }}>
@@ -1166,13 +1175,13 @@ export default function App() {
           <div className="modal-card">
             <h3>⚙ Genspark 멀티계정</h3>
             <div className="meta" style={{ marginBottom: 8 }}>계정마다 <b>🔑 로그인</b>으로 한 번씩 로그인(쿠키 저장). 생성 시 한도 안 찬 계정부터, 한도 도달 시 다음 계정으로.</div>
-            <div className="frow"><label>일일 한도</label><input className="n" type="number" style={{ width: 70 }} value={gsAcc.dailyCap} onChange={(e) => changeGsCap(e.target.value)} /><span className="meta">계정당 하루 생성 상한</span></div>
+            <div className="frow"><label>일일 한도</label><input className="n" type="number" min="0" style={{ width: 70 }} value={gsAcc.dailyCap} onChange={(e) => changeGsCap(e.target.value)} /><span className="meta">계정당 하루 생성 상한 · <b>0 = 무제한</b> (Genspark 자체 한도 메시지로만 Flow 전환)</span></div>
             <div style={{ margin: '8px 0' }}>
               {gsAcc.accounts.map((a) => (
                 <div key={a.id} className="frow" style={{ alignItems: 'center' }}>
                   <span style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 6 }}>
                     <input defaultValue={a.label} onBlur={(e) => renameGsAcc(a.id, e.target.value)} title="이름 수정 후 다른 곳 클릭" style={{ flex: '0 0 120px', fontWeight: 700 }} />
-                    <span className="meta">(오늘 {a.used}/{gsAcc.dailyCap})</span>
+                    <span className="meta">(오늘 {a.used}/{gsAcc.dailyCap > 0 ? gsAcc.dailyCap : '무제한'})</span>
                   </span>
                   <button className="ghost" style={{ flex: '0 0 auto' }} onClick={() => gsLogin(a.id)}>🔑 로그인</button>
                   {a.id !== 'default' && <button className="ghost" style={{ flex: '0 0 auto' }} title="계정 삭제" onClick={() => removeGsAcc(a.id)}>✕</button>}

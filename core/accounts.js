@@ -18,9 +18,11 @@ function _today() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-function makeAccountStore(service, idPrefix) {
+// defaultCap: 서비스별 기본 일일 한도. 0(또는 음수) = 무제한(앱이 막지 않고 엔진의 실제 한도 감지에만 의존).
+//   Flow/Grok 은 45(구글·X 차단 예방), Genspark 은 0(Genspark 자체 한도 메시지로만 전환).
+function makeAccountStore(service, idPrefix, defaultCap = 45) {
   const FILE = path.join(DIR, `${service}-accounts.json`);
-  const DEFAULTS = { accounts: [], dailyCap: 45, counts: {} };
+  const DEFAULTS = { accounts: [], dailyCap: defaultCap, counts: {} };
   const prefix = idPrefix || service;
 
   function load() {
@@ -64,7 +66,9 @@ function makeAccountStore(service, idPrefix) {
   }
   function setCap(n) {
     const c = load();
-    c.dailyCap = Math.max(1, parseInt(n, 10) || 45);
+    const v = parseInt(n, 10);
+    // 0 = 무제한 허용. 음수/비정상은 서비스 기본값으로.
+    c.dailyCap = (Number.isFinite(v) && v >= 0) ? v : defaultCap;
     save(c);
     return c.dailyCap;
   }
@@ -79,12 +83,15 @@ function makeAccountStore(service, idPrefix) {
   }
   function pickActive() {
     const c = load();
-    for (const a of _accounts(c)) { if (countToday(c, a.id) < c.dailyCap) return a; }
+    const unlimited = !(c.dailyCap > 0); // dailyCap<=0 → 앱 캡 무제한
+    for (const a of _accounts(c)) { if (unlimited || countToday(c, a.id) < c.dailyCap) return a; }
     return null;
   }
   // 오늘 한도 안 찬 계정들(순서대로) — 순환에서 한 계정 소진 시 다음 계정으로.
+  //   dailyCap<=0(무제한)이면 항상 모든 계정 활성 — 엔진이 실제 한도 메시지를 감지할 때만 전환.
   function activeAccounts() {
     const c = load();
+    if (!(c.dailyCap > 0)) return _accounts(c);
     return _accounts(c).filter((a) => countToday(c, a.id) < c.dailyCap);
   }
 

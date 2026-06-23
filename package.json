@@ -13,7 +13,9 @@
     "build:shorts": "node build-shorts.js",
     "pack": "vite build && electron-builder --win --dir",
     "dist": "vite build && electron-builder --win nsis --x64 --publish never",
-    "release": "vite build && electron-builder --win nsis --x64 --publish always"
+    "release": "vite build && electron-builder --win nsis --x64 --publish always",
+    "update:manifest": "node scripts/gen-manifest.js",
+    "update:publish": "vite build && node scripts/gen-manifest.js"
   },
   "dependencies": {
     "adm-zip": "^0.5.17",
@@ -33,7 +35,8 @@
     "appId": "com.user.priming",
     "productName": "Priming",
     "artifactName": "${productName}-Setup-${version}.${ext}",
-    "asar": true,
+    "_comment_asar": "라이트 자동 업데이트(light-updater)로 설치폴더의 개별 파일을 교체하므로 asar 비활성(asar 안에 있으면 파일 단위 교체 불가).",
+    "asar": false,
     "files": [
       "**/*",
       "!renderer/src/**/*",

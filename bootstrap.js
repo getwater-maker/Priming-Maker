@@ -14,11 +14,14 @@ try {
   app.commandLine.appendSwitch('disk-cache-dir', path.join(dataDir, 'electron', 'cache'));
 } catch (_) {}
 
-require('./main.js');
-
-// 자동 업데이트 체크 등록 (패키징된 앱에서만 동작 — main.js 의 app.whenReady 처리 후 5초 뒤)
-try {
-  require('./auto-updater').setupAutoUpdater();
-} catch (err) {
-  process.stderr.write(`[auto-updater] setup failed: ${err && err.stack ? err.stack : err}\n`);
-}
+// 라이트 자동 업데이트 — main.js 를 로드하기 "전에" 변경된 파일만 받아 교체.
+//   → 이번 실행이 곧바로 최신 코드로 동작 (팝업·NSIS 인스톨·재시작 단계 없음).
+//   오프라인/실패면 조용히 현재 버전으로 진행. dev(npm start)에선 자동 건너뜀.
+(async () => {
+  try {
+    await require('./light-updater').applyUpdates();
+  } catch (err) {
+    process.stderr.write(`[updater] setup failed: ${err && err.stack ? err.stack : err}\n`);
+  }
+  require('./main.js');
+})();

@@ -457,12 +457,28 @@ async function generateHookVideosGrok(project, videoDir, logger, abortSignal, vi
       }
       g.videoStatus = 'generating';
       if (onProgress) { try { onProgress(); } catch {} } // '영상 변환 중' 배지 즉시 표시
-      const res = await eng.generateVideoFromImage({
-        imagePath: g.imagePath,
-        prompt: g.videoPrompt || g.motionNote || g.videoMotionPrompt || null, // 없으면 Grok 기본 모션
-        outputPath,
-        abortSignal: abortSignal || (() => false),
-      });
+      // 영상 생성 — 실패(진입 타임아웃 등) 시 브라우저를 새로 띄워 1회 자동 재시도.
+      //   generateVideoFromImage 가 예외를 던져도 여기서 잡아 {success:false} 로 처리 →
+      //   한 그룹 실패가 쇼츠 전체를 중단시키지 않고, 배지가 'generating' 에 고착되지 않음.
+      const ATTEMPTS = 2; // 1회 + 재시도 1회
+      let res = null;
+      for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
+        try {
+          res = await eng.generateVideoFromImage({
+            imagePath: g.imagePath,
+            prompt: g.videoPrompt || g.motionNote || g.videoMotionPrompt || null, // 없으면 Grok 기본 모션
+            outputPath,
+            abortSignal: abortSignal || (() => false),
+          });
+        } catch (e) {
+          res = { success: false, error: e && e.message ? e.message : String(e) };
+        }
+        if ((res && res.success && res.videoPath) || (abortSignal && abortSignal())) break;
+        if (attempt < ATTEMPTS) {
+          log(`↻ 그룹${g.num} 영상 재시도 (${attempt}/${ATTEMPTS - 1}) — 이전 실패: ${res && res.error}`);
+          try { await eng.stop(); } catch {} // 브라우저 정리 → 다음 시도에서 start() 새로 진입
+        }
+      }
       if (res && res.success && res.videoPath) {
         g.videoPath = res.videoPath;
         g.videoSourceImage = g.imagePath;
@@ -473,7 +489,7 @@ async function generateHookVideosGrok(project, videoDir, logger, abortSignal, vi
         g.videoStatus = 'fail';
         log(`✗ 그룹${g.num} 영상 실패: ${res && res.error}`);
       }
-      results.push({ num: g.num, ...res });
+      results.push({ num: g.num, ...(res || { success: false }) });
       if (onProgress) { try { onProgress(); } catch {} } // 그룹별 영상 완성 시 UI 갱신
     }
   } finally {

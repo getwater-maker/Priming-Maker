@@ -1,6 +1,6 @@
 node_modules/
 output/
-dist/
+/dist/
 lora-dataset/
 *.log
 *.vrew

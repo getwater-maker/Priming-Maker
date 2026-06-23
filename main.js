@@ -41,15 +41,18 @@ function presetThresholds(preset) {
 }
 // 영상 엔진 → Grok 클립 길이 ('grok10'→10s, 그 외 grok→6s)
 function grokDurOf(engine) { return engine === 'grok10' ? '10s' : '6s'; }
-// 롱폼은 AI 고지 필수 — preset 에 강제로 enabled. (기본 문구 보장)
-function forceAiNoticeIfLongform(preset) {
-  if (currentMode() !== 'longform' || !preset) return preset;
-  // 롱폼: AI 고지 필수 + 5초 후 5초간 표시 (preset 값보다 우선하도록 뒤에 둠).
-  return { ...preset, aiNotice: {
-    text: '본 영상의 음성과 이미지는 AI 도구를 활용하여 제작되었습니다.',
-    ...(preset.aiNotice || {}),
-    enabled: true, startMode: 'seconds', startSeconds: 5, durationSeconds: 5,
-  } };
+// 영상 엔진별 그룹 캡(초) — renderer _clipMaxSec 와 동일 (flow 8 / grok10 10 / comfy 8 / 그 외 grok 6).
+function clipMaxOf(videoEngine) { return videoEngine === 'flow' ? 8.0 : videoEngine === 'grok10' ? 10.0 : videoEngine === 'comfy' ? 8.0 : 6.0; }
+// AI 고지 결정 — 양쪽 모드 모두 사용자 선택(want)을 따른다. 기본값(롱폼 ON / 쇼츠 OFF)은 렌더러가 정함.
+//   롱폼은 켜면 5초 후 5초간 표시(기존 타이밍 유지). 쇼츠는 preset 의 타이밍을 그대로 사용.
+const AI_NOTICE_TEXT = '본 영상의 음성과 이미지는 AI 도구를 활용하여 제작되었습니다.';
+function resolveAiNotice(preset, want) {
+  if (!preset) return preset;
+  const base = { text: AI_NOTICE_TEXT, ...(preset.aiNotice || {}) };
+  if (currentMode() === 'longform') {
+    return { ...preset, aiNotice: { ...base, enabled: !!want, startMode: 'seconds', startSeconds: 5, durationSeconds: 5 } };
+  }
+  return { ...preset, aiNotice: { ...base, enabled: !!want } };
 }
 
 // 로컬 이미지/영상 미리보기용 커스텀 프로토콜 (app ready 전에 등록 필요)
@@ -405,16 +408,23 @@ ipcMain.handle('tts-build', async (_e, args = {}) => {
 
 ipcMain.handle('export-vrew', async (_e, args = {}) => {
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
-  const { shortsNum = null, presetName = null, captionStyle = null, captionMaxChars = 7 } = args;
+  const { shortsNum = null, presetName = null, captionStyle = null, captionMaxChars = 7, aiNotice = false } = args;
   try { fs.mkdirSync(S.outRoot, { recursive: true }); } catch {}
   let preset = S.preset || P.getPreset(presetName);
   if (preset && captionStyle) {
     preset = { ...preset, captionStyle: { ...(preset.captionStyle || {}), ...captionStyle } };
   }
-  preset = forceAiNoticeIfLongform(preset); // 롱폼 AI 고지 필수
+  preset = resolveAiNotice(preset, aiNotice); // 롱폼=항상 / 쇼츠=사용자 선택
   const outs = [];
+  const incomplete = [];
   for (const pr of S.parsed.projects) {
     if (shortsNum && pr.shortsNum !== shortsNum) continue;
+    const miss = missingVisualGroups(pr);
+    if (miss.length) {
+      incomplete.push({ label: prLabel(pr), nums: miss });
+      log(`⛔ ${prLabel(pr)} — 이미지 미생성 그룹 ${miss.length}개 (G${miss.join(', G')}) → .vrew 건너뜀`);
+      continue;
+    }
     const dirs = shortsDirs(S.outRoot, pr.shortsNum);
     const baseName = vrewBaseName(pr);
     const vrewPath = path.join(S.outRoot, `${baseName}.vrew`);
@@ -428,6 +438,7 @@ ipcMain.handle('export-vrew', async (_e, args = {}) => {
       log(`✗ ${prLabel(pr)} 실패: ${e.message}`);
     }
   }
+  warnIncompleteVisuals(incomplete);
   return { outRoot: S.outRoot, outs };
 });
 
@@ -466,6 +477,17 @@ function getFlowEng(profileDir) {
   S.flowEng = new FlowAutomator(win, profileDir);
   S.flowEngProfileDir = profileDir;
   return S.flowEng;
+}
+// Flow 크롬 창을 닫고 정리 — 작업(이미지/영상 생성)이 끝나면 호출해 창을 남기지 않는다.
+//   (재사용은 한 번의 만들기 실행 안에서만. 다음 실행은 getFlowEng 가 새로 띄움.)
+async function closeFlowEng() {
+  const eng = S.flowEng;
+  if (!eng) return;
+  S.flowEng = null; S.flowEngProfileDir = null;
+  try {
+    if (typeof eng._closeContextAndCleanup === 'function') await eng._closeContextAndCleanup('작업 완료');
+    else if (eng.context) await eng.context.close();
+  } catch {}
 }
 
 async function runFlowImages(project, imagesDir, logger, styleId, onlyNums) {
@@ -884,10 +906,38 @@ ipcMain.handle('image-build', async (_e, args = {}) => {
     }
     pushDtoUpdate(); // 생성된 이미지(g.imagePath)를 UI 썸네일에 즉시 반영
   }
+  try { await closeFlowEng(); } catch {} // Flow 이미지 창 닫고 마무리
   S.timings.image = (Date.now() - _imgT0) / 1000;
   pushDtoUpdate();
   return P.toDTO(S.parsed);
 });
+
+// 비주얼(이미지) 미생성 그룹 번호 — 이미지도 영상도 없는 그룹.
+//   쇼츠는 이미지→영상 변환이므로 영상이 있으면 이미지가 있었던 것 → 둘 중 하나라도 있으면 OK.
+//   imagePrompt 가 있는(=비주얼이 있어야 하는) 그룹만 검사.
+function missingVisualGroups(project) {
+  return (project.groups || []).filter((g) => {
+    if (!(g.imagePrompt && String(g.imagePrompt).trim())) return false; // 비주얼 대상 그룹만
+    const hasImg = g.imagePath && fs.existsSync(g.imagePath);
+    const hasVid = g.videoPath && fs.existsSync(g.videoPath);
+    return !hasImg && !hasVid;
+  }).map((g) => g.num);
+}
+// 미생성 그룹이 있는 편들을 팝업으로 알림. incomplete = [{ label, nums }]
+function warnIncompleteVisuals(incomplete) {
+  if (!incomplete || !incomplete.length) return;
+  const detail = incomplete.map((x) => `• ${x.label}: G${x.nums.join(', G')}`).join('\n');
+  log(`⛔ 이미지 미생성으로 .vrew 미생성: ${incomplete.length}건`);
+  try {
+    dialog.showMessageBox(win, {
+      type: 'warning',
+      title: '이미지 미생성 — .vrew 를 만들지 않았습니다',
+      message: '일부 그룹의 이미지가 생성되지 않아 해당 편의 .vrew 를 만들지 않았습니다.',
+      detail: `${detail}\n\n해당 그룹의 이미지를 생성한 뒤 다시 시도하세요.\n(쇼츠는 이미지 생성 후 영상으로 변환됩니다.)`,
+      buttons: ['확인'],
+    });
+  } catch {}
+}
 
 // 영상화할 그룹 번호 — 범위(fromNum~toNum) 안의 그룹. 범위 미지정이면 전체 그룹.
 //   (랜덤/개수 방식은 폐지 — 사용자가 N~N 범위로 지정)
@@ -939,6 +989,7 @@ ipcMain.handle('video-build', async (_e, args = {}) => {
     }
     pushDtoUpdate(); // 생성된 영상(g.videoPath)을 UI 썸네일에 즉시 반영
   }
+  try { await closeFlowEng(); } catch {} // Flow 이미지/영상 창 닫고 마무리
   S.timings.video = (Date.now() - _vidT0) / 1000;
   pushDtoUpdate();
   return P.toDTO(S.parsed);
@@ -1274,7 +1325,7 @@ ipcMain.handle('load-project', async () => {
 //   make-all(단건)·run-batch(순차 큐)가 공용. opts.openVrew/openFolder 로 자동열기 제어(큐 실행 시 끔).
 async function runMakeAllCore(opts = {}) {
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
-  const { shortsNum = null, engine = 'genspark', presetName = null, speed = null, captionStyle = null, captionMaxChars = 7, styleId = null, fromNum = null, toNum = null, dry = false, videoEngine = 'grok', flowVideoModel = 'Veo 3.1 - Lite', flowCount = 'x1', openVrew = true, openFolder = true } = opts;
+  const { shortsNum = null, engine = 'genspark', presetName = null, speed = null, captionStyle = null, captionMaxChars = 7, styleId = null, fromNum = null, toNum = null, dry = false, videoEngine = 'grok', flowVideoModel = 'Veo 3.1 - Lite', flowCount = 'x1', clipMaxSec = null, aiNotice = false, openVrew = true, openFolder = true } = opts;
   const stylePrompt = styleId ? (require('./core/style-store').getPrompt(styleId) || '') : '';
   let preset = P.getPreset(presetName);
   // TTS 는 정속(1.0) — speed 값은 Vrew 배속(playbackRate)으로만 사용
@@ -1292,49 +1343,88 @@ async function runMakeAllCore(opts = {}) {
   const _makeT0 = Date.now();
   S.timings = { tts: 0, image: 0, video: 0, make: 0 }; // 이번 작업 단계별 시간 (누적)
   pushDtoUpdate();
-  for (const pr of S.parsed.projects) {
-    if (shortsNum && pr.shortsNum !== shortsNum) continue;
+
+  // 쇼츠 1·2·3 을 하나의 덩어리로 — 단계별 일괄 처리.
+  //   예전: 쇼츠마다 [TTS→이미지→영상→.vrew] 를 끝까지 돌리고 다음 쇼츠.
+  //   지금: 전 쇼츠의 TTS 를 1번 1그룹부터 마지막 쇼츠 마지막 그룹까지 먼저, 그다음 전 쇼츠 이미지,
+  //         그다음 전 쇼츠 영상, 마지막에 전 쇼츠 .vrew. (사용자 요청)
+  //   부수효과: 단계가 완전 순차라 ComfyUI(로컬 GPU) 이미지와 OmniVoice TTS 가 겹치지 않음 → VRAM 충돌 자동 해소.
+  //   (트레이드오프: 예전 Genspark/Flow 의 'TTS∥이미지' 동시 실행은 사라짐 — 의도된 변경.)
+  const projects = S.parsed.projects.filter((pr) => !shortsNum || pr.shortsNum === shortsNum);
+
+  // ── 1단계: 음성(TTS) — 쇼츠1 1그룹부터 쇼츠N 마지막 그룹까지 ──
+  log('🎙 1단계 — 음성(TTS) 일괄 변환…');
+  for (const pr of projects) {
     if (S.abort) { log('⏹ 중단됨'); break; }
     const dirs = shortsDirs(S.outRoot, pr.shortsNum);
-    log(`⚡ ${pr.title} 전체 제작 시작…`);
-    if (!dry) prefillImageCache(pr, dirs.media, styleId, engine); // ♻ 캐시 재활용 먼저
-    // 지연 실행(thunk) — comfy 일 때 TTS 후 순차로 돌리려고 즉시 시작하지 않음.
-    const audioTask = () => dry ? Promise.resolve().then(() => P.fillSilent(pr, dirs.tts))
-      : P.fillTts(pr, preset, ttsMgr, dirs.tts, log, () => S.abort, speed, pushDtoUpdate);
-    const imgTask = () => dry || imagesNeeded(pr) === 0 ? Promise.resolve()
-      : (engine === 'comfy') ? runComfyImages(pr, dirs.media, log, styleId)        // ComfyUI 단독
-      : runRotatingImages(pr, dirs.media, log, styleId, engine);                    // genspark/flow → 순환
-
-    // 단계별 시간 측정(병렬이어도 각자 wall-clock 기록).
-    const runAudio = () => { const t0 = Date.now(); return Promise.resolve(audioTask()).finally(() => { S.timings.tts += (Date.now() - t0) / 1000; pushDtoUpdate(); }); };
-    const runImage = () => { const t0 = Date.now(); return Promise.resolve(imgTask()).catch((e) => log('이미지 오류: ' + e.message)).finally(() => { S.timings.image += (Date.now() - t0) / 1000; pushDtoUpdate(); }); };
-    if (engine === 'comfy' && !dry) {
-      // 이미지도 로컬 GPU(ComfyUI) → TTS(OmniVoice 로컬 GPU)와 동시 실행 시 VRAM 충돌(OOM) 우려.
-      // 같은 RTX3060 12GB 를 둘이 동시에 쓰지 않도록 TTS → 이미지 순차 실행.
-      log('🧠 이미지=ComfyUI(로컬 GPU) → VRAM 보호 위해 TTS 먼저, 이미지 다음(순차)');
-      await runAudio();
-      await runImage();
-    } else {
-      // 클라우드 이미지(Genspark/Flow) → GPU 충돌 없음, 병렬로 빠르게.
-      await Promise.allSettled([runAudio(), runImage()]);
-    }
-    if (!dry) cacheGeneratedImages(pr, styleId, engine);
-    pushDtoUpdate(); // TTS·이미지 매핑(g.imagePath) 결과를 UI 썸네일에 즉시 반영
-    if (S.abort) { log('⏹ 중단됨'); break; }
-    // I2V 범위(N~N) — 그 그룹만(도입부만 등). 미지정이면 전체. (랜덤 폐지)
-    const vOnly = rangeNums(pr, fromNum, toNum);
-    const _v0 = Date.now();
+    const t0 = Date.now();
     try {
-      if (videoEngine === 'flow') await runFlowVideos(pr, dirs.media, log, { model: flowVideoModel, count: flowCount, onlyNums: vOnly });
-      else if (videoEngine === 'comfy') await runComfyVideos(pr, dirs.media, log, { onlyNums: vOnly });
-      else await P.generateHookVideosGrok(pr, dirs.media, log, () => S.abort, 0, pushDtoUpdate, vOnly, grokDurOf(videoEngine));
-      await maybeUpscale(pr, log, true); // 모든 영상 1080p 업스케일
-    } catch (e) { log(`영상 실패: ${e.message}`); }
-    S.timings.video += (Date.now() - _v0) / 1000;
-    pushDtoUpdate(); // 생성된 영상(g.videoPath)도 UI 에 반영
+      if (dry) P.fillSilent(pr, dirs.tts);
+      else await P.fillTts(pr, preset, ttsMgr, dirs.tts, log, () => S.abort, speed, pushDtoUpdate);
+      // 음성 직후 그룹 재구성(쇼츠 모드만) — TTS 버튼(tts-build)과 동일. clipMaxSec 없으면 생략.
+      if (!dry && clipMaxSec && getModeProfile(currentMode()).grouping.strategy === 'tts-greedy') {
+        const m = P.mergeGroupsByTts(pr, clipMaxSec);
+        log(`  ↳ ${prLabel(pr)} ${clipMaxSec}초 미만 단위 그룹 재구성: ${m.before} → ${m.after}개`);
+      }
+      log(`✓ ${prLabel(pr)} 음성 완료`);
+    } catch (e) { log(`${prLabel(pr)} 음성 오류: ${e.message}`); }
+    S.timings.tts += (Date.now() - t0) / 1000;
+    pushDtoUpdate();
+  }
+
+  // ── 2단계: 이미지 — 전 쇼츠 ──
+  if (!dry && !S.abort) {
+    log('🖼 2단계 — 이미지 일괄 생성…');
+    for (const pr of projects) {
+      if (S.abort) { log('⏹ 중단됨'); break; }
+      const dirs = shortsDirs(S.outRoot, pr.shortsNum);
+      prefillImageCache(pr, dirs.media, styleId, engine); // ♻ 캐시 재활용 먼저
+      const t0 = Date.now();
+      try {
+        if (imagesNeeded(pr) > 0) {
+          if (engine === 'comfy') await runComfyImages(pr, dirs.media, log, styleId); // ComfyUI 단독
+          else await runRotatingImages(pr, dirs.media, log, styleId, engine);          // genspark/flow → 순환
+        }
+      } catch (e) { log(`${prLabel(pr)} 이미지 오류: ${e.message}`); }
+      cacheGeneratedImages(pr, styleId, engine);
+      S.timings.image += (Date.now() - t0) / 1000;
+      pushDtoUpdate(); // 이미지 매핑(g.imagePath) UI 썸네일에 반영
+    }
+  }
+
+  // ── 3단계: 영상 — 전 쇼츠 ──
+  if (!dry && !S.abort) {
+    log('🎬 3단계 — 영상 일괄 생성…');
+    for (const pr of projects) {
+      if (S.abort) { log('⏹ 중단됨'); break; }
+      const dirs = shortsDirs(S.outRoot, pr.shortsNum);
+      const vOnly = rangeNums(pr, fromNum, toNum); // I2V 범위(미지정=전체)
+      const t0 = Date.now();
+      try {
+        if (videoEngine === 'flow') await runFlowVideos(pr, dirs.media, log, { model: flowVideoModel, count: flowCount, onlyNums: vOnly });
+        else if (videoEngine === 'comfy') await runComfyVideos(pr, dirs.media, log, { onlyNums: vOnly });
+        else await P.generateHookVideosGrok(pr, dirs.media, log, () => S.abort, 0, pushDtoUpdate, vOnly, grokDurOf(videoEngine));
+        await maybeUpscale(pr, log, true); // 모든 영상 1080p 업스케일
+      } catch (e) { log(`${prLabel(pr)} 영상 실패: ${e.message}`); }
+      S.timings.video += (Date.now() - t0) / 1000;
+      pushDtoUpdate(); // 생성된 영상(g.videoPath)도 UI 에 반영
+    }
+  }
+
+  // ── 4단계: .vrew — 전 쇼츠. 이미지(쇼츠는 영상) 미생성 그룹이 있는 편은 .vrew 를 만들지 않고 팝업으로 알림. ──
+  log('📦 4단계 — .vrew 일괄 생성…');
+  const incomplete = [];
+  for (const pr of projects) {
+    const miss = missingVisualGroups(pr);
+    if (miss.length) {
+      incomplete.push({ label: prLabel(pr), nums: miss });
+      log(`⛔ ${prLabel(pr)} — 이미지 미생성 그룹 ${miss.length}개 (G${miss.join(', G')}) → .vrew 건너뜀`);
+      continue;
+    }
     let ep = preset;
     if (ep && captionStyle) ep = { ...ep, captionStyle: { ...(ep.captionStyle || {}), ...captionStyle } };
-    ep = forceAiNoticeIfLongform(ep); // 롱폼 AI 고지 필수
+    ep = resolveAiNotice(ep, aiNotice); // 롱폼=항상 / 쇼츠=사용자 선택
+    const dirs = shortsDirs(S.outRoot, pr.shortsNum);
     const baseName = vrewBaseName(pr);
     const vrewPath = path.join(S.outRoot, `${baseName}.vrew`);
     try {
@@ -1342,9 +1432,11 @@ async function runMakeAllCore(opts = {}) {
       P.writeSrt(pr, path.join(dirs.subtitles, `${baseName}.srt`), captionMaxChars);
       log(`✓ ${pr.title}.vrew (clip ${res.clipCount})`);
       if (openVrew) shell.openPath(vrewPath);
-    } catch (e) { log(`vrew 실패: ${e.message}`); }
+    } catch (e) { log(`${prLabel(pr)} vrew 실패: ${e.message}`); }
   }
+  warnIncompleteVisuals(incomplete);
   if (ttsMgr) { try { await ttsMgr.stop(); } catch {} }
+  try { await closeFlowEng(); } catch {} // Flow 이미지/영상 창 닫고 마무리
   S.timings.make = (Date.now() - _makeT0) / 1000;
   pushDtoUpdate();
   try { fs.mkdirSync(S.outRoot, { recursive: true }); } catch {}
@@ -1388,6 +1480,7 @@ ipcMain.handle('run-batch', async (_e, args = {}) => {
         toNum: (s.vidTo != null && s.vidTo !== '') ? parseInt(s.vidTo, 10) : null,
         videoEngine: s.videoEngine || 'grok', flowVideoModel: s.flowVideoModel || 'Veo 3.1 - Lite', flowCount: s.flowCount || 'x1',
         captionStyle: common.captionStyle || null, captionMaxChars: common.captionMaxChars || 7,
+        clipMaxSec: clipMaxOf(s.videoEngine || 'grok'), aiNotice: !!s.aiNotice, // 쇼츠 그룹 재구성 캡 + AI 고지(사용자 선택)
         dry: false, openVrew: false, openFolder: false,
       });
       it.status = 'done'; okN++;

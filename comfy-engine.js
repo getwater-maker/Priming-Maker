@@ -36,7 +36,12 @@ try {
 
 class ComfyEngine {
   constructor(cfg = {}, logger = () => {}) {
-    this.baseUrl = (cfg.baseUrl || 'http://127.0.0.1:8188').replace(/\/+$/, '');
+    this.cloud = !!cfg.cloud;            // ComfyUI 클라우드(comfy.org) 모드
+    this.apiKey = cfg.apiKey || '';      // X-API-Key (클라우드 전용)
+    // 클라우드인데 baseUrl 이 로컬(127.0.0.1)로 남아있으면 공식 호스트로 보정
+    let base = (cfg.baseUrl || 'http://127.0.0.1:8188').replace(/\/+$/, '');
+    if (this.cloud && /127\.0\.0\.1|localhost/.test(base)) base = 'https://cloud.comfy.org';
+    this.baseUrl = base;
     this.workflowPath = cfg.workflowPath || '';
     this.imageNodeId = cfg.imageNodeId || '';
     this.promptNodeId = cfg.promptNodeId || '';
@@ -60,12 +65,83 @@ class ComfyEngine {
     this.log = logger;
   }
 
-  // 서버 헬스 체크 — /system_stats
+  // 경로 빌더 — 클라우드면 /api 접두. 로컬은 그대로.
+  _url(p) { return this.baseUrl + (this.cloud ? '/api' : '') + p; }
+  // 헤더 빌더 — 클라우드면 X-API-Key 부착. (FormData 업로드 시 Content-Type 은 fetch 가 자동 설정하도록 비움)
+  _headers(extra = {}) {
+    const h = { ...extra };
+    if (this.cloud && this.apiKey) h['X-API-Key'] = this.apiKey;
+    return h;
+  }
+
+  // 서버 헬스 체크 — 로컬: /system_stats, 클라우드: API 키 존재 확인(실제 인증오류는 /prompt 응답에서 표면화)
   async health() {
+    if (this.cloud) {
+      if (!this.apiKey) { this.log('[Comfy] ⚠ 클라우드 모드인데 API 키가 비어 있습니다 (⚙ ComfyUI 설정).'); return false; }
+      return true;
+    }
     try {
-      const r = await fetch(this.baseUrl + '/system_stats', { method: 'GET' });
+      const r = await fetch(this._url('/system_stats'), { method: 'GET' });
       return r.ok;
     } catch { return false; }
+  }
+
+  // 출력 객체(노드맵)에서 비디오/이미지 파일 1개 추출 — 로컬/클라우드 공용.
+  _scanMedia(outputs, isVid) {
+    outputs = outputs || {};
+    for (const nodeId of Object.keys(outputs)) {
+      const o = outputs[nodeId] || {};
+      for (const key of Object.keys(o)) {
+        const arr = o[key];
+        if (Array.isArray(arr)) {
+          const m = arr.find((x) => x && (isVid
+            ? (/\.(mp4|webm|mov|mkv)$/i.test(x.filename || '') || /video|mp4|webm/i.test(x.format || ''))
+            : /\.(png|jpe?g|webp)$/i.test(x.filename || '')));
+          if (m) return m;
+        }
+      }
+    }
+    return null;
+  }
+
+  // 클라우드 응답에서 outputs 노드맵 위치 추출 (구조 변동 대비 여러 위치 탐색).
+  _extractOutputs(j) {
+    if (!j || typeof j !== 'object') return {};
+    if (j.outputs) return j.outputs;
+    if (j.job && j.job.outputs) return j.job.outputs;
+    if (j.result && j.result.outputs) return j.result.outputs;
+    // history 형태({prompt_id:{outputs}}) 가능성
+    for (const k of Object.keys(j)) { if (j[k] && j[k].outputs) return j[k].outputs; }
+    return j; // 최후: 통째로 스캔
+  }
+
+  // 클라우드 폴링 — /api/job/{id}/status 로 상태 확인 → completed 시 /api/jobs/{id} 에서 outputs.
+  async _waitCloud(promptId, abortSignal, timeoutSec, isVid) {
+    const deadline = Date.now() + timeoutSec * 1000;
+    while (Date.now() < deadline) {
+      if (abortSignal && abortSignal()) throw new Error('중단됨');
+      await new Promise((res) => setTimeout(res, 2000));
+      let st;
+      try {
+        const r = await fetch(this._url(`/job/${promptId}/status`), { headers: this._headers() });
+        if (r.status === 401 || r.status === 403) throw new Error('API 키 인증 실패 (401/403) — 키를 확인하세요.');
+        if (!r.ok) continue;
+        st = await r.json();
+      } catch (e) { if (/인증/.test(e.message)) throw e; continue; }
+      const status = (st && (st.status || st.state) || '').toLowerCase();
+      if (status === 'failed' || status === 'cancelled' || status === 'error') {
+        throw new Error(`클라우드 작업 ${status}: ${JSON.stringify(st).slice(0, 200)}`);
+      }
+      if (status === 'completed' || status === 'success') {
+        const r2 = await fetch(this._url(`/jobs/${promptId}`), { headers: this._headers() });
+        if (!r2.ok) throw new Error(`작업 상세 조회 실패 (${r2.status})`);
+        const j = await r2.json();
+        const media = this._scanMedia(this._extractOutputs(j), isVid);
+        if (media) return media;
+        throw new Error(`출력에서 ${isVid ? '비디오' : '이미지'}를 찾지 못했습니다 — 응답: ${JSON.stringify(j).slice(0, 300)}`);
+      }
+    }
+    throw new Error(`타임아웃 (${timeoutSec}초) — 클라우드 생성이 끝나지 않음`);
   }
 
   // 이미지 업로드 → ComfyUI input 파일명
@@ -75,7 +151,7 @@ class ComfyEngine {
     fd.append('image', new Blob([data]), path.basename(imagePath));
     fd.append('type', 'input');
     fd.append('overwrite', 'true');
-    const r = await fetch(this.baseUrl + '/upload/image', { method: 'POST', body: fd });
+    const r = await fetch(this._url('/upload/image'), { method: 'POST', headers: this._headers(), body: fd });
     if (!r.ok) throw new Error(`이미지 업로드 실패 (${r.status})`);
     const j = await r.json();
     return j.subfolder ? `${j.subfolder}/${j.name}` : j.name;
@@ -167,10 +243,11 @@ class ComfyEngine {
   }
 
   async _queue(graph) {
-    const r = await fetch(this.baseUrl + '/prompt', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+    const r = await fetch(this._url('/prompt'), {
+      method: 'POST', headers: this._headers({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ prompt: graph, client_id: this.clientId }),
     });
+    if (r.status === 401 || r.status === 403) throw new Error('API 키 인증 실패 (401/403) — ⚙ ComfyUI 설정의 키를 확인하세요.');
     if (!r.ok) {
       const t = await r.text().catch(() => '');
       throw new Error(`/prompt 큐 실패 (${r.status}): ${t.slice(0, 300)}`);
@@ -184,13 +261,14 @@ class ComfyEngine {
 
   // history 폴링 → 출력 비디오 {filename, subfolder, type}
   async _waitVideo(promptId, abortSignal) {
+    if (this.cloud) return this._waitCloud(promptId, abortSignal, this.timeoutSec, true);
     const deadline = Date.now() + this.timeoutSec * 1000;
     while (Date.now() < deadline) {
-      if (abortSignal && abortSignal()) { try { await fetch(this.baseUrl + '/interrupt', { method: 'POST' }); } catch {} throw new Error('중단됨'); }
+      if (abortSignal && abortSignal()) { try { await fetch(this._url('/interrupt'), { method: 'POST', headers: this._headers() }); } catch {} throw new Error('중단됨'); }
       await new Promise((res) => setTimeout(res, 1500));
       let hist;
       try {
-        const r = await fetch(this.baseUrl + `/history/${promptId}`);
+        const r = await fetch(this._url(`/history/${promptId}`));
         if (!r.ok) continue;
         hist = await r.json();
       } catch { continue; }
@@ -200,16 +278,8 @@ class ComfyEngine {
       if (status === 'error') throw new Error('ComfyUI 실행 오류 (history status=error)');
       const outputs = entry.outputs || {};
       // SaveVideo / VHS_VideoCombine / CreateVideo 등 — 출력 객체의 모든 배열을 훑어 비디오 파일을 찾음.
-      for (const nodeId of Object.keys(outputs)) {
-        const o = outputs[nodeId] || {};
-        for (const key of Object.keys(o)) {
-          const arr = o[key];
-          if (Array.isArray(arr)) {
-            const vid = arr.find((x) => x && (/\.(mp4|webm|mov|mkv)$/i.test(x.filename || '') || /video|mp4|webm/i.test(x.format || '')));
-            if (vid) return vid;
-          }
-        }
-      }
+      const vid = this._scanMedia(outputs, true);
+      if (vid) return vid;
       // outputs 있는데 비디오가 없으면 완료됐지만 비디오 출력이 없는 것
       if (Object.keys(outputs).length) throw new Error('출력에 비디오 파일이 없습니다 — SaveVideo/VHS_VideoCombine 출력 노드와 mp4 저장을 확인하세요.');
     }
@@ -218,7 +288,8 @@ class ComfyEngine {
 
   async _download(vid, outputPath) {
     const q = new URLSearchParams({ filename: vid.filename, subfolder: vid.subfolder || '', type: vid.type || 'output' });
-    const r = await fetch(this.baseUrl + '/view?' + q.toString());
+    // 클라우드 /api/view 는 서명 URL 로 302 리다이렉트 → fetch 가 자동 추적.
+    const r = await fetch(this._url('/view') + '?' + q.toString(), { headers: this._headers() });
     if (!r.ok) throw new Error(`/view 다운로드 실패 (${r.status})`);
     const buf = Buffer.from(await r.arrayBuffer());
     const isMp4 = /\.mp4$/i.test(vid.filename);
@@ -276,33 +347,26 @@ class ComfyEngine {
   }
   // history → 출력 이미지 {filename, subfolder, type}
   async _waitImage(promptId, abortSignal) {
+    if (this.cloud) return this._waitCloud(promptId, abortSignal, this.imageTimeoutSec, false);
     const deadline = Date.now() + this.imageTimeoutSec * 1000;
     while (Date.now() < deadline) {
-      if (abortSignal && abortSignal()) { try { await fetch(this.baseUrl + '/interrupt', { method: 'POST' }); } catch {} throw new Error('중단됨'); }
+      if (abortSignal && abortSignal()) { try { await fetch(this._url('/interrupt'), { method: 'POST', headers: this._headers() }); } catch {} throw new Error('중단됨'); }
       await new Promise((res) => setTimeout(res, 1000));
       let hist;
-      try { const r = await fetch(this.baseUrl + `/history/${promptId}`); if (!r.ok) continue; hist = await r.json(); } catch { continue; }
+      try { const r = await fetch(this._url(`/history/${promptId}`)); if (!r.ok) continue; hist = await r.json(); } catch { continue; }
       const entry = hist && hist[promptId];
       if (!entry) continue;
       if (entry.status && entry.status.status_str === 'error') throw new Error('ComfyUI 실행 오류');
       const outputs = entry.outputs || {};
-      for (const nodeId of Object.keys(outputs)) {
-        const o = outputs[nodeId] || {};
-        for (const key of Object.keys(o)) {
-          const arr = o[key];
-          if (Array.isArray(arr)) {
-            const img = arr.find((x) => x && /\.(png|jpe?g|webp)$/i.test(x.filename || ''));
-            if (img) return img;
-          }
-        }
-      }
+      const img = this._scanMedia(outputs, false);
+      if (img) return img;
       if (Object.keys(outputs).length) throw new Error('출력에 이미지가 없습니다 — SaveImage 노드를 확인하세요.');
     }
     throw new Error(`타임아웃 (${this.imageTimeoutSec}초)`);
   }
   async _downloadImage(img, outputPath) {
     const q = new URLSearchParams({ filename: img.filename, subfolder: img.subfolder || '', type: img.type || 'output' });
-    const r = await fetch(this.baseUrl + '/view?' + q.toString());
+    const r = await fetch(this._url('/view') + '?' + q.toString(), { headers: this._headers() });
     if (!r.ok) throw new Error(`/view 다운로드 실패 (${r.status})`);
     fs.writeFileSync(outputPath, Buffer.from(await r.arrayBuffer()));
     return outputPath;

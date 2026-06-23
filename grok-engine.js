@@ -299,7 +299,10 @@ class GrokEngine {
       Object.defineProperty(navigator, 'webdriver', { get: () => false });
     });
 
-    await this.page.goto(GROK_URL, { waitUntil: 'networkidle', timeout: 30000 });
+    // waitUntil 'networkidle' → 'load' — grok.com SPA 는 백그라운드 API 호출이 끊이지 않아
+    //   networkidle(0.5초 무통신)에 30초 안에 못 닿아 타임아웃나는 케이스가 잦음(특히 Flow 크롬이
+    //   동시에 떠 있을 때). load 면 DOM 준비 즉시 진행. (아래 generateVideoFromImage 의 재진입과 동일 정책)
+    await this.page.goto(GROK_URL, { waitUntil: 'load', timeout: 30000 });
     await this.page.waitForTimeout(3000);
 
     // 페이지 로드 직후 dialog 가 떠있으면 닫기 (광고/안내/Premium 확인 등)
@@ -379,17 +382,19 @@ class GrokEngine {
 
     const motion = (prompt && prompt.trim()) || limit.cfg.defaultMotionPrompt;
 
-    // 3. 브라우저 시작 보장 (page 가 closed 면 start() 가 자동 재기동)
-    if (this.page && this.page.isClosed && this.page.isClosed()) {
-      this.log('[Grok] 이전 세션이 닫혀있음 — 재시작');
-      try { await this.context?.close(); } catch {}
-      this.context = null;
-      this.page = null;
-    }
-    await this.start();
-    if (abortSignal && abortSignal()) return { success: false, error: '사용자 중단' };
-
     try {
+      // 3. 브라우저 시작 보장 (page 가 closed 면 start() 가 자동 재기동)
+      //    start() 는 try 안에 둔다 — 진입(goto) 타임아웃 등 실패도 예외를 던지지 않고
+      //    {success:false} 로 반환 → 상위(generateHookVideosGrok)가 'fail' 표시·재시도 가능.
+      if (this.page && this.page.isClosed && this.page.isClosed()) {
+        this.log('[Grok] 이전 세션이 닫혀있음 — 재시작');
+        try { await this.context?.close(); } catch {}
+        this.context = null;
+        this.page = null;
+      }
+      await this.start();
+      if (abortSignal && abortSignal()) return { success: false, error: '사용자 중단' };
+
       this.log(`[Grok] 비디오 생성 시작 — ${path.basename(imagePath)} · "${motion.substring(0, 40)}"`);
 
       // 4. /imagine 진입 (이전 결과 페이지 /imagine/post/... 에 있으면 메인으로 이동)

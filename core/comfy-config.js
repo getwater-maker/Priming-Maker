@@ -14,6 +14,12 @@ const CONFIG_PATH = path.join(STORE_DIR, 'comfy-config.json');
 
 const DEFAULTS = {
   baseUrl: 'http://127.0.0.1:8188',
+  // ── ComfyUI 클라우드(comfy.org) 모드 ──────────────────
+  //   cloud=true 면 baseUrl 을 https://cloud.comfy.org 로, 모든 요청 경로에 /api 접두 +
+  //   X-API-Key 헤더를 붙이고, 진행 확인을 /api/job/{id}/status + /api/jobs/{id} 로 전환한다.
+  //   (로컬/RunPod 는 cloud=false 그대로 — /system_stats·/prompt·/history·/view 사용)
+  cloud: false,
+  apiKey: '',           // ComfyUI 클라우드 계정 대시보드에서 발급한 API 키 (cloud=true 일 때 필수)
   workflowPath: '',     // i2v(영상) ComfyUI '저장(API 포맷)' JSON 경로 (LTX 등)
   imageNodeId: '',      // 빈값=LoadImage 자동탐지
   promptNodeId: '',     // 빈값=CLIPTextEncode 자동탐지

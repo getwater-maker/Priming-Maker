@@ -7,6 +7,77 @@
 **편별 Vrew 4.0.1 .vrew 파일**을 자동 생성하는 Electron 앱. PrimingFlow(D:\PrimingFlow)의 엔진을
 복사·재활용한 독립 클론.
 
+## 라이트 자동 업데이트 — 변경 파일만 교체 (2026-06-23)
+- 요청: 설치는 1회, 이후엔 바뀐 파일만 설치폴더에 받아 즉시 최신으로 실행. (기존 팝업→다운→인스톨→재시작 단계 제거)
+- 구조: **asar 비활성**(package.json `build.asar:false` — 개별 파일 교체 가능) + `light-updater.js` + `scripts/gen-manifest.js`.
+  - `light-updater.applyUpdates()` 가 **bootstrap.js 에서 `require('./main.js')` 하기 전에** await 호출 →
+    GitHub(main) 의 `update-manifest.json`(파일별 sha1)과 설치폴더 파일 해시 비교 → 다른 파일만 raw URL 로
+    받아 원자적 교체(tmp→rename) → 그 실행이 곧바로 최신. 오프라인/실패면 조용히 현재 버전 진행. dev 는 건너뜀.
+  - **deps(node_modules) 변경**은 파일 교체로 불가 → manifest.deps 해시 다르면 적용 멈추고 "재설치 필요" 안내(앱 ready 후 dialog).
+    즉 package.json dependencies 바꾼 릴리스는 설치파일 재배포 필요. 그 외 JS/렌더러 변경은 전부 이 방식.
+  - 오래된 렌더러 에셋(이전 빌드 해시) 자동 정리(manifest 에 없는 renderer/dist/assets 삭제).
+- 발행: 코드 변경 후 **`npm run update:publish`**(vite build + gen-manifest) → `update-manifest.json`+변경파일 **git commit + push**.
+  raw.githubusercontent.com 은 public repo 라 토큰 불필요(CDN 캐시 ~5분).
+- .gitignore: `dist/`→`/dist/`(루트 설치산출물만 무시). **renderer/dist 와 update-manifest.json 은 커밋 대상**(raw 로 받기 때문).
+- 기존 `auto-updater.js`(electron-updater/NSIS)는 bootstrap 에서 호출 제거(파일은 남김). electron-updater 의존성은 미사용.
+
+## AI 고지 = 양쪽 모드 선택형, 기본값만 모드별 (2026-06-23)
+- 요청: 롱폼·쇼츠 **둘 다 선택 가능**. 강제 아님. 기본값만 다름 — **롱폼 표시 ON / 쇼츠 미표시 OFF**.
+- main: `forceAiNoticeIfLongform` → **`resolveAiNotice(preset, want)`**. 모드 무관하게 `enabled:!!want`(사용자 선택).
+  롱폼은 켜질 때만 5초후 5초 타이밍 적용, 쇼츠는 preset 타이밍 유지. export-vrew·runMakeAllCore 4단계·run-batch
+  (s.aiNotice) 호출부가 `aiNotice` 전달. run-batch 는 `clipMaxOf(videoEngine)` 도 전달(쇼츠 재구성).
+- 렌더러: capbar 'AI 고지' 체크박스 **양쪽 모드 노출**. 기본값은 preset 로드 effect 에서 `setAiNotice(mode==='longform')`
+  로 세팅(롱폼 true/쇼츠 false). make/export 가 `aiNotice` 그대로 전달(강제값 제거). currentSettings/applySettings 에 포함.
+  채널편집 모달 체크박스는 안내문만(실제 표시는 작업바 토글이 결정).
+
+## Flow 창 닫기 + 이미지 미생성 시 .vrew 차단 (2026-06-23)
+- **Flow 크롬 창 마무리**: 기존엔 S.flowEng 를 재사용하려고 앱 종료(before-quit) 때만 닫아 작업 끝나도 창이 남음.
+  → `closeFlowEng()`(main.js, `_closeContextAndCleanup` 호출) 추가 + runMakeAllCore 끝 / image-build / video-build
+  종료 시 호출. 재사용은 한 번의 실행 안에서만, 끝나면 창 닫음. (다음 실행은 getFlowEng 가 새로 띄움)
+- **이미지(쇼츠는 영상) 미생성 그룹 있으면 .vrew 생성 차단 + 팝업**: `missingVisualGroups(pr)` =
+  imagePrompt 있는데 imagePath·videoPath 둘 다 없는 그룹. 있으면 그 편 .vrew 를 건너뛰고
+  `warnIncompleteVisuals()` 가 `dialog.showMessageBox` 로 어느 편 G몇이 빠졌는지 팝업. runMakeAllCore 4단계 +
+  export-vrew(💾) 양쪽 적용. (쇼츠는 영상이 있으면 이미지가 있었던 것 → image|video 둘 중 하나면 OK)
+- 참고: vrew-builder 의 `Image file 수 0 < 이미지 그룹 수 N` self-check 경고는 **이미지 파일 개수만** 세서
+  영상으로 대체된 그룹을 못 알아보는 false alarm(경고 로그일 뿐, 차단 아님). 실제 차단은 위 main 게이트가 담당.
+
+## 전체만들기 = 단계별 일괄 처리 (2026-06-23)
+- 요청: 대본 1개(쇼츠1·2·3)를 **하나의 덩어리**로 — 쇼츠마다 TTS→이미지→영상→vrew 를 끝내고 다음으로
+  가지 말고, **전 쇼츠 TTS(쇼츠1 1그룹~쇼츠N 마지막)→ 전 쇼츠 이미지 → 전 쇼츠 영상 → 전 쇼츠 .vrew** 순서로.
+- `runMakeAllCore`(main.js) 재구성: `projects` 한 번 필터 후 1·2·3·4단계 루프로 분리. 각 단계는 전 쇼츠를 돈다.
+  - 1단계 TTS: fillTts + (쇼츠 모드면) `mergeGroupsByTts(clipMaxSec)` 그룹 재구성까지 — tts-build 와 동일.
+    이제 make-all 이 TTS 버튼 없이도 그룹 재구성을 포함(원클릭 정합성). clipMaxSec 는 renderer makeAll 이 전달.
+  - 부수효과: 단계 완전 순차 → ComfyUI(로컬 GPU) 이미지와 OmniVoice TTS 가 안 겹쳐 VRAM 충돌 자동 해소
+    (예전 comfy 전용 순차 분기 제거). 트레이드오프: Genspark/Flow 의 'TTS∥이미지' 동시 실행은 사라짐(의도).
+  - 중단(S.abort): 단계 사이/내부에서 멈추되 **4단계 .vrew 는 항상 실행**(만들어진 자산으로 best-effort 패키징).
+  - opts 에 `clipMaxSec` 추가. run-batch(큐)도 shortsNum 필터만 다를 뿐 동일 경로라 영향 없음.
+
+## 버그픽스 2건 (2026-06-23)
+- 🐞 **쇼츠2부터 이미지가 Genspark→Flow 로 빠짐**: 원인은 Genspark 서비스 한도가 아니라 **앱 자체 캡**
+  (`core/genspark-accounts.json` dailyCap=45)에 오늘 카운트 45 도달 → `activeAccounts()` 빈 배열 → 순환이
+  Flow 로 폴백(main.js:548). 사용자 의도 = "Genspark 일일한도는 알 수 없고, Genspark 가 보내는 휴식/한도
+  **메시지**(genspark-engine `_detectLimitMessage`)를 감지했을 때만 Flow 전환". → **Genspark 캡을 무제한으로**:
+  `core/accounts.js` 에 `defaultCap` 인자 + `dailyCap<=0` = 무제한(pickActive/activeAccounts 항상 활성, setCap 0 허용),
+  `genspark-accounts.js` 가 `makeAccountStore('genspark','gs',0)` 로 호출. 기존 상태파일도 dailyCap:0·count 초기화.
+  UI: Genspark 계정 모달 "0=무제한" 안내 + "오늘 N/무제한" 표시. (tts/genspark-store 의 maxDaily 는 이미 0=무제한)
+- 🐞 **쇼츠2 Grok 영상 실패 후 .vrew 만들고 다음 쇼츠로 + G1 "영상 변환 중" 고착**: `start()` 의 첫 진입이
+  `waitUntil:'networkidle'`(grok-engine.js:302)이라 grok.com SPA 에서 30초 타임아웃(특히 Flow 크롬 동시 실행 시).
+  게다가 `await this.start()` 가 generateVideoFromImage 의 try **밖**이라 예외가 그대로 위로 던져져 → 그룹 status
+  가 'generating' 에 고착 + make-all(main.js:1332)이 삼키고 다음 쇼츠로. → ① 302 를 `'load'` 로(399 와 동일 정책)
+  ② start() 를 try 안으로 이동(실패도 {success:false} 반환) ③ pipeline `generateHookVideosGrok` 에 **그룹별 1회
+  자동 재시도**(실패 시 eng.stop() 후 재진입) + try/catch 로 항상 'done'/'fail' 종결(배지 고착·전체중단 방지).
+
+## ComfyUI 클라우드(comfy.org) 지원 (2026-06-23)
+- RunPod 설치/GPU 할당이 어려워 **comfy.org 공식 클라우드**로 전환 옵션 추가. 로컬/RunPod 경로는 그대로.
+- comfy-config: `cloud`(bool)·`apiKey` 필드 추가. cloud=true 면 baseUrl 이 로컬이면 `https://cloud.comfy.org` 로 보정.
+- comfy-engine: 클라우드 분기 — ① 모든 경로에 `/api` 접두(`_url`) ② 모든 요청에 `X-API-Key` 헤더(`_headers`)
+  ③ health=API키 존재확인 ④ 폴링을 `/history/{id}` 대신 `/api/job/{id}/status`(상태) + `/api/jobs/{id}`(outputs)
+  로 전환(`_waitCloud`) ⑤ `/api/view` 는 서명 URL 302 → fetch 자동추적. 업로드/큐/다운로드/이미지·비디오 wait 공용화(`_scanMedia`/`_extractOutputs`).
+- UI(App.jsx ⚙ ComfyUI 모달): '클라우드 모드' 체크박스 + (체크 시) 'API 키' 입력란. 워크플로는 동일하게 '저장(API 포맷)' JSON.
+- 플랜: API 접근은 Standard($20)+. 직접 학습 LoRA 가져오기는 Creator($35)+. 현재 사용자는 기본 모델만 → Standard 가정.
+- ⏳ **실측 검증 필요**: `/api/jobs/{id}` 의 outputs 구조·`/api/view` 동작은 실제 키로 한 번 돌려 확인(엔진 셀렉터 반복법과 동일).
+  응답 구조가 다르면 `_extractOutputs`/`_scanMedia` 만 보정하면 됨(로그에 응답 일부 출력하도록 처리됨).
+
 ## 최근 버그픽스 (2026-06-17)
 - 🐞 **Genspark 이미지가 UI에 안 붙음**: `generateImagesGenspark`는 `g.imagePath`를 정상 매핑하지만,
   make-all/image-build가 중간에 `pushDtoUpdate()`를 안 보내 작업 끝까지 썸네일이 안 보였음(Flow만 실시간).
