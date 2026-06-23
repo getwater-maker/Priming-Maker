@@ -726,17 +726,21 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
   // 16:9 면 템플릿 기본값(1920×1080 / 1.7778) 그대로 유지.
   // 비율: 9:16(쇼츠) / 1:1(정사각) / 16:9(롱폼)
   const _aspect = (opts.aspect === '9:16' || opts.aspect === '1:1') ? opts.aspect : '16:9';
+  // scaleFactor(자막 좌표계) = width/height. 정상 .vrew 분석값: 16:9=1.7778 / 9:16=0.5625 / 1:1=1.0.
   const _frameRatio = _aspect === '9:16' ? 0.5625 : (_aspect === '1:1' ? 1.0 : 1.7777777777777777);
   const _canvasW = _aspect === '16:9' ? 1920 : 1080;
   const _canvasH = _aspect === '9:16' ? 1920 : (_aspect === '1:1' ? 1080 : 1080);
+  // 🔴 Vrew props.videoRatio = height/width (정상 16:9 .vrew = 1080/1920 = 0.5625 로 검증).
+  //    예전엔 videoRatio 에 _frameRatio(width/height)를 그대로 넣어 videoSize 와 역수로 어긋남 →
+  //    내보내기 시 프레임 크기 오계산 → "메모리 부족(C166/E08)" 오류. 캔버스 비율로 바로잡음.
+  const _videoRatio = _canvasH / _canvasW; // 9:16=1.7778 · 16:9=0.5625 · 1:1=1.0
   if (pj.props && pj.props.videoSize) { pj.props.videoSize.width = _canvasW; pj.props.videoSize.height = _canvasH; }
   if (pj.props && pj.props.initProjectVideoSize) { pj.props.initProjectVideoSize.width = _canvasW; pj.props.initProjectVideoSize.height = _canvasH; }
-  // 🔴 Vrew 가 실제 화면비를 그리는 필드. 이게 누락돼 캔버스는 세로인데 16:9 로 렌더되던 버그 fix.
-  if (pj.props) { pj.props.videoRatio = _frameRatio; }
+  if (pj.props) { pj.props.videoRatio = _videoRatio; }
   if (pj.props && pj.props.globalCaptionStyle && pj.props.globalCaptionStyle.captionStyleSetting) {
     pj.props.globalCaptionStyle.captionStyleSetting.scaleFactor = _frameRatio;
   }
-  log(`[Vrew] 출력 비율 ${_aspect} (캔버스 ${_canvasW}×${_canvasH}, ratio ${_frameRatio})`);
+  log(`[Vrew] 출력 비율 ${_aspect} (캔버스 ${_canvasW}×${_canvasH}, videoRatio ${_videoRatio.toFixed(4)}, scaleFactor ${_frameRatio})`);
 
   // Vrew 배속(playbackRate) — 기본 1(미사용). 배속은 음성 MP3 에 atempo 로 이미 구워져 있으므로
   //   Vrew 단계에선 정속(1) 재생. (원하면 opts.playbackRate 로 추가 가속 가능하나 기본은 1)

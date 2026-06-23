@@ -7,6 +7,15 @@
 **편별 Vrew 4.0.1 .vrew 파일**을 자동 생성하는 Electron 앱. PrimingFlow(D:\PrimingFlow)의 엔진을
 복사·재활용한 독립 클론.
 
+## 🐞 내보내기 "메모리 부족(C166/E08)" = videoRatio 역수 버그 (2026-06-23)
+- 증상: 프로그램 생성 .vrew 가 Vrew 에서 열리지만 **내보내기에서 "메모리 부족" 오류**. 정상 .vrew 는 잘 됨.
+- 원인: `pj.props.videoRatio` 는 Vrew 에서 **height/width** (정상 16:9 .vrew 분석값 = 1080/1920 = **0.5625**).
+  그런데 vrew-builder 가 videoRatio 에 `_frameRatio`(=width/height, scaleFactor 용)를 그대로 넣어 **역수로 어긋남**
+  (9:16 이 0.5625 로 저장 → videoSize 1080×1920 과 불일치). Vrew 가 내보내기 프레임 크기를 잘못 잡아 메모리 오류.
+- 수정(vrew-builder.js ~735): `_videoRatio = _canvasH/_canvasW`(9:16=1.7778·16:9=0.5625·1:1=1.0) 별도 계산해 videoRatio 에 사용.
+  scaleFactor(자막 좌표계)는 `_frameRatio`(width/height) 그대로 유지 — 정상 .vrew 의 scaleFactor=1.7778(16:9)과 일치.
+- 검증: 정상 16:9 .vrew = videoRatio 0.5625 + scaleFactor 1.7778(×16). 실패본의 videoRatio 만 1.7778 로 패치해 재내보내기로 확인.
+
 ## 라이트 자동 업데이트 — 변경 파일만 교체 (2026-06-23)
 - 요청: 설치는 1회, 이후엔 바뀐 파일만 설치폴더에 받아 즉시 최신으로 실행. (기존 팝업→다운→인스톨→재시작 단계 제거)
 - 구조: **asar 비활성**(package.json `build.asar:false` — 개별 파일 교체 가능) + `light-updater.js` + `scripts/gen-manifest.js`.
