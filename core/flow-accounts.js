@@ -59,6 +59,12 @@ function remove(id) {
   if (c.counts && c.counts[id]) delete c.counts[id];
   save(c);
 }
+function rename(id, label) {
+  const c = load();
+  const accs = (c.accounts && c.accounts.length) ? c.accounts.slice() : [];
+  const a = accs.find((x) => x.id === id);
+  if (a) { a.label = String(label || '').trim() || a.label; c.accounts = accs; save(c); }
+}
 function setCap(n) {
   const c = load();
   c.dailyCap = Math.max(1, parseInt(n, 10) || 45);
@@ -83,4 +89,4 @@ function pickActive() {
   return null;
 }
 
-module.exports = { load, save, list, add, remove, setCap, markUsed, pickActive, FILE };
+module.exports = { load, save, list, add, remove, rename, setCap, markUsed, pickActive, FILE };

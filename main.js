@@ -264,6 +264,7 @@ ipcMain.handle('open-lora-folder', () => { try { const dir = require('./core/lor
 ipcMain.handle('get-flow-accounts', () => require('./core/flow-accounts').list());
 ipcMain.handle('add-flow-account', (_e, label) => { require('./core/flow-accounts').add(label); return require('./core/flow-accounts').list(); });
 ipcMain.handle('remove-flow-account', (_e, id) => { require('./core/flow-accounts').remove(id); return require('./core/flow-accounts').list(); });
+ipcMain.handle('rename-flow-account', (_e, args = {}) => { require('./core/flow-accounts').rename(args.id, args.label); return require('./core/flow-accounts').list(); });
 ipcMain.handle('set-flow-cap', (_e, n) => { require('./core/flow-accounts').setCap(n); return require('./core/flow-accounts').list(); });
 ipcMain.handle('flow-login', async (_e, args = {}) => {
   const accId = (args && args.accId) || 'default';
@@ -280,6 +281,7 @@ ipcMain.handle('flow-login', async (_e, args = {}) => {
 ipcMain.handle('get-genspark-accounts', () => require('./core/genspark-accounts').list());
 ipcMain.handle('add-genspark-account', (_e, label) => { require('./core/genspark-accounts').add(label); return require('./core/genspark-accounts').list(); });
 ipcMain.handle('remove-genspark-account', (_e, id) => { require('./core/genspark-accounts').remove(id); return require('./core/genspark-accounts').list(); });
+ipcMain.handle('rename-genspark-account', (_e, args = {}) => { require('./core/genspark-accounts').rename(args.id, args.label); return require('./core/genspark-accounts').list(); });
 ipcMain.handle('set-genspark-cap', (_e, n) => { require('./core/genspark-accounts').setCap(n); return require('./core/genspark-accounts').list(); });
 ipcMain.handle('genspark-login', async (_e, args = {}) => {
   const accId = (args && args.accId) || 'default';
@@ -297,6 +299,7 @@ ipcMain.handle('genspark-login', async (_e, args = {}) => {
 ipcMain.handle('get-grok-accounts', () => require('./core/grok-accounts').list());
 ipcMain.handle('add-grok-account', (_e, label) => { require('./core/grok-accounts').add(label); return require('./core/grok-accounts').list(); });
 ipcMain.handle('remove-grok-account', (_e, id) => { require('./core/grok-accounts').remove(id); return require('./core/grok-accounts').list(); });
+ipcMain.handle('rename-grok-account', (_e, args = {}) => { require('./core/grok-accounts').rename(args.id, args.label); return require('./core/grok-accounts').list(); });
 ipcMain.handle('set-grok-cap', (_e, n) => { require('./core/grok-accounts').setCap(n); return require('./core/grok-accounts').list(); });
 ipcMain.handle('grok-login', async (_e, args = {}) => {
   const accId = (args && args.accId) || 'default';

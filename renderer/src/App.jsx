@@ -518,23 +518,25 @@ export default function App() {
   }
   // Genspark 멀티계정
   async function openGsAcc() { try { setGsAcc(await api.getGensparkAccounts()); setGsAccOpen(true); } catch (e) { logline('Genspark 계정 오류: ' + e.message); } }
-  async function addGsAcc() { const l = prompt('계정 라벨 (예: Genspark A)'); if (l == null) return; try { setGsAcc(await api.addGensparkAccount(l)); } catch (e) { logline(e.message); } }
+  async function addGsAcc() { try { setGsAcc(await api.addGensparkAccount('')); } catch (e) { logline(e.message); } }
   async function removeGsAcc(id) { try { setGsAcc(await api.removeGensparkAccount(id)); } catch (e) { logline(e.message); } }
+  async function renameGsAcc(id, label) { try { setGsAcc(await api.renameGensparkAccount(id, label)); } catch (e) { logline(e.message); } }
   async function changeGsCap(n) { try { setGsAcc(await api.setGensparkCap(n)); } catch (e) { logline(e.message); } }
   async function gsLogin(id) { setStatus('Genspark 로그인 창 여는 중…'); try { const r = await api.gensparkLogin(id); setStatus(r.ok ? '✓ Genspark 로그인 완료' : 'Genspark 로그인 실패: ' + (r.error || '')); } catch (e) { setStatus('Genspark 로그인 오류'); } }
   // Grok 멀티계정
   async function openGrokAcc() { try { setGrokAcc(await api.getGrokAccounts()); setGrokAccOpen(true); } catch (e) { logline('Grok 계정 오류: ' + e.message); } }
-  async function addGrokAcc() { const l = prompt('계정 라벨 (예: Grok A)'); if (l == null) return; try { setGrokAcc(await api.addGrokAccount(l)); } catch (e) { logline(e.message); } }
+  async function addGrokAcc() { try { setGrokAcc(await api.addGrokAccount('')); } catch (e) { logline(e.message); } }
   async function removeGrokAcc(id) { try { setGrokAcc(await api.removeGrokAccount(id)); } catch (e) { logline(e.message); } }
+  async function renameGrokAcc(id, label) { try { setGrokAcc(await api.renameGrokAccount(id, label)); } catch (e) { logline(e.message); } }
   async function changeGrokCap(n) { try { setGrokAcc(await api.setGrokCap(n)); } catch (e) { logline(e.message); } }
   async function grokLogin(id) { setStatus('Grok(X) 로그인 창 여는 중…'); try { const r = await api.grokLogin(id); setStatus(r.ok ? '✓ Grok 로그인 완료' : 'Grok 로그인 실패: ' + (r.error || '')); } catch (e) { setStatus('Grok 로그인 오류'); } }
   async function addFlowAcc() {
-    const label = prompt('계정 라벨 (예: Flow A)'); if (label == null) return;
-    try { setFlowAcc(await api.addFlowAccount(label)); } catch (e) { logline('추가 오류: ' + e.message); }
+    try { setFlowAcc(await api.addFlowAccount('')); } catch (e) { logline('추가 오류: ' + e.message); }
   }
   async function removeFlowAcc(id) {
     try { setFlowAcc(await api.removeFlowAccount(id)); } catch (e) { logline('삭제 오류: ' + e.message); }
   }
+  async function renameFlowAcc(id, label) { try { setFlowAcc(await api.renameFlowAccount(id, label)); } catch (e) { logline(e.message); } }
   async function changeFlowCap(n) {
     try { setFlowAcc(await api.setFlowCap(n)); } catch (e) { logline('한도 오류: ' + e.message); }
   }
@@ -1097,7 +1099,10 @@ export default function App() {
             <div style={{ margin: '8px 0' }}>
               {flowAcc.accounts.map((a) => (
                 <div key={a.id} className="frow" style={{ alignItems: 'center' }}>
-                  <span style={{ flex: 1, fontWeight: 700 }}>{a.label} <span className="meta">(오늘 {a.used}/{flowAcc.dailyCap})</span></span>
+                  <span style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <input defaultValue={a.label} onBlur={(e) => renameFlowAcc(a.id, e.target.value)} title="이름 수정 후 다른 곳 클릭" style={{ flex: '0 0 120px', fontWeight: 700 }} />
+                    <span className="meta">(오늘 {a.used}/{flowAcc.dailyCap})</span>
+                  </span>
                   <button className="ghost" style={{ flex: '0 0 auto' }} onClick={() => flowLogin(a.id)}>🔑 로그인</button>
                   {a.id !== 'default' && <button className="ghost" style={{ flex: '0 0 auto' }} title="계정 삭제" onClick={() => removeFlowAcc(a.id)}>✕</button>}
                 </div>
@@ -1161,7 +1166,10 @@ export default function App() {
             <div style={{ margin: '8px 0' }}>
               {gsAcc.accounts.map((a) => (
                 <div key={a.id} className="frow" style={{ alignItems: 'center' }}>
-                  <span style={{ flex: 1, fontWeight: 700 }}>{a.label} <span className="meta">(오늘 {a.used}/{gsAcc.dailyCap})</span></span>
+                  <span style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <input defaultValue={a.label} onBlur={(e) => renameGsAcc(a.id, e.target.value)} title="이름 수정 후 다른 곳 클릭" style={{ flex: '0 0 120px', fontWeight: 700 }} />
+                    <span className="meta">(오늘 {a.used}/{gsAcc.dailyCap})</span>
+                  </span>
                   <button className="ghost" style={{ flex: '0 0 auto' }} onClick={() => gsLogin(a.id)}>🔑 로그인</button>
                   {a.id !== 'default' && <button className="ghost" style={{ flex: '0 0 auto' }} title="계정 삭제" onClick={() => removeGsAcc(a.id)}>✕</button>}
                 </div>
@@ -1182,7 +1190,10 @@ export default function App() {
             <div style={{ margin: '8px 0' }}>
               {grokAcc.accounts.map((a) => (
                 <div key={a.id} className="frow" style={{ alignItems: 'center' }}>
-                  <span style={{ flex: 1, fontWeight: 700 }}>{a.label} <span className="meta">(오늘 {a.used}/{grokAcc.dailyCap})</span></span>
+                  <span style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <input defaultValue={a.label} onBlur={(e) => renameGrokAcc(a.id, e.target.value)} title="이름 수정 후 다른 곳 클릭" style={{ flex: '0 0 120px', fontWeight: 700 }} />
+                    <span className="meta">(오늘 {a.used}/{grokAcc.dailyCap})</span>
+                  </span>
                   <button className="ghost" style={{ flex: '0 0 auto' }} onClick={() => grokLogin(a.id)}>🔑 로그인</button>
                   {a.id !== 'default' && <button className="ghost" style={{ flex: '0 0 auto' }} title="계정 삭제" onClick={() => removeGrokAcc(a.id)}>✕</button>}
                 </div>
