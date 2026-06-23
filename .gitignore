@@ -1,6 +1,7 @@
 node_modules/
 output/
 dist/
+lora-dataset/
 *.log
 *.vrew
 *.vrew.debug.json

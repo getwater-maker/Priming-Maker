@@ -38,7 +38,9 @@
       "**/*",
       "!renderer/src/**/*",
       "!**/*.map",
-      "!_*.md"
+      "!_*.md",
+      "!lora-dataset/**",
+      "!output/**"
     ],
     "asarUnpack": [
       "tts/omnivoice-backend/**",
