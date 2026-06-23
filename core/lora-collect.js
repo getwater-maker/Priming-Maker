@@ -50,9 +50,12 @@ function _saveManifest(dir, m) {
   try { fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(_manifestPath(dir), JSON.stringify(m, null, 2), 'utf8'); } catch (e) {}
 }
 
+// 누적 장수 = 폴더의 실제 이미지 파일 수(수동으로 지우면 바로 반영됨). 중복방지는 manifest 가 담당.
 function count() {
   const cfg = load();
-  return _loadManifest(cfg.dir).items.length;
+  try {
+    return fs.readdirSync(cfg.dir).filter((f) => /\.(png|jpe?g|webp)$/i.test(f)).length;
+  } catch { return 0; }
 }
 
 // 캡션 정리 — 스타일/보일러플레이트 제거된 '내용 프롬프트'에 트리거를 앞에 붙임.
