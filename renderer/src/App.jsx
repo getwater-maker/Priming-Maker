@@ -1128,8 +1128,8 @@ export default function App() {
                     <input type="checkbox" checked={imgRot.enabled ? imgRot.enabled[id] !== false : true} onChange={() => toggleRotEngine(id)} />
                     <b>{i + 1}. {ENGINE_META[id] ? ENGINE_META[id].name : id}</b>
                   </label>
-                  {id === 'flow' && <button className="ghost" style={{ flex: '0 0 auto' }} onClick={openFlowAcc}>🔑 Flow 계정</button>}
-                  {id === 'genspark' && <button className="ghost" style={{ flex: '0 0 auto' }} onClick={openGsAcc}>🔑 Genspark 계정</button>}
+                  {id === 'flow' && <button className="ghost" style={{ flex: '0 0 auto' }} onClick={() => { setImgRotOpen(false); openFlowAcc(); }}>🔑 Flow 계정</button>}
+                  {id === 'genspark' && <button className="ghost" style={{ flex: '0 0 auto' }} onClick={() => { setImgRotOpen(false); openGsAcc(); }}>🔑 Genspark 계정</button>}
                 </div>
               ))}
             </div>
