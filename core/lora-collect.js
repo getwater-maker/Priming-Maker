@@ -20,7 +20,9 @@ const crypto = require('crypto');
 
 const STORE_DIR = path.join(os.homedir(), '.priming-maker');
 const CONFIG_PATH = path.join(STORE_DIR, 'lora-collect.json');
-const DEFAULT_DIR = path.join(STORE_DIR, 'lora-dataset');
+// 데이터셋 기본 폴더 — 사용자 지정(고정 위치). 설정(lora-collect.json)이 우선이며 이건 폴백 기본값.
+//   D: 가 없으면 첫 수집 시 mkdir 실패(무시) → ⚙에서 폴더 변경 가능.
+const DEFAULT_DIR = 'D:/Priming-Maker/lora-dataset';
 
 const DEFAULTS = { enabled: true, dir: DEFAULT_DIR, trigger: 'joseon' };
 
