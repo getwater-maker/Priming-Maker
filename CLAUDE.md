@@ -7,14 +7,24 @@
 **편별 Vrew 4.0.1 .vrew 파일**을 자동 생성하는 Electron 앱. PrimingFlow(D:\PrimingFlow)의 엔진을
 복사·재활용한 독립 클론.
 
-## 🐞 내보내기 "메모리 부족(C166/E08)" = videoRatio 역수 버그 (2026-06-23)
-- 증상: 프로그램 생성 .vrew 가 Vrew 에서 열리지만 **내보내기에서 "메모리 부족" 오류**. 정상 .vrew 는 잘 됨.
-- 원인: `pj.props.videoRatio` 는 Vrew 에서 **height/width** (정상 16:9 .vrew 분석값 = 1080/1920 = **0.5625**).
-  그런데 vrew-builder 가 videoRatio 에 `_frameRatio`(=width/height, scaleFactor 용)를 그대로 넣어 **역수로 어긋남**
-  (9:16 이 0.5625 로 저장 → videoSize 1080×1920 과 불일치). Vrew 가 내보내기 프레임 크기를 잘못 잡아 메모리 오류.
-- 수정(vrew-builder.js ~735): `_videoRatio = _canvasH/_canvasW`(9:16=1.7778·16:9=0.5625·1:1=1.0) 별도 계산해 videoRatio 에 사용.
-  scaleFactor(자막 좌표계)는 `_frameRatio`(width/height) 그대로 유지 — 정상 .vrew 의 scaleFactor=1.7778(16:9)과 일치.
-- 검증: 정상 16:9 .vrew = videoRatio 0.5625 + scaleFactor 1.7778(×16). 실패본의 videoRatio 만 1.7778 로 패치해 재내보내기로 확인.
+## 🐞 쇼츠 9:16 .vrew = 화면비 가로로 표시 + 내보내기 실패 — 실제 원인 2가지 (2026-06-24)
+> ⚠️ 이전의 "videoRatio 역수" 진단은 **오진**이었음. videoRatio 는 화면비와 무관한 상수(정상 .vrew 는
+>   16:9·9:16 모두 **0.5625**). 사용자 정답본(make1.vrew = 프로그램 .vrew 를 9:16 으로 직접 수정) 정밀 비교로 확정.
+
+**① 화면비가 9:16 이 아니라 16:9(가로)로 열림 — 원인: 오버레이 트랙 X좌표계**
+- Vrew 는 videoSize/videoRatio 가 아니라 **web/shape(제목·도형·AI고지) 트랙의 xPos/width 좌표계**로 캔버스
+  화면비를 인식한다. 우리는 이 좌표를 16:9 기준 0..1(예 제목 width 0.96)로만 써서 Vrew 가 가로로 펼침.
+- 수정(vrew-builder.js buildVrew 끝 "2.7"): web/shape 트랙만 xPos/width 를 **×_overlayScale**(중앙 보존).
+  `_overlayScale = (16/9)×(canvasH/canvasW)` → **16:9=1.0(무변경=롱폼 안전) · 9:16=(16/9)²=3.1605 · 1:1=1.7778**.
+  **미디어(video/image)는 그대로**(width≈1 + fillType:cut = 커버 — ×스케일 하면 캔버스에서 사라짐).
+  **자막(transcript.clips[].captions[].style)도 그대로**(별도 좌표계). videoRatio 는 상수 **0.5625** 로 통일.
+- 검증: make1 의 영상 z=1~3 은 ×3.16(자동변환 잔재)이지만 사용자가 직접 고친 z=0·z=4 는 `width=1+fillType:cut`.
+  자막·도형·제목만 ×3.16. → 미디어 유지 + 오버레이만 스케일 = 9:16 + 미디어 보임 + 내보내기 정상(실측 확인).
+
+**② 내보내기 자체가 실패(제목 텍스트가 원인) — 원인: 제목 web 트랙의 assetEffectInfo**
+- 정상 .vrew 의 제목 web 트랙엔 `assetEffectInfo` 필드가 **없음**. 우리는 `assetEffectInfo:{type:'none',...}` 를
+  넣어 둠 → Vrew 내보내기 실패(type:'none' 이라도 web/textbox 트랙에 있으면 안 됨).
+- 수정(vrew-builder.js addTitleTrack ~585): `assetEffectInfo` 줄 **삭제**(필드 생략 = 즉시 표시). 실측 내보내기 성공.
 
 ## 라이트 자동 업데이트 — 변경 파일만 교체 (2026-06-23)
 - 요청: 설치는 1회, 이후엔 바뀐 파일만 설치폴더에 받아 즉시 최신으로 실행. (기존 팝업→다운→인스톨→재시작 단계 제거)

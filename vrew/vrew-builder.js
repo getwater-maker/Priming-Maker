@@ -582,8 +582,9 @@ function addTitleTrack(pj, title, frameRatio, log, clipIds = null, yShift = 0) {
         { attributeName: '--textbox-color', type: 'color-hex', value: '#00000000' },
         { attributeName: '--textbox-align', type: 'textbox-align', value: align },
       ],
-      // 제목은 처음부터 항상 표시 — fade-in 제거(없으면 즉시 표시).
-      assetEffectInfo: { type: 'none', duration: 0, startDelay: 0 },
+      // 제목은 처음부터 항상 표시 — assetEffectInfo 필드 자체를 넣지 않는다(즉시 표시).
+      //   🔴 type:'none' 이라도 assetEffectInfo 가 web/textbox 트랙에 있으면 Vrew 내보내기가
+      //      실패한다(정상 .vrew 분석: 제목 web 트랙에 이 필드 없음). 필드 생략이 정답.
       stats: { styledInFloatingMenu: true, styledInPanel: false },
       scaleFactor: frameRatio || 0.5625,
     };
@@ -730,17 +731,20 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
   const _frameRatio = _aspect === '9:16' ? 0.5625 : (_aspect === '1:1' ? 1.0 : 1.7777777777777777);
   const _canvasW = _aspect === '16:9' ? 1920 : 1080;
   const _canvasH = _aspect === '9:16' ? 1920 : (_aspect === '1:1' ? 1080 : 1080);
-  // 🔴 Vrew props.videoRatio = height/width (정상 16:9 .vrew = 1080/1920 = 0.5625 로 검증).
-  //    예전엔 videoRatio 에 _frameRatio(width/height)를 그대로 넣어 videoSize 와 역수로 어긋남 →
-  //    내보내기 시 프레임 크기 오계산 → "메모리 부족(C166/E08)" 오류. 캔버스 비율로 바로잡음.
-  const _videoRatio = _canvasH / _canvasW; // 9:16=1.7778 · 16:9=0.5625 · 1:1=1.0
+  // 🔴 화면비를 결정하는 건 videoSize(캔버스 px) + 오버레이(web/shape) 트랙의 X좌표계다.
+  //    videoRatio 는 화면비와 무관한 상수 — 정상 .vrew 는 16:9·9:16 모두 0.5625. (역수 패치는 오진단이었음)
+  //    Vrew 가 9:16 으로 인식하려면 web/shape(제목·도형·AI고지) 트랙의 xPos/width 를 ×_overlayScale
+  //    해야 한다(미디어·자막 transcript 은 그대로). 아래 buildVrew 끝에서 일괄 적용.
+  //    _overlayScale = (16/9)×(H/W): 16:9=1.0(무변경=롱폼 정상) · 9:16=(16/9)²=3.1605 · 1:1=1.7778.
+  const _videoRatio = 0.5625;
+  const _overlayScale = (16 / 9) * (_canvasH / _canvasW);
   if (pj.props && pj.props.videoSize) { pj.props.videoSize.width = _canvasW; pj.props.videoSize.height = _canvasH; }
   if (pj.props && pj.props.initProjectVideoSize) { pj.props.initProjectVideoSize.width = _canvasW; pj.props.initProjectVideoSize.height = _canvasH; }
   if (pj.props) { pj.props.videoRatio = _videoRatio; }
   if (pj.props && pj.props.globalCaptionStyle && pj.props.globalCaptionStyle.captionStyleSetting) {
     pj.props.globalCaptionStyle.captionStyleSetting.scaleFactor = _frameRatio;
   }
-  log(`[Vrew] 출력 비율 ${_aspect} (캔버스 ${_canvasW}×${_canvasH}, videoRatio ${_videoRatio.toFixed(4)}, scaleFactor ${_frameRatio})`);
+  log(`[Vrew] 출력 비율 ${_aspect} (캔버스 ${_canvasW}×${_canvasH}, videoRatio ${_videoRatio}, scaleFactor ${_frameRatio}, overlayScale ${_overlayScale.toFixed(4)})`);
 
   // Vrew 배속(playbackRate) — 기본 1(미사용). 배속은 음성 MP3 에 atempo 로 이미 구워져 있으므로
   //   Vrew 단계에선 정속(1) 재생. (원하면 opts.playbackRate 로 추가 가속 가능하나 기본은 1)
@@ -1216,6 +1220,25 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
     } catch (e) {
       log(`[Vrew] 로고 트랙 추가 실패: ${e.message}`);
     }
+  }
+
+  // ---------- 2.7. 오버레이(web/shape) 트랙 X좌표 스케일 (9:16/1:1 화면비 인식) ----------
+  // Vrew 는 제목·도형·AI고지 같은 web/shape 트랙의 xPos/width 좌표계로 캔버스 화면비를 인식한다.
+  //   - 미디어(video/image) 트랙은 0..1(캔버스) 공간 그대로(width≈1 + fillType:cut = 커버) → 건드리지 않음.
+  //   - 자막(transcript.clips[].captions[].style) 도 별도 좌표계 → 건드리지 않음.
+  //   - web/shape 만 ×_overlayScale, 중앙 보존(xPos = 중앙 − width/2).
+  // 16:9 는 _overlayScale=1 이라 무변경(롱폼 영향 없음). make1.vrew(사용자 검증본) 기준.
+  if (_overlayScale !== 1) {
+    let _nScaled = 0;
+    for (const _t of Object.values(pj.props.tracks)) {
+      if ((_t.type === 'web' || _t.type === 'shape') && typeof _t.width === 'number' && typeof _t.xPos === 'number') {
+        const _c = _t.xPos + _t.width / 2;
+        _t.width = _t.width * _overlayScale;
+        _t.xPos = _c - _t.width / 2;
+        _nScaled++;
+      }
+    }
+    log(`[Vrew] 오버레이 트랙 X좌표 ×${_overlayScale.toFixed(4)} 적용: ${_nScaled}개 (${_aspect})`);
   }
 
   // ---------- 3. self-check ----------

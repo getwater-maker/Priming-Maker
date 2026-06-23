@@ -9,7 +9,7 @@
     "auto-updater.js": "7f0d3a183a25f3c9150002dc3c45d89257358384",
     "bootstrap.js": "5b21e2402b179e26a988462d5072c3141926b745",
     "build-shorts.js": "9dfbb4dfee70ffb9105148b9744081e2bb287957",
-    "CLAUDE.md": "18d4a05268c1510eda5a7e837b112e7fba8722be",
+    "CLAUDE.md": "2913e319177498b2c9c56ccba2729764bb50b993",
     "comfy-engine.js": "a2eb7c0b18ef518ccf4671b0ea3de3d2944f9f1b",
     "core/accounts.js": "e36e07bbbf9eec4d56b584c3add8a1077fbe0cec",
     "core/caption-splitter.js": "68b72deb61586c430cc446c2334399d37cebb9fd",
@@ -68,7 +68,7 @@
     "vrew/dummy/shape-square.vbin": "7915d4dcdcd7572c4a988ef773ea5bd0a927dc8e",
     "vrew/dummy/uc-0010-simple-textbox.bin": "24d897751b391f868b8bcfb5159a0da4f2abc9b7",
     "vrew/dummy/uc-0010-simple-textbox.meta.json": "ba3a41513c2bb7efff3802d219c754ce9b181e43",
-    "vrew/vrew-builder.js": "24ed9b01f1442b4633fc6a3b1559e2a6a635bdee",
+    "vrew/vrew-builder.js": "f75dacce503cdf7ce64a64b6f94fd36f9f426fcf",
     "vrew-template.json": "7df033330328143fbc9211ca92eb2063c6cace65"
   }
 }
