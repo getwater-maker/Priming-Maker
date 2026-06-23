@@ -103,6 +103,18 @@ function parseMeta(rawLine) {
   return meta;
 }
 
+// 훅 자막을 슬래시(/)로 2줄 분할 → {titleLine1, titleLine2, caption}.
+//   슬래시가 없으면 분할 안 함(titleLine1/2 = null, caption 그대로).
+function splitHookCaption(hookCaption) {
+  if (hookCaption && hookCaption.includes('/')) {
+    const i = hookCaption.indexOf('/');
+    const titleLine1 = hookCaption.slice(0, i).trim();
+    const titleLine2 = hookCaption.slice(i + 1).trim();
+    return { titleLine1, titleLine2, caption: (titleLine1 + ' ' + titleLine2).trim() };
+  }
+  return { titleLine1: null, titleLine2: null, caption: hookCaption };
+}
+
 // ── 신규(그룹) 블록 파서 ────────────────────────────────
 function parseShortsBlockGrouped(lines) {
   let hookCaption = null;
@@ -161,13 +173,7 @@ function parseShortsBlockGrouped(lines) {
   }
 
   // 훅 자막을 슬래시(/)로 2줄 분할 → titleLine1/titleLine2 (첫 프레임 제목 2줄 렌더)
-  let titleLine1 = null, titleLine2 = null, caption = hookCaption;
-  if (hookCaption && hookCaption.includes('/')) {
-    const i = hookCaption.indexOf('/');
-    titleLine1 = hookCaption.slice(0, i).trim();
-    titleLine2 = hookCaption.slice(i + 1).trim();
-    caption = (titleLine1 + ' ' + titleLine2).trim();
-  }
+  const { titleLine1, titleLine2, caption } = splitHookCaption(hookCaption);
   return { hookCaption: caption, titleLine1, titleLine2, groups };
 }
 
@@ -348,7 +354,7 @@ function parseCutScript(text) {
     let hookCaption, model, titleLine1 = null, titleLine2 = null;
     if (format === 'grouped') {
       const r = parseShortsBlockGrouped(blk.lines);
-      hookCaption = r.hookCaption;
+      hookCaption = r.hookCaption; titleLine1 = r.titleLine1; titleLine2 = r.titleLine2;
       model = buildProjectModelGrouped(r.groups);
     } else if (format === 'prose') {
       const r = parseShortsBlockProse(blk.lines);
@@ -356,7 +362,8 @@ function parseCutScript(text) {
       model = buildProjectModelGrouped(r.groups); // [단계]=그룹, 그 아래 줄=문장 (다중문장 그룹)
     } else {
       const r = parseShortsBlock(blk.lines);
-      hookCaption = r.hookCaption;
+      const sp = splitHookCaption(r.hookCaption); // 훅 자막 슬래시(/) → 1줄/2줄 분할
+      hookCaption = sp.caption; titleLine1 = sp.titleLine1; titleLine2 = sp.titleLine2;
       model = buildProjectModel(r.cuts);
     }
     const proj = new Project({ sentences: model.sentences, groups: model.groups });

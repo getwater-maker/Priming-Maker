@@ -1,5 +1,5 @@
 {
-  "version": "0.1.1",
+  "version": "0.1.2",
   "deps": "3a5115dcd9e379dc8abaabe10ad1041adcaf5828",
   "files": {
     "AGENTS.md": "1a0fd73c104ff40f5cce110a3ffac07a7aa77205",
@@ -14,7 +14,7 @@
     "core/accounts.js": "e36e07bbbf9eec4d56b584c3add8a1077fbe0cec",
     "core/caption-splitter.js": "68b72deb61586c430cc446c2334399d37cebb9fd",
     "core/comfy-config.js": "9a2cbfd8063404eb90b8cdf58691578920eb469c",
-    "core/cut-script-parser.js": "a6d1e4e67a1cfbf82973df823b5f26955fc5e8d9",
+    "core/cut-script-parser.js": "c19eea7a685c50693a86fbc7f35b6c6eb03ffc70",
     "core/flow-accounts.js": "824c40161dc3eb96b7acb372886eb5c0384db122",
     "core/genspark-accounts.js": "3e523c32e118a152aa5249477097d4cfe095a6df",
     "core/grok-accounts.js": "b83a68d14765d3261d8332e73fdd20cd536cd7a2",
@@ -43,7 +43,7 @@
     "light-updater.js": "c9be26807112942a9cf4a88dfcd14a1004634762",
     "main.js": "a49166d879d846c1937666c8d0186a6f67ed32f9",
     "package-lock.json": "2b2cb85d9cd416d71e5bc6ba63b49bbec1302108",
-    "package.json": "8d7419001054e821874f2415efaca0a20165cda2",
+    "package.json": "2cf34a55cb962c90005dcf6dbe3da057180ea757",
     "preload.js": "d470bb541a941d6c5412dfccb97566fc0e666e98",
     "renderer/dist/assets/index-CzPs-u7A.js": "adfa36378a7d6a249170e051fbefcd78dca43f43",
     "renderer/dist/assets/index-p0zt6x82.css": "7af2dc845800a3b300679a0d132ac02f4e433841",
