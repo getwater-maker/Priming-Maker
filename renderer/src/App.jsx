@@ -883,7 +883,7 @@ export default function App() {
             <button className="ghost" disabled={!loaded} onClick={() => runImg(null)}>🖼 이미지</button>
             <span className="hdiv" />
             <select title="i2v 영상 엔진" value={videoEngine} onChange={(e) => setVideoEngine(e.target.value)}>
-              <option value="grok10">Grok(10초)</option><option value="grok">Grok(6초)</option><option value="flow">Flow(8초)</option><option value="comfy">ComfyUI(LTX)</option>
+              <option value="grok10">Grok(10초)</option><option value="grok">Grok(6초)</option><option value="flow">Flow(8초)</option><option value="comfy">ComfyUI (LTX/Wan)</option>
             </select>
             {videoEngine === 'comfy' && <button className="ghost" title="ComfyUI i2v 설정" style={{ padding: '6px 9px' }} onClick={openComfy}>⚙ Comfy</button>}
             {(videoEngine === 'grok10' || videoEngine === 'grok') && <button className="ghost" title="Grok(X) 멀티계정 등록·로그인·한도" style={{ padding: '6px 9px' }} onClick={openGrokAcc}>⚙ 계정</button>}
@@ -1058,12 +1058,16 @@ export default function App() {
             <div className="frow"><label>스텝/CFG</label><input className="n" type="number" style={{ width: 60 }} value={comfy.imageSteps} onChange={(e) => setComfy({ ...comfy, imageSteps: e.target.value })} /><input className="n" type="number" step="0.5" style={{ width: 60 }} value={comfy.imageCfg} onChange={(e) => setComfy({ ...comfy, imageCfg: e.target.value })} /><span className="meta">Lightning 기본 8 / 2 (dpmpp_sde·karras)</span></div>
             <div className="frow"><label>네거티브</label><input placeholder="중국·일본·중복 차단" value={comfy.imageNegative || ''} onChange={(e) => setComfy({ ...comfy, imageNegative: e.target.value })} /></div>
             <div className="meta">비우면 내장 SDXL 그래프 사용(native→1080 업스케일). 커스텀 워크플로를 쓰려면 imageWorkflowPath 를 설정파일에 직접 지정하세요.</div>
-            <div className="subhead">📹 영상 (i2v · LTX)</div>
-            <div className="frow"><label>워크플로</label><input placeholder="ComfyUI '저장(API 포맷)' JSON 경로" value={comfy.workflowPath} onChange={(e) => setComfy({ ...comfy, workflowPath: e.target.value })} /><button className="ghost" style={{ flex: '0 0 auto' }} onClick={pickWorkflow}>찾기</button></div>
+            <div className="subhead">📹 영상 (i2v · LTX / Wan 등)</div>
+            <div className="frow"><label>워크플로</label><input placeholder="ComfyUI '저장(API 포맷)' JSON 경로 (LTX 또는 Wan)" value={comfy.workflowPath} onChange={(e) => setComfy({ ...comfy, workflowPath: e.target.value })} /><button className="ghost" style={{ flex: '0 0 auto' }} onClick={pickWorkflow}>찾기</button></div>
             <div className="frow"><label>이미지 노드</label><input placeholder="비우면 LoadImage 자동탐지" value={comfy.imageNodeId} onChange={(e) => setComfy({ ...comfy, imageNodeId: e.target.value })} /></div>
             <div className="frow"><label>프롬프트 노드</label><input placeholder="비우면 CLIPTextEncode 자동탐지" value={comfy.promptNodeId} onChange={(e) => setComfy({ ...comfy, promptNodeId: e.target.value })} /></div>
+            <div className="frow"><label>너비/높이 노드</label><input placeholder="너비 노드ID(비우면 자동)" value={comfy.videoWidthNodeId || ''} onChange={(e) => setComfy({ ...comfy, videoWidthNodeId: e.target.value })} /><input placeholder="높이 노드ID" value={comfy.videoHeightNodeId || ''} onChange={(e) => setComfy({ ...comfy, videoHeightNodeId: e.target.value })} /></div>
+            <div className="frow"><label>길이 노드</label><input placeholder="길이/프레임 노드ID(비우면 자동)" value={comfy.videoDurationNodeId || ''} onChange={(e) => setComfy({ ...comfy, videoDurationNodeId: e.target.value })} /></div>
+            <div className="frow"><label>fps(프레임 모드)</label><input className="n" type="number" style={{ width: 60 }} value={comfy.videoFps || 0} onChange={(e) => setComfy({ ...comfy, videoFps: e.target.value })} /><span className="meta">0=초 단위(LTX) · Wan은 16 (길이=초×fps, 4n+1 보정)</span></div>
+            <div className="frow"><label>최대 길이(초)</label><input className="n" type="number" style={{ width: 60 }} value={comfy.videoMaxSec || 0} onChange={(e) => setComfy({ ...comfy, videoMaxSec: e.target.value })} /><span className="meta">0=캡 없음(TTS 길이 그대로)</span></div>
             <div className="frow"><label>영상 타임아웃(초)</label><input type="number" value={comfy.timeoutSec} onChange={(e) => setComfy({ ...comfy, timeoutSec: e.target.value })} /></div>
-            <div className="meta">⚠ 영상 출력은 <b>SaveVideo/VHS(mp4)</b> 노드 필요. 이미지는 SaveImage 노드.</div>
+            <div className="meta">⚠ 영상 출력은 <b>SaveVideo/VHS(mp4)</b> 노드 필요. Wan은 fps=16 + 길이 노드를 Wan 워크플로의 length 노드로 지정.</div>
             <div className="mbtns"><button onClick={saveComfy}>저장</button><button className="ghost" onClick={() => setComfyOpen(false)}>취소</button></div>
           </div>
         </div>

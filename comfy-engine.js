@@ -55,6 +55,7 @@ class ComfyEngine {
     this.videoHeightNodeId = cfg.videoHeightNodeId || '';
     this.videoDurationNodeId = cfg.videoDurationNodeId || ''; // i2v 길이(초) 노드
     this.videoMaxSec = Number(cfg.videoMaxSec) > 0 ? Number(cfg.videoMaxSec) : 0; // 0 = 캡 없음(그룹 TTS 길이 그대로)
+    this.videoFps = Number(cfg.videoFps) > 0 ? Number(cfg.videoFps) : 0; // 0=초 모드(LTX), >0=프레임 모드(Wan)
     this.clientId = 'priming_' + Math.random().toString(36).slice(2, 10);
     this.log = logger;
   }
@@ -103,19 +104,25 @@ class ComfyEngine {
       else if (!hDone && /height/.test(t)) { n.inputs.value = d.h; hDone = true; }
     }
   }
-  // i2v 길이(초) — Duration 노드를 그룹 TTS 재생시간 그대로 설정. videoMaxSec>0 일 때만 상한 적용(기본 캡 없음).
+  // i2v 길이 — 그룹 TTS 재생시간으로 설정. 초 모드(LTX)면 초, 프레임 모드(Wan, videoFps>0)면 프레임(4n+1).
+  //   길이 노드의 value/length/num_frames/frames 중 있는 필드(리터럴)에 기록. videoMaxSec>0 일 때만 상한.
   _setVideoDuration(graph, durSec) {
     const ceil = Math.max(1, Math.ceil(Number(durSec) || 0));
     const sec = this.videoMaxSec > 0 ? Math.min(this.videoMaxSec, ceil) : ceil;
-    const setVal = (id) => { if (id && graph[id] && graph[id].inputs && 'value' in graph[id].inputs) { graph[id].inputs.value = sec; return true; } return false; };
-    if (setVal(this.videoDurationNodeId)) return sec;
-    for (const id of Object.keys(graph)) {
-      const n = graph[id];
-      if (!n.inputs || typeof n.inputs.value !== 'number') continue;
-      const t = ((n._meta && n._meta.title) || '').toLowerCase();
-      if (/duration/.test(t)) { n.inputs.value = sec; return sec; }
+    let target = sec; // 초 모드(LTX)
+    if (this.videoFps > 0) { // 프레임 모드(Wan): frames = sec×fps → 4n+1 보정
+      let f = Math.round(sec * this.videoFps);
+      target = Math.max(5, Math.round((f - 1) / 4) * 4 + 1);
     }
-    return sec;
+    const FIELDS = ['value', 'length', 'num_frames', 'frames', 'frame_count', 'video_frames'];
+    const setOn = (n) => { if (!n || !n.inputs) return false; for (const f of FIELDS) { if (f in n.inputs && typeof n.inputs[f] !== 'object') { n.inputs[f] = target; return true; } } return false; };
+    if (this.videoDurationNodeId && graph[this.videoDurationNodeId] && setOn(graph[this.videoDurationNodeId])) return target;
+    for (const id of Object.keys(graph)) {
+      const n = graph[id]; if (!n.inputs) continue;
+      const t = ((n._meta && n._meta.title) || '').toLowerCase();
+      if (/duration|length|frames|프레임|길이/.test(t) && setOn(n)) return target;
+    }
+    return target;
   }
   _buildGraph(uploadName, prompt, aspect, durSec) {
     if (!this.workflowPath || !fs.existsSync(this.workflowPath)) {

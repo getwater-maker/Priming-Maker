@@ -35,7 +35,10 @@ const DEFAULTS = {
   // i2v 영상 길이 = 그룹 TTS 길이에 맞춤. Duration 노드(초) 설정. 빈값이면 title 'Duration' 자동탐지.
   videoDurationNodeId: '',
   videoMaxSec: 0,         // 영상 최대 길이(초) — 0 = 캡 없음(그룹 TTS 길이 그대로). >0 이면 그 값으로 상한.
-  matchVideoToAudio: true, // 영상 길이를 그룹 TTS 재생시간에 맞춤 (ComfyUI/LTX)
+  matchVideoToAudio: true, // 영상 길이를 그룹 TTS 재생시간에 맞춤 (ComfyUI/LTX/Wan)
+  // 길이 단위 — 0 = 초(LTX Duration 노드). >0 = 프레임(Wan 등): frames = ceil(초)×fps 를 4n+1 로 보정.
+  //   Wan 2.2 i2v 는 보통 16fps → videoFps=16. (이때 길이 노드의 length/num_frames/value 에 프레임수 기록)
+  videoFps: 0,
 };
 
 function load() {
