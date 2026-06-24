@@ -731,12 +731,12 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
   const _frameRatio = _aspect === '9:16' ? 0.5625 : (_aspect === '1:1' ? 1.0 : 1.7777777777777777);
   const _canvasW = _aspect === '16:9' ? 1920 : 1080;
   const _canvasH = _aspect === '9:16' ? 1920 : (_aspect === '1:1' ? 1080 : 1080);
-  // 🔴 화면비를 결정하는 건 videoSize(캔버스 px) + 오버레이(web/shape) 트랙의 X좌표계다.
-  //    videoRatio 는 화면비와 무관한 상수 — 정상 .vrew 는 16:9·9:16 모두 0.5625. (역수 패치는 오진단이었음)
-  //    Vrew 가 9:16 으로 인식하려면 web/shape(제목·도형·AI고지) 트랙의 xPos/width 를 ×_overlayScale
-  //    해야 한다(미디어·자막 transcript 은 그대로). 아래 buildVrew 끝에서 일괄 적용.
-  //    _overlayScale = (16/9)×(H/W): 16:9=1.0(무변경=롱폼 정상) · 9:16=(16/9)²=3.1605 · 1:1=1.7778.
-  const _videoRatio = 0.5625;
+  // 🔴 videoRatio = 캔버스 가로/세로. Vrew 4.2.x 는 이 값으로 화면비를 인식한다.
+  //    16:9=1.7778 · 9:16=0.5625 · 1:1=1.0. (정답본 비교 2026-06-24: 0618 롱폼=1.7778, 9:16=0.5625)
+  //    ⚠ 과거 "둘 다 0.5625 상수" 는 오진 — 9:16 파일만 보고 내린 결론이라 롱폼(16:9)이 세로로 열렸음.
+  //    → _frameRatio(=가로/세로) 를 그대로 사용. 쇼츠(9:16)는 0.5625 로 동일, 롱폼만 1.7778 로 교정.
+  //    web/shape 오버레이 ×_overlayScale 은 별개로 유지(쇼츠 자막·제목 위치, make1.vrew 검증값).
+  const _videoRatio = _frameRatio;
   const _overlayScale = (16 / 9) * (_canvasH / _canvasW);
   if (pj.props && pj.props.videoSize) { pj.props.videoSize.width = _canvasW; pj.props.videoSize.height = _canvasH; }
   if (pj.props && pj.props.initProjectVideoSize) { pj.props.initProjectVideoSize.width = _canvasW; pj.props.initProjectVideoSize.height = _canvasH; }
