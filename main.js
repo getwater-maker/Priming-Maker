@@ -356,6 +356,18 @@ function detectScriptMode(scriptPath) {
   if (mq && /9:16/.test(mq[0]) && !/16:9/.test(mq[0])) return 'shorts';
   return 'longform';
 }
+// 작업본(스냅샷) 복원 시, 원본 .md 에서 형식(grouped/cut/prose)을 다시 판별.
+//   옛 스냅샷엔 형식 정보가 없어 직접 나눈 그룹(grouped)이 TTS 후 자동 재구성으로 합쳐지던 문제 방지.
+//   .md 를 못 읽으면 null → 호출부에서 'grouped'(안전: 재구성 안 함) 로 폴백.
+function detectFormatFromScript(scriptPath) {
+  try {
+    if (scriptPath && fs.existsSync(scriptPath)) {
+      const { parseCutScript } = require('./core/cut-script-parser');
+      return parseCutScript(fs.readFileSync(scriptPath, 'utf8')).format || null;
+    }
+  } catch (_) {}
+  return null;
+}
 
 ipcMain.handle('open-script', async (_e, args = {}) => {
   const preset = P.getPreset(args.presetName || null);
@@ -1174,8 +1186,9 @@ function buildParsedForScript(scriptPath, mode, preset) {
   let parsed;
   if (sameMode && snap.savedAt && snap.savedAt >= mdMtime) {
     const projects = projectsFromSnapshot(snap);
-    for (const pr of projects) pr.mode = mode;
-    parsed = { fileTitle: snap.fileTitle, meta: snap.meta, projects, format: 'grouped', mode };
+    const fmt = detectFormatFromScript(scriptPath) || 'grouped'; // 원본 .md 로 형식 재판별(옛 스냅샷 보정)
+    for (const pr of projects) { pr.mode = mode; if (!pr.format) pr.format = fmt; }
+    parsed = { fileTitle: snap.fileTitle, meta: snap.meta, projects, format: fmt, mode };
     note = `♻ 작업본 이어받기 (${new Date(snap.savedAt).toLocaleString()})`;
   } else {
     parsed = P.parseScript(scriptPath, mode, presetThresholds(preset));
@@ -1374,8 +1387,9 @@ ipcMain.handle('load-project', async () => {
   const projects = projectsFromSnapshot(snap);
   S.scriptPath = snap.scriptPath; S.outRoot = snap.outRoot;
   S.mode = (snap.mode === 'longform') ? 'longform' : 'shorts';
-  for (const pr of projects) pr.mode = S.mode;
-  S.parsed = { fileTitle: snap.fileTitle, meta: snap.meta, projects, format: 'grouped', mode: S.mode };
+  const fmt = detectFormatFromScript(snap.scriptPath) || 'grouped'; // 원본 .md 로 형식 재판별(옛 스냅샷 보정)
+  for (const pr of projects) { pr.mode = S.mode; if (!pr.format) pr.format = fmt; }
+  S.parsed = { fileTitle: snap.fileTitle, meta: snap.meta, projects, format: fmt, mode: S.mode };
   addItem(S.parsed, S.scriptPath, S.outRoot); // 현재 모드 큐에 추가 + 활성화
   log(`📂 프로젝트 불러오기(${S.mode}): ${r.filePaths[0]}`);
   return { dto: P.toDTO(S.parsed), scriptPath: S.scriptPath, outRoot: S.outRoot, mode: S.mode, queue: queueDTO() };

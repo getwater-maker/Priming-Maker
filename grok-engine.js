@@ -247,7 +247,9 @@ class GrokEngine {
   async _checkRequestLimit() {
     try {
       const txt = await this.page.evaluate(() => (document.body ? document.body.innerText : '') || '');
-      if (/요청\s*한도에?\s*도달|request\s*limit\s*reached|Upgrade to SuperGrok/i.test(txt)) {
+      // 중단 신호: 요청(전체) 한도 · 480p 생성 한도 · SuperGrok 업그레이드 권유 · request limit.
+      //   ※ 720p 한도는 _check720pLimit 가 480p 전환으로 처리하므로 여기서 제외(잘못 멈춤 방지).
+      if (/요청\s*한도에?\s*도달|Upgrade to SuperGrok|request\s*limit\s*reached|480p.{0,12}한도/i.test(txt)) {
         const m = txt.match(/(오전|오후)\s*\d{1,2}:\d{2}[^\n]*?(다시 사용|available)/);
         return { limited: true, reset: m ? m[0].trim() : '' };
       }
@@ -572,16 +574,28 @@ class GrokEngine {
         // 버튼 클릭 후에도 안 됐을 케이스 대비해서 Enter 도 발사 (이미 페이지 전환된 경우엔 무시됨)
         try { await this.page.keyboard.press('Enter'); } catch (_) {}
         this.log('[Grok] 생성 요청 전송 — 결과 페이지로 이동 대기 (최대 90초)');
-        await this.page.waitForURL(/\/imagine\/post\//, { timeout: 90000 });
+        // 제출 직후 짧은 간격 폴링 — 결과 URL 이동 vs 한도 토스트(요청/480p 한도)를 동시에 감시.
+        //   한도 토스트는 몇 초 뒤 사라지므로, 90초 끝에 한 번 검사하면 놓친다 → 1.5초마다 즉시 잡는다.
+        const deadline = Date.now() + 90000;
+        while (Date.now() < deadline) {
+          if (/\/imagine\/post\//.test(this.page.url())) return; // 결과 페이지 진입 = 성공
+          const rl = await this._checkRequestLimit();
+          if (rl.limited) { const e = new Error('한도 도달'); e._limit = rl; throw e; }
+          await this.page.waitForTimeout(1500);
+        }
+        throw new Error('결과 페이지 이동 타임아웃(90초)');
       };
+      // 한도 예외 → limitReached 결과로 변환 (상위가 작업 중단 + 안내 팝업)
+      const _asLimit = (rl) => { this.log(`[Grok] ⛔ 한도 도달 감지 — 중단${rl.reset ? ` (${rl.reset})` : ''}`); return { success: false, limitReached: true, reset: rl.reset, error: `Grok 한도 도달${rl.reset ? ` (${rl.reset})` : ''}` }; };
 
       try {
         await _trySubmitAndWait();
         this.log(`[Grok] 결과 페이지 진입: ${this.page.url()}`);
       } catch (e) {
-        // 요청(전체) 한도 팝업이면 재시도해도 소용없음 — 즉시 한도 반환(상위가 작업 중단·팝업)
+        // 한도(요청/480p) 감지면 재시도해도 소용없음 — 즉시 중단 반환
+        if (e._limit) return _asLimit(e._limit);
         const rl0 = await this._checkRequestLimit();
-        if (rl0.limited) { this.log(`[Grok] ⛔ 요청 한도 도달 감지${rl0.reset ? ` — ${rl0.reset}` : ''}`); return { success: false, limitReached: true, reset: rl0.reset, error: `Grok 요청 한도 도달${rl0.reset ? ` (${rl0.reset})` : ''}` }; }
+        if (rl0.limited) return _asLimit(rl0);
         // 1차 실패 — 페이지 새로고침 + 1회 재시도
         this.log(`[Grok] 1차 submit 실패 (${e.message}) — 페이지 새로고침 후 1회 재시도`);
         try {
@@ -596,8 +610,9 @@ class GrokEngine {
             this.log(`[Grok] 결과 페이지 진입(재시도): ${this.page.url()}`);
           }
         } catch (e2) {
+          if (e2._limit) return _asLimit(e2._limit);
           const rl = await this._checkRequestLimit();
-          if (rl.limited) { this.log(`[Grok] ⛔ 요청 한도 도달 감지${rl.reset ? ` — ${rl.reset}` : ''}`); return { success: false, limitReached: true, reset: rl.reset, error: `Grok 요청 한도 도달${rl.reset ? ` (${rl.reset})` : ''}` }; }
+          if (rl.limited) return _asLimit(rl);
           return { success: false, error: `결과 페이지로 이동 안 됨 (재시도 후 실패: ${e2.message})` };
         }
       }
