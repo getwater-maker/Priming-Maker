@@ -241,6 +241,20 @@ class GrokEngine {
     }
   }
 
+  // 요청(전체) 한도 팝업 감지 — "요청 한도에 도달했습니다 / Upgrade to SuperGrok".
+  //   720p 한도(_check720pLimit, 자동 480p 전환)와는 다른, 계정 전체 요청 한도.
+  //   이게 뜨면 재시도해도 소용없으므로 작업을 멈춰야 한다. 반환: { limited, reset }(reset=재사용 시각 텍스트).
+  async _checkRequestLimit() {
+    try {
+      const txt = await this.page.evaluate(() => (document.body ? document.body.innerText : '') || '');
+      if (/요청\s*한도에?\s*도달|request\s*limit\s*reached|Upgrade to SuperGrok/i.test(txt)) {
+        const m = txt.match(/(오전|오후)\s*\d{1,2}:\d{2}[^\n]*?(다시 사용|available)/);
+        return { limited: true, reset: m ? m[0].trim() : '' };
+      }
+    } catch (_) {}
+    return { limited: false, reset: '' };
+  }
+
   // 720p 막힘이 의심될 때 해상도 칩 영역 DOM 을 로그로 덤프 — 빨간 계기판 아이콘/disabled 마크업 확인용.
   async _dumpResChips() {
     try {
@@ -565,6 +579,9 @@ class GrokEngine {
         await _trySubmitAndWait();
         this.log(`[Grok] 결과 페이지 진입: ${this.page.url()}`);
       } catch (e) {
+        // 요청(전체) 한도 팝업이면 재시도해도 소용없음 — 즉시 한도 반환(상위가 작업 중단·팝업)
+        const rl0 = await this._checkRequestLimit();
+        if (rl0.limited) { this.log(`[Grok] ⛔ 요청 한도 도달 감지${rl0.reset ? ` — ${rl0.reset}` : ''}`); return { success: false, limitReached: true, reset: rl0.reset, error: `Grok 요청 한도 도달${rl0.reset ? ` (${rl0.reset})` : ''}` }; }
         // 1차 실패 — 페이지 새로고침 + 1회 재시도
         this.log(`[Grok] 1차 submit 실패 (${e.message}) — 페이지 새로고침 후 1회 재시도`);
         try {
@@ -579,6 +596,8 @@ class GrokEngine {
             this.log(`[Grok] 결과 페이지 진입(재시도): ${this.page.url()}`);
           }
         } catch (e2) {
+          const rl = await this._checkRequestLimit();
+          if (rl.limited) { this.log(`[Grok] ⛔ 요청 한도 도달 감지${rl.reset ? ` — ${rl.reset}` : ''}`); return { success: false, limitReached: true, reset: rl.reset, error: `Grok 요청 한도 도달${rl.reset ? ` (${rl.reset})` : ''}` }; }
           return { success: false, error: `결과 페이지로 이동 안 됨 (재시도 후 실패: ${e2.message})` };
         }
       }

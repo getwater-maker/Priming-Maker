@@ -966,6 +966,20 @@ function warnIncompleteVisuals(incomplete) {
   } catch {}
 }
 
+// Grok 요청(전체) 한도로 작업을 멈췄을 때 안내 팝업. info = { reset }(재사용 시각 텍스트).
+function warnGrokLimit(info) {
+  log(`⛔ Grok 요청 한도로 작업 중단${info && info.reset ? ` — ${info.reset}` : ''}`);
+  try {
+    dialog.showMessageBox(win, {
+      type: 'warning',
+      title: 'Grok 요청 한도 도달 — 작업을 멈췄습니다',
+      message: 'Grok 비디오 생성 요청 한도에 도달해 더 진행하지 않고 멈췄습니다.',
+      detail: `${info && info.reset ? info.reset + ' 무렵 다시 사용할 수 있습니다.\n\n' : ''}한도가 풀린 뒤 다시 "만들기"를 누르면, 이미 만들어진 TTS·이미지·비디오는 재사용하고 빠진 비디오만 이어서 생성합니다.\n(추후: 다른 Grok 계정 또는 Flow 로 자동 전환 예정)`,
+      buttons: ['확인'],
+    });
+  } catch {}
+}
+
 // 영상화할 그룹 번호 — 범위(fromNum~toNum) 안의 그룹. 범위 미지정이면 전체 그룹.
 //   (랜덤/개수 방식은 폐지 — 사용자가 N~N 범위로 지정)
 function rangeNums(project, fromNum, toNum) {
@@ -978,6 +992,7 @@ ipcMain.handle('video-build', async (_e, args = {}) => {
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
   const { shortsNum = null, fromNum = null, toNum = null, engine = 'grok', flowVideoModel = 'Veo 3.1 - Lite', flowCount = 'x1', upscale = false, imgEngine = 'rotate', styleId = null } = args;
   S.abort = false;
+  S.grokLimit = null;
   const _vidT0 = Date.now();
   S.timings.video = 0;
   for (const pr of S.parsed.projects) {
@@ -1007,9 +1022,10 @@ ipcMain.handle('video-build', async (_e, args = {}) => {
         await runComfyVideos(pr, videoDir, log, { onlyNums });
       } else {
         log(`🎬 ${prLabel(pr)} 비디오 생성 (Grok ${grokDurOf(engine) === 'auto' ? '자동 6/10초' : grokDurOf(engine)}${rangeLbl})…`);
-        await P.generateHookVideosGrok(pr, videoDir, log, () => S.abort, 0, pushDtoUpdate, onlyNums, grokDurOf(engine));
+        const vr = await P.generateHookVideosGrok(pr, videoDir, log, () => S.abort, 0, pushDtoUpdate, onlyNums, grokDurOf(engine));
+        if (vr && vr.limitReached) { S.grokLimit = vr.limitReached; S.abort = true; log('⛔ Grok 요청 한도 도달 — 작업을 멈춥니다'); }
       }
-      await maybeUpscale(pr, log, true); // 모든 영상 1080p 업스케일
+      if (!S.abort) await maybeUpscale(pr, log, true); // 모든 영상 1080p 업스케일 (중단 시 생략)
       log(`✓ ${prLabel(pr)} 영상 완료`);
     } catch (e) {
       log(`✗ ${prLabel(pr)} 영상 실패: ${e.message}`);
@@ -1017,6 +1033,7 @@ ipcMain.handle('video-build', async (_e, args = {}) => {
     pushDtoUpdate(); // 생성된 영상(g.videoPath)을 UI 썸네일에 즉시 반영
   }
   try { await closeFlowEng(); } catch {} // Flow 이미지/영상 창 닫고 마무리
+  if (S.grokLimit) { warnGrokLimit(S.grokLimit); S.grokLimit = null; } // Grok 요청 한도 안내 팝업
   S.timings.video = (Date.now() - _vidT0) / 1000;
   pushDtoUpdate();
   return P.toDTO(S.parsed);
@@ -1365,6 +1382,7 @@ async function runMakeAllCore(opts = {}) {
     ttsMgr = mgr;
   }
   S.abort = false;
+  S.grokLimit = null; // 이번 실행 중 Grok 요청 한도 감지 여부(감지 시 작업 중단 + 팝업)
   try { fs.mkdirSync(S.outRoot, { recursive: true }); } catch {}
   // 프롬프트 없는 그룹(prose 대본) → 이미지 전에 API로 자동 생성 (내용 맞는 이미지)
   if (!dry) { await autoFillPrompts(S.parsed.projects.filter((p) => !shortsNum || p.shortsNum === shortsNum), log); }
@@ -1433,38 +1451,46 @@ async function runMakeAllCore(opts = {}) {
       try {
         if (videoEngine === 'flow') await runFlowVideos(pr, dirs.media, log, { model: flowVideoModel, count: flowCount, onlyNums: vOnly });
         else if (videoEngine === 'comfy') await runComfyVideos(pr, dirs.media, log, { onlyNums: vOnly });
-        else await P.generateHookVideosGrok(pr, dirs.media, log, () => S.abort, 0, pushDtoUpdate, vOnly, grokDurOf(videoEngine));
-        await maybeUpscale(pr, log, true); // 모든 영상 1080p 업스케일
+        else {
+          const vr = await P.generateHookVideosGrok(pr, dirs.media, log, () => S.abort, 0, pushDtoUpdate, vOnly, grokDurOf(videoEngine));
+          if (vr && vr.limitReached) { S.grokLimit = vr.limitReached; S.abort = true; log('⛔ Grok 요청 한도 도달 — 작업을 멈춥니다 (한도 풀린 뒤 다시 만들기)'); }
+        }
+        if (!S.abort) await maybeUpscale(pr, log, true); // 모든 영상 1080p 업스케일 (중단 시 생략)
       } catch (e) { log(`${prLabel(pr)} 영상 실패: ${e.message}`); }
       S.timings.video += (Date.now() - t0) / 1000;
       pushDtoUpdate(); // 생성된 영상(g.videoPath)도 UI 에 반영
     }
   }
 
-  // ── 4단계: .vrew — 전 쇼츠. 이미지(쇼츠는 영상) 미생성 그룹이 있는 편은 .vrew 를 만들지 않고 팝업으로 알림. ──
-  log('📦 4단계 — .vrew 일괄 생성…');
-  const incomplete = [];
-  for (const pr of projects) {
-    const miss = missingVisualGroups(pr);
-    if (miss.length) {
-      incomplete.push({ label: prLabel(pr), nums: miss });
-      log(`⛔ ${prLabel(pr)} — 이미지 미생성 그룹 ${miss.length}개 (G${miss.join(', G')}) → .vrew 건너뜀`);
-      continue;
+  // ── 4단계: .vrew — 전 쇼츠. (중단 시엔 .vrew 생성·이후 작업 모두 생략 — 사용자가 멈췄으면 뒤 작업 안 함) ──
+  if (!S.abort) {
+    log('📦 4단계 — .vrew 일괄 생성…');
+    const incomplete = [];
+    for (const pr of projects) {
+      const miss = missingVisualGroups(pr);
+      if (miss.length) {
+        incomplete.push({ label: prLabel(pr), nums: miss });
+        log(`⛔ ${prLabel(pr)} — 이미지 미생성 그룹 ${miss.length}개 (G${miss.join(', G')}) → .vrew 건너뜀`);
+        continue;
+      }
+      let ep = preset;
+      if (ep && captionStyle) ep = { ...ep, captionStyle: { ...(ep.captionStyle || {}), ...captionStyle } };
+      ep = resolveAiNotice(ep, aiNotice); // 롱폼=항상 / 쇼츠=사용자 선택
+      const dirs = shortsDirs(S.outRoot, pr.shortsNum);
+      const baseName = vrewBaseName(pr);
+      const vrewPath = path.join(S.outRoot, `${baseName}.vrew`);
+      try {
+        const res = await P.buildProjectVrew(pr, vrewPath, ep, log, captionMaxChars); // 배속은 음성에 이미 반영
+        P.writeSrt(pr, path.join(dirs.subtitles, `${baseName}.srt`), captionMaxChars);
+        log(`✓ ${pr.title}.vrew (clip ${res.clipCount})`);
+        if (openVrew) shell.openPath(vrewPath);
+      } catch (e) { log(`${prLabel(pr)} vrew 실패: ${e.message}`); }
     }
-    let ep = preset;
-    if (ep && captionStyle) ep = { ...ep, captionStyle: { ...(ep.captionStyle || {}), ...captionStyle } };
-    ep = resolveAiNotice(ep, aiNotice); // 롱폼=항상 / 쇼츠=사용자 선택
-    const dirs = shortsDirs(S.outRoot, pr.shortsNum);
-    const baseName = vrewBaseName(pr);
-    const vrewPath = path.join(S.outRoot, `${baseName}.vrew`);
-    try {
-      const res = await P.buildProjectVrew(pr, vrewPath, ep, log, captionMaxChars); // 배속은 음성에 이미 반영
-      P.writeSrt(pr, path.join(dirs.subtitles, `${baseName}.srt`), captionMaxChars);
-      log(`✓ ${pr.title}.vrew (clip ${res.clipCount})`);
-      if (openVrew && !S.abort) shell.openPath(vrewPath); // 중단 시 .vrew 자동 열기 생략
-    } catch (e) { log(`${prLabel(pr)} vrew 실패: ${e.message}`); }
+    warnIncompleteVisuals(incomplete);
+  } else {
+    log('⏹ 중단됨 — .vrew 생성 및 이후 작업 생략');
   }
-  if (!S.abort) warnIncompleteVisuals(incomplete); // 중단 시엔 '이미지 미생성' 경고 팝업 생략 (의도된 중단)
+  if (S.grokLimit) { warnGrokLimit(S.grokLimit); S.grokLimit = null; } // Grok 요청 한도로 멈춘 경우 안내 팝업
   if (ttsMgr) { try { await ttsMgr.stop(); } catch {} }
   try { await closeFlowEng(); } catch {} // Flow 이미지/영상 창 닫고 마무리
   S.timings.make = (Date.now() - _makeT0) / 1000;

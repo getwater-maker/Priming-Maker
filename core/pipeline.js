@@ -441,8 +441,10 @@ async function generateHookVideosGrok(project, videoDir, logger, abortSignal, vi
   if (!autoDur) eng._videoDuration = videoDuration;
 
   const results = [];
+  let limitReached = null;
   try {
     for (const g of targets) {
+      if (abortSignal && abortSignal()) { log('⏹ 중단 — 남은 비디오 그룹 생략'); break; } // 중단 시 다음 그룹으로 넘어가지 않음
       if (!g.imagePath || !fs.existsSync(g.imagePath)) {
         log(`그룹${g.num}: 이미지가 없어 영상 건너뜀 (먼저 이미지 생성 필요)`);
         results.push({ num: g.num, success: false, error: 'no image' });
@@ -487,6 +489,14 @@ async function generateHookVideosGrok(project, videoDir, logger, abortSignal, vi
           try { await eng.stop(); } catch {} // 브라우저 정리 → 다음 시도에서 start() 새로 진입
         }
       }
+      if (res && res.limitReached) {
+        // Grok 요청(전체) 한도 도달 — 더 시도해도 소용없음. 남은 그룹 중단하고 상위로 전파.
+        g.videoStatus = 'fail';
+        log(`⛔ 그룹${g.num} — Grok 요청 한도 도달${res.reset ? ` (${res.reset})` : ''} — 비디오 생성 중단`);
+        results.push({ num: g.num, ...res });
+        limitReached = res;
+        break;
+      }
       if (res && res.success && res.videoPath) {
         g.videoPath = res.videoPath;
         g.videoSourceImage = g.imagePath;
@@ -505,6 +515,7 @@ async function generateHookVideosGrok(project, videoDir, logger, abortSignal, vi
   }
   const okN = results.filter((r) => r && r.success).length;
   if (okN > 0) { try { GrokAcc.markUsed(grokProfile, okN); } catch {} } // 계정 오늘 사용량 누적
+  if (limitReached) results.limitReached = limitReached; // 상위(runMakeAllCore)가 작업 중단·팝업 처리
   return results;
 }
 
