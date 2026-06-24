@@ -73,7 +73,8 @@ const HOOK_RE = /^\s*-\s*훅\s*자막\s*\(\s*첫\s*프레임\s*\)\s*:\s*(.+?)\s*
 
 // ── 신규(그룹) 형식 ─────────────────────────────────────
 // **🎬 그룹 1 ｜훅 (이미지 → 비디오)**  /  **🎞️ 그룹 2 ｜본론 (이미지 + 모션)**
-const GROUP_HEADER_RE = /그룹\s*(\d+)\s*[｜|│ǀ]\s*([^(（]+?)\s*[（(]([^)）]+)[)）]/;
+// 그룹 헤더: "그룹 N ｜단계 (모드)" — 모드 괄호는 선택(없는 그룹: 본론/재훅/절정 직전 등도 인식).
+const GROUP_HEADER_RE = /그룹\s*(\d+)\s*[｜|│ǀ]\s*([^(（]+?)\s*(?:[（(]([^)）]+)[)）])?\s*\**\s*$/;
 const backtick = (t) => { const m = t.match(/`([^`]+)`/); return m ? m[1].trim() : null; };
 
 // ── 구(컷) 형식 ─────────────────────────────────────────
@@ -134,10 +135,10 @@ function parseShortsBlockGrouped(lines) {
       const gh = t.match(GROUP_HEADER_RE);
       if (gh) {
         const phase = gh[2].trim();
-        const modeText = gh[3].trim();
+        const modeText = (gh[3] || '').trim(); // 모드 괄호 없는 그룹(본론 등)은 빈 문자열
         cur = {
           num: parseInt(gh[1], 10), phase, modeText,
-          isI2V: /비디오|I2V/i.test(modeText),
+          isI2V: /비디오|I2V/i.test(modeText), // videoPrompt 가 있으면 buildProjectModelGrouped 에서 보정
           sentences: [], imagePrompt: null, videoPrompt: null, motionNote: null,
         };
         groups.push(cur);
@@ -187,8 +188,10 @@ function buildProjectModelGrouped(groupsData) {
     g.videoPrompt = gd.videoPrompt || null;
     g.phase = gd.phase || null;
     g.title = gd.phase || null;
-    g.mode = gd.isI2V ? 'i2v' : 'motion';
-    g.isI2V = !!gd.isI2V;
+    // i2v 프롬프트가 있으면 모드 표기와 무관하게 i2v (괄호 없는 그룹도 🎬 비디오 프롬프트 보유)
+    const i2v = !!gd.isI2V || !!(gd.videoPrompt && gd.videoPrompt.trim());
+    g.mode = i2v ? 'i2v' : 'motion';
+    g.isI2V = i2v;
     g.motionNote = gd.motionNote || null;
     // 문장이 하나도 없으면 빈 그룹 — 스킵(이미지/영상만 있는 비정상 블록 방지)
     const texts = (gd.sentences && gd.sentences.length) ? gd.sentences : [];

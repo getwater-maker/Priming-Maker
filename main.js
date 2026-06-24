@@ -420,9 +420,11 @@ ipcMain.handle('tts-build', async (_e, args = {}) => {
     else { await P.fillTts(pr, S.preset, S.ttsMgr, ttsDir, log, () => S.abort, speed, pushDtoUpdate); log(`✓ ${prLabel(pr)} 음성 완료`); }
     // 음성변환 직후: (쇼츠만) 문장 기준 clipMaxSec(영상 엔진별 6/8초) 미만 단위로 그룹 자동 재구성.
     //   롱폼은 group-builder 가 이미 의미 단위로 묶었으므로 8초 재패킹을 건너뛴다.
-    if (getModeProfile(currentMode()).grouping.strategy === 'tts-greedy') {
+    if (getModeProfile(currentMode()).grouping.strategy === 'tts-greedy' && pr.format !== 'grouped') {
       const m = P.mergeGroupsByTts(pr, clipMaxSec);
       log(`  ↳ ${clipMaxSec}초 미만 단위로 그룹 재구성: ${m.before} → ${m.after}개`);
+    } else if (pr.format === 'grouped') {
+      log(`  ↳ 작성된 그룹 구조 유지 (그룹 ${pr.groups.length}개) — 자동 재구성 생략`);
     }
     pushDtoUpdate();
   }
@@ -1178,6 +1180,7 @@ function buildSnapshot() {
     savedAt: Date.now(),
     projects: S.parsed.projects.map((pr) => ({
       shortsNum: pr.shortsNum, title: pr.title, aspect: pr.aspect, hookCaption: pr.hookCaption, voice: pr.voice,
+      format: pr.format || S.parsed.format || null, // 대본 형식 보존(grouped 면 자동 재구성 건너뜀)
       titleLine1: pr.titleLine1, titleLine2: pr.titleLine2,
       t1Size: pr.t1Size, t1Color: pr.t1Color, t1Align: pr.t1Align,
       t2Size: pr.t2Size, t2Color: pr.t2Color, t2Align: pr.t2Align,
@@ -1283,7 +1286,7 @@ function projectsFromSnapshot(snap) {
     });
     finalizeGroupIds(groups, sentences);
     const proj = new Project({ sentences, groups });
-    Object.assign(proj, { aspect: ps.aspect, title: ps.title, shortsNum: ps.shortsNum, hookCaption: ps.hookCaption, voice: ps.voice,
+    Object.assign(proj, { format: ps.format || snap.format || null, aspect: ps.aspect, title: ps.title, shortsNum: ps.shortsNum, hookCaption: ps.hookCaption, voice: ps.voice,
       titleLine1: ps.titleLine1, titleLine2: ps.titleLine2,
       t1Size: ps.t1Size, t1Color: ps.t1Color, t1Align: ps.t1Align, t2Size: ps.t2Size, t2Color: ps.t2Color, t2Align: ps.t2Align,
       bgEnabled: ps.bgEnabled, bgFill: ps.bgFill, bgFillOp: ps.bgFillOp, bgStroke: ps.bgStroke,
@@ -1387,9 +1390,11 @@ async function runMakeAllCore(opts = {}) {
       if (dry) P.fillSilent(pr, dirs.tts);
       else await P.fillTts(pr, preset, ttsMgr, dirs.tts, log, () => S.abort, speed, pushDtoUpdate);
       // 음성 직후 그룹 재구성(쇼츠 모드만) — TTS 버튼(tts-build)과 동일. clipMaxSec 없으면 생략.
-      if (!dry && clipMaxSec && getModeProfile(currentMode()).grouping.strategy === 'tts-greedy') {
+      if (!dry && clipMaxSec && getModeProfile(currentMode()).grouping.strategy === 'tts-greedy' && pr.format !== 'grouped') {
         const m = P.mergeGroupsByTts(pr, clipMaxSec);
         log(`  ↳ ${prLabel(pr)} ${clipMaxSec}초 미만 단위 그룹 재구성: ${m.before} → ${m.after}개`);
+      } else if (pr.format === 'grouped') {
+        log(`  ↳ ${prLabel(pr)} 작성된 그룹 구조 유지 (그룹 ${pr.groups.length}개) — 자동 재구성 생략`);
       }
       log(`✓ ${prLabel(pr)} 음성 완료`);
     } catch (e) { log(`${prLabel(pr)} 음성 오류: ${e.message}`); }
