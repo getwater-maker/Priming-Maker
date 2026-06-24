@@ -1428,30 +1428,36 @@ async function runMakeAllCore(opts = {}) {
   //   (트레이드오프: 예전 Genspark/Flow 의 'TTS∥이미지' 동시 실행은 사라짐 — 의도된 변경.)
   const projects = S.parsed.projects.filter((pr) => !shortsNum || pr.shortsNum === shortsNum);
 
-  // ── 1단계: 음성(TTS) — 쇼츠1 1그룹부터 쇼츠N 마지막 그룹까지 ──
-  log('🎙 1단계 — 음성(TTS) 일괄 변환…');
-  for (const pr of projects) {
-    if (S.abort) { log('⏹ 중단됨'); break; }
-    const dirs = shortsDirs(S.outRoot, pr.shortsNum);
-    const t0 = Date.now();
-    try {
-      if (dry) P.fillSilent(pr, dirs.tts);
-      else await P.fillTts(pr, preset, ttsMgr, dirs.tts, log, () => S.abort, speed, pushDtoUpdate);
-      // 음성 직후 그룹 재구성(쇼츠 모드만) — TTS 버튼(tts-build)과 동일. clipMaxSec 없으면 생략.
-      if (!dry && clipMaxSec && getModeProfile(currentMode()).grouping.strategy === 'tts-greedy' && pr.format !== 'grouped') {
-        const m = P.mergeGroupsByTts(pr, clipMaxSec);
-        log(`  ↳ ${prLabel(pr)} ${clipMaxSec}초 미만 단위 그룹 재구성: ${m.before} → ${m.after}개`);
-      } else if (pr.format === 'grouped') {
-        log(`  ↳ ${prLabel(pr)} 작성된 그룹 구조 유지 (그룹 ${pr.groups.length}개) — 자동 재구성 생략`);
-      }
-      log(`✓ ${prLabel(pr)} 음성 완료`);
-    } catch (e) { log(`${prLabel(pr)} 음성 오류: ${e.message}`); }
-    S.timings.tts += (Date.now() - t0) / 1000;
-    pushDtoUpdate();
-  }
+  // ── 1·2단계: 음성(TTS) + 이미지 ──
+  //   이미지 엔진이 Genspark/Flow(브라우저, 로컬 GPU 미사용)면 TTS 와 '병렬' → 더 빠름(GPU 비충돌).
+  //   ComfyUI(로컬 GPU)면 TTS(OmniVoice GPU)와 겹치면 VRAM 충돌 → '순차'.
+  //   또한 cut/prose 처럼 TTS 후 그룹 재구성이 일어나면 이미지가 그룹에 의존 → 안전하게 순차.
+  const willRegroup = (pr) => (!dry && clipMaxSec && getModeProfile(currentMode()).grouping.strategy === 'tts-greedy' && pr.format !== 'grouped');
+  const browserImg = (engine === 'genspark' || engine === 'flow');
+  const canParallel = !dry && browserImg && !projects.some(willRegroup);
 
-  // ── 2단계: 이미지 — 전 쇼츠 ──
-  if (!dry && !S.abort) {
+  const ttsStage = async () => {
+    log('🎙 1단계 — 음성(TTS) 일괄 변환…');
+    for (const pr of projects) {
+      if (S.abort) { log('⏹ 중단됨'); break; }
+      const dirs = shortsDirs(S.outRoot, pr.shortsNum);
+      const t0 = Date.now();
+      try {
+        if (dry) P.fillSilent(pr, dirs.tts);
+        else await P.fillTts(pr, preset, ttsMgr, dirs.tts, log, () => S.abort, speed, pushDtoUpdate);
+        if (willRegroup(pr)) {
+          const m = P.mergeGroupsByTts(pr, clipMaxSec);
+          log(`  ↳ ${prLabel(pr)} ${clipMaxSec}초 미만 단위 그룹 재구성: ${m.before} → ${m.after}개`);
+        } else if (pr.format === 'grouped') {
+          log(`  ↳ ${prLabel(pr)} 작성된 그룹 구조 유지 (그룹 ${pr.groups.length}개) — 자동 재구성 생략`);
+        }
+        log(`✓ ${prLabel(pr)} 음성 완료`);
+      } catch (e) { log(`${prLabel(pr)} 음성 오류: ${e.message}`); }
+      S.timings.tts += (Date.now() - t0) / 1000;
+      pushDtoUpdate();
+    }
+  };
+  const imageStage = async () => {
     log('🖼 2단계 — 이미지 일괄 생성…');
     for (const pr of projects) {
       if (S.abort) { log('⏹ 중단됨'); break; }
@@ -1467,6 +1473,17 @@ async function runMakeAllCore(opts = {}) {
       cacheGeneratedImages(pr, styleId, engine);
       S.timings.image += (Date.now() - t0) / 1000;
       pushDtoUpdate(); // 이미지 매핑(g.imagePath) UI 썸네일에 반영
+    }
+  };
+
+  if (canParallel) {
+    log(`⚡ 1·2단계 병렬 — TTS ∥ 이미지(${engine}, 브라우저 엔진이라 GPU 비충돌)`);
+    await Promise.all([ttsStage(), imageStage()]);
+  } else {
+    await ttsStage();
+    if (!dry && !S.abort) {
+      if (engine === 'comfy') log('🖼 2단계 — 이미지(ComfyUI, GPU) — TTS 후 순차 진행');
+      await imageStage();
     }
   }
 
