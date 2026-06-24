@@ -1098,8 +1098,14 @@ ipcMain.handle('clear-asset', (_e, args = {}) => {
   const pr = S.parsed.projects.find((p) => p.shortsNum === shortsNum);
   const g = pr && pr.groups.find((x) => x.num === groupNum);
   if (g) {
-    g.imagePath = null; g.videoPath = null; g.imageStatus = 'idle'; g.videoStatus = 'idle'; g.videoSourceImage = null;
-    log(`자산 삭제: ${pr.title} G${groupNum}`);
+    // 단계별 삭제: 영상이 있으면 영상만 지워 이미지가 다시 보이게, 영상이 없으면 이미지를 지워 빈칸으로.
+    if (g.videoPath) {
+      g.videoPath = null; g.videoStatus = 'idle'; g.videoSourceImage = null;
+      log(`영상 삭제: ${pr.title} G${groupNum} (이미지 유지)`);
+    } else {
+      g.imagePath = null; g.imageStatus = 'idle';
+      log(`이미지 삭제: ${pr.title} G${groupNum}`);
+    }
   }
   return P.toDTO(S.parsed);
 });
