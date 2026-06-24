@@ -164,7 +164,15 @@ async function fillTtsList(sentences, preset, ttsMgr, workDir, onLine, abortSign
   const synthOpts = {
     provider: preset.engine,
     refAudioPath: preset.voiceCloneRefAudio || undefined,
-    refText: preset.voiceCloneRefText || undefined,
+    // 참조텍스트: 참조음성과 같은 이름의 .txt 가 있으면 그 내용을 사용(이전 프로그램 방식 — 직접입력 불필요).
+    //   없으면 preset.voiceCloneRefText 폴백.
+    refText: (() => {
+      const a = preset.voiceCloneRefAudio;
+      if (a) {
+        try { const tp = a.replace(/\.[^.\\/]+$/, '.txt'); if (fs.existsSync(tp)) { const t = fs.readFileSync(tp, 'utf8').trim(); if (t) return t; } } catch {}
+      }
+      return preset.voiceCloneRefText || undefined;
+    })(),
     instruct: preset.instruct || undefined,
     cfgValue: preset.cfgValue,
     inferenceTimesteps: preset.inferenceTimesteps,

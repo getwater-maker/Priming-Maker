@@ -206,7 +206,13 @@ app.on('before-quit', () => {
 
 const log = (line) => { if (win && !win.isDestroyed()) win.webContents.send('log', String(line)); };
 
-ipcMain.handle('get-app-version', () => { try { return app.getVersion(); } catch { return ''; } });
+// 버전 표시 — app.getVersion() 은 electron 시작 시점의 package.json(=이번 실행 업데이트 적용 전) 을
+//   캐시해 한 박자 늦는다. 라이트 업데이터는 main.js 로드 전에 package.json 을 교체하므로,
+//   파일에서 직접 읽으면 방금 적용된 최신 버전이 보인다.
+ipcMain.handle('get-app-version', () => {
+  try { return JSON.parse(fs.readFileSync(path.join(app.getAppPath(), 'package.json'), 'utf8')).version || app.getVersion(); }
+  catch { try { return app.getVersion(); } catch { return ''; } }
+});
 
 ipcMain.handle('list-presets', () => {
   try { return P.listPresets(); } catch (e) { return []; }
@@ -329,6 +335,15 @@ ipcMain.handle('list-ref-audio', () => {
   try {
     return fs.readdirSync(dir).filter((f) => /\.(wav|mp3|flac|m4a)$/i.test(f)).map((f) => ({ name: f, path: path.join(dir, f) }));
   } catch { return []; }
+});
+// 참조음성 폴더 열기 — 선택된 참조음성이 있으면 그 폴더, 없으면 기본 ref-audio 폴더.
+//   (같은 이름의 .txt 파일이 참조텍스트로 자동 사용되므로, 사용자가 wav+txt 를 이 폴더에서 관리)
+ipcMain.handle('open-ref-folder', (_e, p) => {
+  let dir = path.join(os.homedir(), '.flow-app', 'ref-audio');
+  try { if (p && fs.existsSync(p)) dir = path.dirname(p); } catch {}
+  try { fs.mkdirSync(dir, { recursive: true }); } catch {}
+  try { shell.openPath(dir); } catch {}
+  return true;
 });
 
 // 대본(.md) 내용으로 롱폼/쇼츠 자동 판별 — '## 쇼츠 N' 헤더가 있으면 쇼츠, 없으면 롱폼.

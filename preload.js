@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld('api', {
   getModeProfiles: () => ipcRenderer.invoke('get-mode-profiles'),
   listStyles: () => ipcRenderer.invoke('list-styles'),
   listRefAudio: () => ipcRenderer.invoke('list-ref-audio'),
+  openRefFolder: (p) => ipcRenderer.invoke('open-ref-folder', p),
   getComfyConfig: () => ipcRenderer.invoke('get-comfy-config'),
   setComfyConfig: (patch) => ipcRenderer.invoke('set-comfy-config', patch),
   testComfy: () => ipcRenderer.invoke('test-comfy'),
