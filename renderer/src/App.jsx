@@ -353,8 +353,6 @@ export default function App() {
     }
     if (!plan.length) { setStatus('큐에 대본이 없습니다'); return; }
     if (!ensurePromptsFilled(null, { image: 'all', video: 'range' })) return; // 현재 표시 대본 기준 빈 프롬프트 검사
-    const order = plan.map((p) => (p.mode === 'longform' ? '롱' : '쇼')).join(' → ');
-    if (!window.confirm(`큐 ${plan.length}개 대본을 순차 제작합니다.\n순서: ${order}\n(각 대본은 자기 설정으로, GPU 한 대라 한 번에 하나씩)\n계속할까요?`)) return;
     setStatus(`⚡⚡ 큐 순차 제작중… (${plan.length}개)`);
     try {
       const r = await api.runBatch({ plan, common: { captionStyle: capOverride(), captionMaxChars: effCap } });
