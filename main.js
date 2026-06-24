@@ -330,6 +330,17 @@ ipcMain.handle('list-ref-audio', () => {
   } catch { return []; }
 });
 
+// 대본(.md) 내용으로 롱폼/쇼츠 자동 판별 — '## 쇼츠 N' 헤더가 있으면 쇼츠, 없으면 롱폼.
+//   (사용자가 탭을 잘못 골라 열어도 대본 형식에 맞는 모드로 연다.) 파일을 못 읽으면 null.
+function detectScriptMode(scriptPath) {
+  let txt = '';
+  try { txt = fs.readFileSync(scriptPath, 'utf8'); } catch { return null; }
+  if (/^##\s*쇼츠\s*\d/m.test(txt)) return 'shorts';            // 쇼츠 편 헤더 → 쇼츠 (확정)
+  const mq = txt.match(/^>\s?.*$/m);                              // 메타 줄(>)의 화면비 = 보조 신호
+  if (mq && /9:16/.test(mq[0]) && !/16:9/.test(mq[0])) return 'shorts';
+  return 'longform';
+}
+
 ipcMain.handle('open-script', async (_e, args = {}) => {
   const preset = P.getPreset(args.presetName || null);
   const opt = { properties: ['openFile'], filters: [{ name: 'Markdown', extensions: ['md'] }] };
@@ -338,7 +349,13 @@ ipcMain.handle('open-script', async (_e, args = {}) => {
   if (r.canceled || !r.filePaths[0]) return null;
   const scriptPath = r.filePaths[0];
   S.scriptPath = scriptPath;
-  S.mode = (args.mode === 'longform') ? 'longform' : 'shorts';
+  // 대본 형식 자동 판별 — 탭 선택과 무관하게 대본에 맞는 모드로 연다(잘못 열기 방지). 실패 시 탭 모드.
+  const detectedMode = detectScriptMode(scriptPath);
+  const requestedMode = (args.mode === 'longform') ? 'longform' : 'shorts';
+  S.mode = detectedMode || requestedMode;
+  if (detectedMode && detectedMode !== requestedMode) {
+    log(`🔀 대본 형식 감지 → ${detectedMode === 'longform' ? '롱폼' : '쇼츠'} 모드로 자동 전환`);
+  }
   S.preset = preset;
   S.outRoot = computeOutRoot(scriptPath, preset, S.mode);
 
@@ -351,7 +368,7 @@ ipcMain.handle('open-script', async (_e, args = {}) => {
   log(`대본 열기(${S.mode}): ${S.parsed.fileTitle}`);
   if (restoreNote) log(restoreNote);
   log(`편수 ${S.parsed.projects.length} · 출력 ${S.outRoot}`);
-  return { dto: P.toDTO(S.parsed), scriptPath, outRoot: S.outRoot, queue: queueDTO() };
+  return { dto: P.toDTO(S.parsed), scriptPath, outRoot: S.outRoot, queue: queueDTO(), mode: S.mode };
 });
 
 // 출력 경로 = <채널 outputFolder>/<대본파일명(확장자 제외)>/

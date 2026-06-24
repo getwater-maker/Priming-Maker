@@ -271,9 +271,12 @@ export default function App() {
   async function openScript() {
     const r = await api.openScript({ presetName: presetName || null, mode });
     if (!r) return;
+    // 대본 형식 자동 판별 → 맞는 탭(롱폼/쇼츠)으로 전환 (잘못된 탭에서 열림 방지)
+    const switched = r.mode && r.mode !== mode;
+    if (switched) { setMode(r.mode); setAspect(r.mode === 'longform' ? '16:9' : '9:16'); }
     setDto(r.dto); setFtitle(r.dto.fileTitle); if (r.queue) setQueue(r.queue);
     try { await api.setQueueSettings(currentSettings()); } catch (_) {} // 이 대본의 설정을 현재 헤더값으로 캡처
-    setStatus(`${r.dto.projects.length}편 로드 · 큐에 추가`);
+    setStatus(`${r.dto.projects.length}편 로드 · 큐에 추가${switched ? ` · ${r.mode === 'longform' ? '롱폼' : '쇼츠'} 모드로 전환` : ''}`);
   }
   // 큐에서 대본 선택 → 활성화 + 그 대본의 설정을 헤더에 로드
   async function selectQueueItem(id) {
@@ -327,6 +330,16 @@ export default function App() {
     setStatus('⚡ 전체 제작중… (TTS+이미지→영상→.vrew)');
     try { const d = await api.makeAll(args); setDto(d); setStatus('전체 제작 완료'); }
     catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
+  }
+  // ⚡ 만들기(통합) — 큐 대본이 1개면 그것만(.vrew 자동열기 등 기존 동작), 여러 개면 큐 전체 순차 제작.
+  async function runMakeOrBatch() {
+    try { await api.setQueueSettings(currentSettings()); } catch (_) {} // 현재 헤더값을 활성 항목에 반영
+    const L = (queue && queue.longform && queue.longform.items) || [];
+    const Sh = (queue && queue.shorts && queue.shorts.items) || [];
+    const total = L.length + Sh.length;
+    if (total === 0) { setStatus('대본을 먼저 여세요'); return; }
+    if (total === 1) return runMake(null);  // 단일 대본 → makeAll(.vrew·폴더 자동열기)
+    return runBatchAll();                    // 여러 대본 → 큐 전체 교차 순차
   }
   // ⚡⚡ 큐 전체 순차 제작 — 교차 순서(L1→S1→L2→S2…), 각 대본은 자기 설정으로.
   async function runBatchAll() {
@@ -921,9 +934,8 @@ export default function App() {
             <button className="ghost" disabled={!loaded || impBusy} title="각 그룹 내용을 분석해 이미지 프롬프트를 자동 작성·적용 (Ollama)" onClick={runMakePrompts}>{impBusy ? '⏳ 작성중…' : '✍ 프롬프트작성'}</button>
             <button className="ghost" disabled={!loaded} title="Ollama 서버·모델 설정 / 웹 LLM 답변 붙여넣기(고급)" style={{ padding: '6px 9px' }} onClick={openOllama}>⚙</button>
             <button className="ghost" disabled={!loaded} title="모든 편을 이어서 미리보기 재생" onClick={() => playShorts(null)}>▶ 미리보기</button>
-            <button disabled={!loaded} title="현재 대본만 TTS+이미지 → 영상 → .vrew → 폴더열기" onClick={() => runMake(null)}>⚡ 만들기</button>
             {(() => { const qc = (queue && queue.longform ? queue.longform.items.length : 0) + (queue && queue.shorts ? queue.shorts.items.length : 0); return (
-              <button disabled={qc < 1} title="롱폼·쇼츠 큐 전체를 교차 순서(롱1→쇼1→롱2→쇼2…)로 순차 제작" onClick={runBatchAll}>⚡⚡ 큐 전체 ({qc})</button>
+              <button disabled={qc < 1} title={qc > 1 ? `큐 ${qc}개 대본을 교차 순서(롱1→쇼1→롱2→쇼2…)로 순차 제작` : '현재 대본 TTS+이미지 → 영상 → .vrew → 폴더열기'} onClick={runMakeOrBatch}>⚡ 만들기{qc > 1 ? ` (${qc})` : ''}</button>
             ); })()}
             <button className="ghost" title="진행 중인 작업 중단" onClick={abort}>■ 중단</button>
             <button disabled={!loaded} onClick={() => runVrew(null)}>💾 .vrew</button>
