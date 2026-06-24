@@ -1264,6 +1264,14 @@ class FlowAutomator {
     if (await this._clickTab(mediaTab)) this.log(`  [설정] ${mediaTab} 탭 ✓`);
     await this.page.waitForTimeout(400);   // 토글 후 비율/매수 재렌더 대기
 
+    // 2b) 동영상 i2v — '프레임' 서브탭 선택 (시작/종료 프레임으로 소스 이미지 첨부).
+    //     이걸 안 누르면 시작/종료 프레임 UI 가 안 떠서 텍스트만으로 생성됨(우리 이미지 무시). (2026-06-24 Flow UI 실측)
+    if (opts.mediaType === 'video' && (opts.frameImages && opts.frameImages.length)) {
+      if (await this._clickTab('프레임')) this.log('  [설정] 프레임(i2v) 탭 ✓');
+      else this.log('  [!] 프레임 탭 못 찾음 — 텍스트만으로 생성될 수 있음');
+      await this.page.waitForTimeout(300);
+    }
+
     // 3) 비율
     if (await this._clickTab(opts.ratio)) this.log(`  [설정] 비율 ${opts.ratio} ✓`);
     else this.log(`  [!] 비율 ${opts.ratio} 탭 못 찾음`);
@@ -1574,46 +1582,48 @@ class FlowAutomator {
     return null;
   }
 
-  // ─── i2v: 영상 모드에서 소스 이미지를 '프레임/애셋'으로 첨부 ───
-  // best-effort 셀렉터 + 상세 로그/덤프 — 실제 Flow 영상 UI 로그를 보고 정확히 고정 예정.
+  // ─── i2v: 동영상 '프레임' 모드에서 소스 이미지를 '시작 프레임'으로 첨부 ───
+  //   실측 흐름(2026-06-24 Flow UI): 설정에서 동영상→프레임 선택 시 프롬프트바에 '시작/종료' 등장 →
+  //   '시작' 클릭 → 미디어 선택창 → 숨김 file input 에 이미지 업로드 → '프롬프트에 추가' 확정.
   async _attachFrameImage(imagePath, num) {
     try {
       if (!imagePath || !fs.existsSync(imagePath)) { this.log(`  [i2v ${num}] 소스 이미지 없음: ${imagePath}`); return false; }
-      this.log(`  [i2v ${num}] 프레임 이미지 첨부 시도: ${path.basename(imagePath)}`);
+      this.log(`  [i2v ${num}] 시작 프레임 첨부: ${path.basename(imagePath)}`);
 
-      // 1) '프레임/애셋' 추가 컨트롤 클릭 (best-effort — 텍스트/aria 기반)
-      const triggers = ['프레임', '애셋', '에셋', 'Frame', 'Asset', '이미지 추가', '추가', 'Add'];
-      let clicked = false;
-      for (const t of triggers) {
-        try {
-          const btn = this.page.getByRole('button', { name: t, exact: false }).first();
-          if (await btn.isVisible({ timeout: 500 })) { await btn.click({ timeout: 1500 }); clicked = true; this.log(`  [i2v ${num}] '${t}' 컨트롤 클릭`); break; }
-        } catch (_) {}
+      // 1) '시작'(시작 프레임) 클릭 → 미디어 선택창 (시작/종료 는 div — 텍스트로 매칭)
+      let opened = false;
+      for (const loc of [this.page.getByRole('button', { name: '시작', exact: true }).first(),
+                         this.page.getByText('시작', { exact: true }).first()]) {
+        try { if (await loc.isVisible({ timeout: 1500 })) { await loc.click({ timeout: 2500 }); opened = true; break; } } catch (_) {}
       }
-      await this.page.waitForTimeout(400);
+      if (!opened) { this.log(`  [i2v ${num}] ⚠ '시작' 프레임 버튼 없음 — 동영상/프레임 모드 미설정 의심`); await this._dumpFrameAttachUI(); return false; }
+      await this.page.waitForTimeout(900);
 
-      // 2) 파일 input 에 이미지 설정 (hidden input 직접 — 대화상자 회피)
+      // 2) 숨김 file input(accept=image)에 직접 설정 — 네이티브 대화상자 회피 (미디어 업로드 버튼 클릭 대신)
       let set = false;
       try {
         const inputs = await this.page.$$('input[type="file"]');
         for (const inp of inputs) {
-          try {
-            const accept = (await inp.getAttribute('accept')) || '';
-            if (accept && !/image/i.test(accept)) continue;
-            await this.page.evaluate((el) => { el.style.cssText = 'display:block !important; opacity:1; position:fixed; top:0; left:0; z-index:99999;'; }, inp);
-            await inp.setInputFiles(imagePath);
-            set = true; this.log(`  [i2v ${num}] 파일 input 업로드 ✓ (accept="${accept}")`); break;
-          } catch (_) {}
+          const accept = (await inp.getAttribute('accept')) || '';
+          if (accept && !/image/i.test(accept)) continue;
+          await inp.setInputFiles(imagePath);
+          set = true; this.log(`  [i2v ${num}] 업로드 전송(accept="${accept}") — 처리 대기`); break;
         }
-      } catch (_) {}
+      } catch (e) { this.log(`  [i2v ${num}] setInputFiles 예외: ${e.message}`); }
+      if (!set) { this.log(`  [i2v ${num}] ⚠ 이미지 file input 못 찾음`); await this._dumpFrameAttachUI(); return false; }
+      await this.page.waitForTimeout(3500); // 업로드+썸네일 처리
 
-      if (!set) {
-        this.log(`  [i2v ${num}] ⚠ 프레임 첨부 실패(트리거클릭=${clicked}) — UI 후보 덤프(이 목록에서 '애셋/프레임 추가' 항목을 알려주시면 정확히 고정):`);
-        await this._dumpFrameAttachUI();
-        return false;
-      }
-      await this.page.waitForTimeout(1500); // 업로드 반영 대기
-      this.log(`  [i2v ${num}] 프레임 첨부 완료`);
+      // 3) '프롬프트에 추가' 클릭 → 시작 프레임으로 확정
+      let added = false;
+      try {
+        const add = this.page.getByRole('button', { name: '프롬프트에 추가', exact: false }).first();
+        await add.waitFor({ state: 'visible', timeout: 10000 });
+        await add.click({ timeout: 3000 });
+        added = true;
+      } catch (_) {}
+      if (!added) { this.log(`  [i2v ${num}] ⚠ '프롬프트에 추가' 못 찾음(업로드 지연?) — 덤프`); await this._dumpFrameAttachUI(); return false; }
+      await this.page.waitForTimeout(1200);
+      this.log(`  [i2v ${num}] 시작 프레임 첨부 완료 ✓`);
       return true;
     } catch (e) { this.log(`  [i2v ${num}] 첨부 예외: ${e.message}`); return false; }
   }
