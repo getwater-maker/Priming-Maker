@@ -19,6 +19,12 @@ function fmtSec(s) {
   if (s <= 0) return '–';
   return s < 60 ? s.toFixed(1) + 's' : Math.floor(s / 60) + ':' + String(Math.round(s % 60)).padStart(2, '0');
 }
+// 초 → "N분 N초" (1시간 이상이면 "N시간 N분 N초"). 합계 표시용.
+function fmtMinSec(s) {
+  s = Math.max(0, Math.round(Number(s) || 0));
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+  return h > 0 ? `${h}시간 ${m}분 ${sec}초` : `${m}분 ${sec}초`;
+}
 function phaseBadge(p, isLf) {
   if (!p) return ['', '-'];
   if (isLf) return ['', p];   // 롱폼: 섹션 제목 그대로 (훅/본론 키워드 축약 안 함 — '본론 진입'이 '본론'으로 잘못 표시되던 문제)
@@ -1307,7 +1313,7 @@ function Cards({ dto, isLf, capCharsN, onTts, onImg, onVid, onBulk, onPlayShorts
         return (
           <div className="card" key={pr.shortsNum}>
             <h2>🎞 {dto.fileTitle ? `${dto.fileTitle} | ` : ''}{pr.title} <span className="meta">({pr.aspect} · {pr.cuts.length}컷)</span>
-              {total > 0 && <span className="total">합계 {total.toFixed(1)}초{rtf != null && <span className="rtf" title="RTF = TTS 생성시간 ÷ 음성길이 (낮을수록 빠름)">│ RTF {rtf.toFixed(2)}</span>}</span>}
+              {total > 0 && <span className="total">합계 {fmtMinSec(total)}{rtf != null && <span className="rtf" title="RTF = TTS 생성시간 ÷ 음성길이 (낮을수록 빠름)">│ RTF {rtf.toFixed(2)}</span>}</span>}
               <span className="cardbtns">
                 <button className="ghost" onClick={() => onTts(pr.shortsNum)}>🎤 TTS</button>
                 <button className="ghost" onClick={() => onImg(pr.shortsNum)}>🖼 이미지</button>
