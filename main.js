@@ -991,6 +991,7 @@ function rangeNums(project, fromNum, toNum) {
 ipcMain.handle('video-build', async (_e, args = {}) => {
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
   const { shortsNum = null, fromNum = null, toNum = null, engine = 'grok', flowVideoModel = 'Veo 3.1 - Lite', flowCount = 'x1', upscale = false, imgEngine = 'rotate', styleId = null } = args;
+  if (engine === 'none') { log('비디오 엔진 "없음" — 이미지만 사용, 비디오 생성 안 함'); return P.toDTO(S.parsed); }
   S.abort = false;
   S.grokLimit = null;
   const _vidT0 = Date.now();
@@ -1440,9 +1441,11 @@ async function runMakeAllCore(opts = {}) {
     }
   }
 
-  // ── 3단계: 영상 — 전 쇼츠 ──
-  if (!dry && !S.abort) {
-    log('🎬 3단계 — 영상 일괄 생성…');
+  // ── 3단계: 비디오 — 전 쇼츠 (videoEngine='none'이면 비디오 없이 이미지만 사용) ──
+  if (videoEngine === 'none') {
+    log('🎬 3단계 — 비디오 없음(이미지만) — 건너뜀');
+  } else if (!dry && !S.abort) {
+    log('🎬 3단계 — 비디오 일괄 생성…');
     for (const pr of projects) {
       if (S.abort) { log('⏹ 중단됨'); break; }
       const dirs = shortsDirs(S.outRoot, pr.shortsNum);
@@ -1634,6 +1637,7 @@ ipcMain.handle('tts-group', async (_e, args = {}) => {
 ipcMain.handle('video-group', async (_e, args = {}) => {
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
   const { shortsNum, groupNum, engine = 'grok', flowVideoModel = 'Veo 3.1 - Lite', flowCount = 'x1', upscale = false, imgEngine = 'rotate', styleId = null } = args;
+  if (engine === 'none') { log('비디오 엔진 "없음" — 이미지만 사용, 비디오 생성 안 함'); return P.toDTO(S.parsed); }
   const pr = S.parsed.projects.find((p) => p.shortsNum === shortsNum);
   const g = pr && pr.groups.find((x) => x.num === groupNum);
   if (!g) return P.toDTO(S.parsed);

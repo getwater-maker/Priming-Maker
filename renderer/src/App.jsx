@@ -326,7 +326,7 @@ export default function App() {
       dry: false, videoEngine, clipMaxSec: _clipMaxSec(), flowVideoModel, flowCount,
       aiNotice, // 양쪽 모드 사용자 선택 (기본값 롱폼 ON / 쇼츠 OFF 는 토글이 보유)
     };
-    if (!ensurePromptsFilled(shortsNum, { image: 'all', video: 'range' })) return; // 만들기=전체 이미지 + 범위 i2v
+    if (!ensurePromptsFilled(shortsNum, { image: 'all', video: videoEngine === 'none' ? 'none' : 'range' })) return; // 만들기=전체 이미지 + 범위 i2v ('없음'은 i2v 불요)
     setStatus('⚡ 전체 제작중… (TTS+이미지→영상→.vrew)');
     try { const d = await api.makeAll(args); setDto(d); setStatus('전체 제작 완료'); }
     catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
@@ -352,7 +352,7 @@ export default function App() {
       if (Sh[i]) plan.push({ mode: 'shorts', id: Sh[i].id, settings: Sh[i].settings || null });
     }
     if (!plan.length) { setStatus('큐에 대본이 없습니다'); return; }
-    if (!ensurePromptsFilled(null, { image: 'all', video: 'range' })) return; // 현재 표시 대본 기준 빈 프롬프트 검사
+    if (!ensurePromptsFilled(null, { image: 'all', video: videoEngine === 'none' ? 'none' : 'range' })) return; // 현재 표시 대본 기준 빈 프롬프트 검사 ('없음'은 i2v 불요)
     setStatus(`⚡⚡ 큐 순차 제작중… (${plan.length}개)`);
     try {
       const r = await api.runBatch({ plan, common: { captionStyle: capOverride(), captionMaxChars: effCap } });
@@ -898,7 +898,7 @@ export default function App() {
             <button className="ghost" disabled={!loaded} onClick={() => runImg(null)}>🖼 이미지</button>
             <span className="hdiv" />
             <select title="i2v 비디오 엔진" value={videoEngine} onChange={(e) => setVideoEngine(e.target.value)}>
-              <option value="grok">Grok</option><option value="flow">Flow(8초)</option><option value="comfy">ComfyUI (LTX/Wan)</option>
+              <option value="grok">Grok</option><option value="flow">Flow(8초)</option><option value="comfy">ComfyUI (LTX/Wan)</option><option value="none">없음 (이미지만)</option>
             </select>
             {videoEngine === 'comfy' && <button className="ghost" title="ComfyUI i2v 설정" style={{ padding: '6px 9px' }} onClick={openComfy}>⚙ Comfy</button>}
             {videoEngine === 'grok' && <button className="ghost" title="Grok(X) 멀티계정 등록·로그인·한도" style={{ padding: '6px 9px' }} onClick={openGrokAcc}>⚙ 계정</button>}
@@ -912,8 +912,12 @@ export default function App() {
                 </select>
               </span>
             )}
-            <span title="영상으로 만들 그룹 범위 (N번~N번). 롱폼 기본=도입부 그룹만">🎬 <input type="number" min="1" style={{ width: 44 }} value={vidFrom} onChange={(e) => setVidFrom(e.target.value)} />~<input type="number" min="1" style={{ width: 44 }} value={vidTo} onChange={(e) => setVidTo(e.target.value)} /></span>
-            <button className="ghost" disabled={!loaded} title={`G${vidFrom}~G${vidTo} 그룹을 i2v 비디오로 변환 (이미지 있는 것만)`} onClick={() => runVid(null)}>비디오</button>
+            {videoEngine === 'none'
+              ? <span className="meta" title="비디오 없이 이미지만으로 .vrew 생성 (켄번스)">비디오 없음 — 이미지만</span>
+              : (<>
+                  <span title="영상으로 만들 그룹 범위 (N번~N번). 롱폼 기본=도입부 그룹만">🎬 <input type="number" min="1" style={{ width: 44 }} value={vidFrom} onChange={(e) => setVidFrom(e.target.value)} />~<input type="number" min="1" style={{ width: 44 }} value={vidTo} onChange={(e) => setVidTo(e.target.value)} /></span>
+                  <button className="ghost" disabled={!loaded} title={`G${vidFrom}~G${vidTo} 그룹을 i2v 비디오로 변환 (이미지 있는 것만)`} onClick={() => runVid(null)}>비디오</button>
+                </>)}
           </div>
         </div>
         {/* 하단 행 — 3영역(좌: 프로젝트 관리) | 4영역(우: 미리보기·만들기·.vrew 등) */}
