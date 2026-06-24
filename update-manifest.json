@@ -1,5 +1,5 @@
 {
-  "version": "0.1.10",
+  "version": "0.1.11",
   "deps": "3a5115dcd9e379dc8abaabe10ad1041adcaf5828",
   "files": {
     "AGENTS.md": "1a0fd73c104ff40f5cce110a3ffac07a7aa77205",
@@ -33,7 +33,7 @@
     "core/sentence-splitter.js": "5a31dcee24e7e5ce89bb3b15f34ef9ee0e8f8084",
     "core/style-store.js": "54f6a373a1563aecf0bca286aa677235e7088168",
     "core/tts-cache.js": "8654afda97826e0d73cc3f49a53ef171e06bcb4e",
-    "core/upscaler.js": "9fbcc533597aceb4114036bc4187b3012ca634ee",
+    "core/upscaler.js": "f8abfaf3bf55d3de9345c55699149ec859b4deaa",
     "dummy-tts.mp3": "59f63dcb6c2532ee673513a4a74ff6c3c678c851",
     "flow-engine.js": "6a323cc0b95b458ad1fae5b917585a8a9cfe3d5b",
     "genspark-engine.js": "c57379ec464804546b267ea7a6a412e0019f532c",
@@ -43,7 +43,7 @@
     "light-updater.js": "c9be26807112942a9cf4a88dfcd14a1004634762",
     "main.js": "8ae91953be2c1080c9531d75e1c9c48b2b21a8fe",
     "package-lock.json": "2b2cb85d9cd416d71e5bc6ba63b49bbec1302108",
-    "package.json": "5b26ebe96a6f230c39fc3c0c0a1c03e81b8f34fc",
+    "package.json": "bad14d549a6e5246293bdb193d1d746671c3df6b",
     "preload.js": "d470bb541a941d6c5412dfccb97566fc0e666e98",
     "renderer/dist/assets/index-DASDrEYi.js": "28538441657df66c9df267f7fb5b9eba93c7d08d",
     "renderer/dist/assets/index-p0zt6x82.css": "7af2dc845800a3b300679a0d132ac02f4e433841",

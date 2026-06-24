@@ -13,7 +13,29 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const https = require('https');
-const { spawnSync } = require('child_process');
+const { spawn } = require('child_process');
+
+// 자식 프로세스를 비동기로 실행 — 메인 프로세스(이벤트 루프)를 막지 않는다.
+//   → 업스케일 도중에도 앱 UI·로그·중단 버튼이 살아있음 (spawnSync 는 동기라 앱 전체를 멈춤).
+//   abortSignal()===true 가 되면 자식을 강제 종료. 반환: { status, stdout, stderr, aborted }.
+function _run(cmd, args, { capture = false, abortSignal = null } = {}) {
+  return new Promise((resolve) => {
+    let child;
+    try { child = spawn(cmd, args, { stdio: capture ? ['ignore', 'pipe', 'pipe'] : 'ignore' }); }
+    catch (e) { resolve({ status: -1, stdout: '', stderr: String((e && e.message) || e), aborted: false }); return; }
+    let out = '', err = '', killed = false;
+    if (capture) {
+      if (child.stdout) child.stdout.on('data', (d) => { out += d.toString(); });
+      if (child.stderr) child.stderr.on('data', (d) => { err += d.toString(); });
+    }
+    const timer = abortSignal ? setInterval(() => {
+      try { if (abortSignal()) { killed = true; child.kill('SIGKILL'); } } catch {}
+    }, 400) : null;
+    const finish = (status) => { if (timer) clearInterval(timer); resolve({ status: killed ? -2 : status, stdout: out, stderr: err, aborted: killed }); };
+    child.on('error', () => finish(-1));
+    child.on('close', (code) => finish(code == null ? -1 : code));
+  });
+}
 
 let AdmZip = null;
 try { AdmZip = require('adm-zip'); } catch {}
@@ -91,9 +113,9 @@ async function ensureRealesrgan(logger) {
 }
 
 // 입력 mp4 의 fps 추출 (ffmpeg stderr 파싱, 실패 시 24)
-function _getFps(input) {
+async function _getFps(input) {
   try {
-    const r = spawnSync(_ffmpeg, ['-i', input], { encoding: 'utf8' });
+    const r = await _run(_ffmpeg, ['-i', input], { capture: true });
     const s = (r.stderr || '') + (r.stdout || '');
     const m = s.match(/([\d.]+)\s*fps/);
     if (m) { const v = parseFloat(m[1]); if (v > 0 && v < 240) return v; }
@@ -120,23 +142,27 @@ async function upscaleVideo(input, output, opts = {}) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'sm_up_'));
   const inDir = path.join(tmp, 'in'), outDir = path.join(tmp, 'out');
   fs.mkdirSync(inDir); fs.mkdirSync(outDir);
+  const aborted = () => !!(opts.abortSignal && opts.abortSignal());
   try {
     if (exe) {
       // 1) 프레임 추출
-      spawnSync(_ffmpeg, ['-y', '-i', input, path.join(inDir, '%08d.png')], { stdio: 'ignore' });
+      await _run(_ffmpeg, ['-y', '-i', input, path.join(inDir, '%08d.png')], { abortSignal: opts.abortSignal });
+      if (aborted()) return { ok: false, aborted: true };
       const nframes = fs.readdirSync(inDir).filter((f) => f.endsWith('.png')).length;
-      if (nframes > 0 && !(opts.abortSignal && opts.abortSignal())) {
-        const fps = _getFps(input);
+      if (nframes > 0) {
+        const fps = await _getFps(input);
         log(`[업스케일] ${nframes}프레임 (${fps}fps) → Real-ESRGAN(${model} ${scale}x)…`);
         // 2) AI 업스케일 (폴더 일괄)
-        const r = spawnSync(exe, ['-i', inDir, '-o', outDir, '-n', model, '-s', scale, '-f', 'png'], { stdio: 'ignore' });
+        const r = await _run(exe, ['-i', inDir, '-o', outDir, '-n', model, '-s', scale, '-f', 'png'], { abortSignal: opts.abortSignal });
+        if (aborted()) return { ok: false, aborted: true };
         const okFrames = (() => { try { return fs.readdirSync(outDir).filter((f) => f.endsWith('.png')).length; } catch { return 0; } })();
         if (r.status === 0 && okFrames >= nframes * 0.9) {
           // 3) 재조립 + 정확 해상도 + 원본 오디오
-          const rr = spawnSync(_ffmpeg, ['-y', '-framerate', String(fps), '-i', path.join(outDir, '%08d.png'),
+          const rr = await _run(_ffmpeg, ['-y', '-framerate', String(fps), '-i', path.join(outDir, '%08d.png'),
             '-i', input, '-map', '0:v:0', '-map', '1:a:0?',
             '-vf', `scale=${W}:${H}:flags=lanczos`, '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-crf', '18',
-            '-c:a', 'copy', '-shortest', output], { stdio: 'ignore' });
+            '-c:a', 'copy', '-shortest', output], { abortSignal: opts.abortSignal });
+          if (aborted()) return { ok: false, aborted: true };
           if (rr.status === 0 && fs.existsSync(output)) { log(`[업스케일] ✅ Real-ESRGAN ${W}x${H} 완료`); return { ok: true, method: 'realesrgan' }; }
           log('[업스케일] 재조립 실패 — ffmpeg 폴백');
         } else {
@@ -144,11 +170,13 @@ async function upscaleVideo(input, output, opts = {}) {
         }
       }
     }
+    if (aborted()) return { ok: false, aborted: true };
     // 폴백: ffmpeg lanczos + unsharp (AI 아님)
     log('[업스케일] ffmpeg lanczos 업스케일(폴백)…');
-    const r2 = spawnSync(_ffmpeg, ['-y', '-i', input,
+    const r2 = await _run(_ffmpeg, ['-y', '-i', input,
       '-vf', `scale=${W}:${H}:flags=lanczos,unsharp=5:5:0.8:5:5:0.0`,
-      '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-crf', '18', '-c:a', 'copy', output], { stdio: 'ignore' });
+      '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-crf', '18', '-c:a', 'copy', output], { abortSignal: opts.abortSignal });
+    if (aborted()) return { ok: false, aborted: true };
     if (r2.status === 0 && fs.existsSync(output)) { log(`[업스케일] ✅ ffmpeg ${W}x${H} 완료 (보간, AI 아님)`); return { ok: true, method: 'ffmpeg' }; }
     throw new Error('ffmpeg 업스케일 실패');
   } finally {
