@@ -1456,17 +1456,19 @@ async function runMakeAllCore(opts = {}) {
       const res = await P.buildProjectVrew(pr, vrewPath, ep, log, captionMaxChars); // 배속은 음성에 이미 반영
       P.writeSrt(pr, path.join(dirs.subtitles, `${baseName}.srt`), captionMaxChars);
       log(`✓ ${pr.title}.vrew (clip ${res.clipCount})`);
-      if (openVrew) shell.openPath(vrewPath);
+      if (openVrew && !S.abort) shell.openPath(vrewPath); // 중단 시 .vrew 자동 열기 생략
     } catch (e) { log(`${prLabel(pr)} vrew 실패: ${e.message}`); }
   }
-  warnIncompleteVisuals(incomplete);
+  if (!S.abort) warnIncompleteVisuals(incomplete); // 중단 시엔 '이미지 미생성' 경고 팝업 생략 (의도된 중단)
   if (ttsMgr) { try { await ttsMgr.stop(); } catch {} }
   try { await closeFlowEng(); } catch {} // Flow 이미지/영상 창 닫고 마무리
   S.timings.make = (Date.now() - _makeT0) / 1000;
   pushDtoUpdate();
   try { fs.mkdirSync(S.outRoot, { recursive: true }); } catch {}
-  if (openFolder) shell.openPath(S.outRoot);
-  log(`⚡ 전체 제작 완료 (TTS ${S.timings.tts.toFixed(1)}s · 이미지 ${S.timings.image.toFixed(1)}s · 영상 ${S.timings.video.toFixed(1)}s · 전체 ${S.timings.make.toFixed(1)}s)`);
+  if (openFolder && !S.abort) shell.openPath(S.outRoot); // 중단 시 탐색기 자동 열기 생략
+  log(S.abort
+    ? `⏹ 중단됨 — 완료된 자산만 보존 (TTS ${S.timings.tts.toFixed(1)}s · 이미지 ${S.timings.image.toFixed(1)}s · 비디오 ${S.timings.video.toFixed(1)}s)`
+    : `⚡ 전체 제작 완료 (TTS ${S.timings.tts.toFixed(1)}s · 이미지 ${S.timings.image.toFixed(1)}s · 비디오 ${S.timings.video.toFixed(1)}s · 전체 ${S.timings.make.toFixed(1)}s)`);
 }
 
 ipcMain.handle('make-all', async (_e, args = {}) => {
