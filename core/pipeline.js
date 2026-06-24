@@ -436,7 +436,9 @@ async function generateHookVideosGrok(project, videoDir, logger, abortSignal, vi
   if (grokAccObj && grokAccObj.id !== 'default') log(`🔑 Grok 계정: ${grokAccObj.label}`);
   const eng = new GrokEngine({ profileId: grokProfile, logger: log });
   eng._aspectRatio = project.aspect || '9:16'; // 이미지 비율(9:16/1:1)에 맞춰 영상 생성
-  if (videoDuration === '10s' || videoDuration === '6s') eng._videoDuration = videoDuration; // UI 지정 클립 길이
+  // 클립 길이: '6s'/'10s' 고정값이 오면 그대로 사용, 그 외('auto' 등)면 그룹별 TTS 시간 기준 자동 결정.
+  const autoDur = !(videoDuration === '10s' || videoDuration === '6s');
+  if (!autoDur) eng._videoDuration = videoDuration;
 
   const results = [];
   try {
@@ -454,6 +456,12 @@ async function generateHookVideosGrok(project, videoDir, logger, abortSignal, vi
       const vhit = MediaCache.get(vck);
       if (vhit) {
         try { fs.copyFileSync(vhit.file, outputPath); g.videoPath = outputPath; g.videoSourceImage = g.imagePath; g.videoStatus = 'done'; log(`♻ 그룹${g.num} 영상 재활용(캐시)`); if (onProgress) { try { onProgress(); } catch {} } results.push({ num: g.num, success: true }); continue; } catch {}
+      }
+      if (autoDur) {
+        // 그룹 TTS 합이 6초 초과면 10초, 6초 이하면 6초 비디오로 자동 변환 (사용자 요구).
+        const gsec = project.getSentencesOfGroup(g).reduce((a, s) => a + (s.ttsDurationSec || 0), 0);
+        eng._videoDuration = gsec > 6 ? '10s' : '6s';
+        log(`그룹${g.num}: TTS ${gsec.toFixed(1)}s → ${eng._videoDuration} 비디오`);
       }
       g.videoStatus = 'generating';
       if (onProgress) { try { onProgress(); } catch {} } // '영상 변환 중' 배지 즉시 표시

@@ -39,10 +39,11 @@ function presetThresholds(preset) {
     splitMode: pick(s.splitMode, preset.splitMode) || 'h3',
   };
 }
-// 영상 엔진 → Grok 클립 길이 ('grok10'→10s, 그 외 grok→6s)
-function grokDurOf(engine) { return engine === 'grok10' ? '10s' : '6s'; }
-// 영상 엔진별 그룹 캡(초) — renderer _clipMaxSec 와 동일 (flow 8 / grok10 10 / comfy 8 / 그 외 grok 6).
-function clipMaxOf(videoEngine) { return videoEngine === 'flow' ? 8.0 : videoEngine === 'grok10' ? 10.0 : videoEngine === 'comfy' ? 8.0 : 6.0; }
+// 영상 엔진 → Grok 클립 길이. 'grok'=자동(그룹 TTS 기준 6/10초, pipeline 에서 결정), 레거시 'grok10'=10s 고정.
+function grokDurOf(engine) { return engine === 'grok10' ? '10s' : 'auto'; }
+// 영상 엔진별 그룹 캡(초) — renderer _clipMaxSec 와 동일 (flow 8 / comfy 8 / grok 10).
+//   Grok 은 그룹 TTS≤6→6초·>6→10초 자동이므로 캡을 10초로 둬야 6초 초과 그룹이 생긴다.
+function clipMaxOf(videoEngine) { return videoEngine === 'flow' ? 8.0 : videoEngine === 'comfy' ? 8.0 : 10.0; }
 // AI 고지 결정 — 양쪽 모드 모두 사용자 선택(want)을 따른다. 기본값(롱폼 ON / 쇼츠 OFF)은 렌더러가 정함.
 //   롱폼은 켜면 5초 후 5초간 표시(기존 타이밍 유지). 쇼츠는 preset 의 타이밍을 그대로 사용.
 const AI_NOTICE_TEXT = '본 영상의 음성과 이미지는 AI 도구를 활용하여 제작되었습니다.';
@@ -1003,7 +1004,7 @@ ipcMain.handle('video-build', async (_e, args = {}) => {
         log(`🎬 ${prLabel(pr)} 영상 생성 (ComfyUI i2v${rangeLbl})…`);
         await runComfyVideos(pr, videoDir, log, { onlyNums });
       } else {
-        log(`🎬 ${prLabel(pr)} 영상 생성 (Grok ${grokDurOf(engine)}${rangeLbl})…`);
+        log(`🎬 ${prLabel(pr)} 비디오 생성 (Grok ${grokDurOf(engine) === 'auto' ? '자동 6/10초' : grokDurOf(engine)}${rangeLbl})…`);
         await P.generateHookVideosGrok(pr, videoDir, log, () => S.abort, 0, pushDtoUpdate, onlyNums, grokDurOf(engine));
       }
       await maybeUpscale(pr, log, true); // 모든 영상 1080p 업스케일

@@ -46,7 +46,7 @@ export default function App() {
   const [styleId, setStyleId] = useState('chibi');
   const [imgEngine, setImgEngine] = useState('rotate'); // 'rotate'(Flow+Genspark 순환) | 'comfy'
   const [aspect, setAspect] = useState('16:9');
-  const [videoEngine, setVideoEngine] = useState('grok10');
+  const [videoEngine, setVideoEngine] = useState('grok');
   const [vidFrom, setVidFrom] = useState(1);   // I2V 범위 시작 그룹
   const [vidTo, setVidTo] = useState(1);        // I2V 범위 끝 그룹 (롱폼 기본=도입부 끝)
   const [timings, setTimings] = useState({ tts: 0, image: 0, video: 0, make: 0 }); // 작업 소요시간(초)
@@ -122,7 +122,7 @@ export default function App() {
     }
     return { ttsD, ttsT, imgD, imgT, vidD, vidT };
   })();
-  const _clipMaxSec = () => (videoEngine === 'flow' ? 8.0 : videoEngine === 'grok10' ? 10.0 : videoEngine === 'comfy' ? 8.0 : 6.0);
+  const _clipMaxSec = () => (videoEngine === 'flow' ? 8.0 : videoEngine === 'comfy' ? 8.0 : 10.0); // Grok=10초 캡(그룹 TTS≤6→6초·>6→10초 자동)
   const capOverride = useCallback(() => {
     const baseY = parseFloat(capPos) || 0;
     const fine = parseFloat(capFine) || 0;
@@ -261,7 +261,7 @@ export default function App() {
     if (s.styleId != null) setStyleId(s.styleId);
     if (s.ttsSpeed != null) setTtsSpeed(s.ttsSpeed);
     if (s.imgEngine != null) setImgEngine(s.imgEngine);
-    if (s.videoEngine != null) setVideoEngine(s.videoEngine);
+    if (s.videoEngine != null) setVideoEngine(s.videoEngine === 'grok10' ? 'grok' : s.videoEngine); // 레거시 grok10 → grok(자동)
     if (s.vidFrom != null) setVidFrom(s.vidFrom);
     if (s.vidTo != null) setVidTo(s.vidTo);
     if (s.flowVideoModel != null) setFlowVideoModel(s.flowVideoModel);
@@ -309,8 +309,8 @@ export default function App() {
   }
   async function runVid(shortsNum) {
     if (!ensurePromptsFilled(shortsNum, { image: 'range', video: 'range' })) return; // 영상=범위 그룹 이미지+i2v
-    setStatus(`영상 생성중(G${vidFrom}~${vidTo})…`);
-    try { const d = await api.videoBuild({ shortsNum, fromNum: parseInt(vidFrom, 10) || 1, toNum: parseInt(vidTo, 10) || 1, engine: videoEngine, flowVideoModel, flowCount, imgEngine, styleId: styleId || null }); setDto(d); setStatus('영상 완료'); }
+    setStatus(`비디오 생성중(G${vidFrom}~${vidTo})…`);
+    try { const d = await api.videoBuild({ shortsNum, fromNum: parseInt(vidFrom, 10) || 1, toNum: parseInt(vidTo, 10) || 1, engine: videoEngine, flowVideoModel, flowCount, imgEngine, styleId: styleId || null }); setDto(d); setStatus('비디오 완료'); }
     catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
   }
   async function runBulk(shortsNum) {
@@ -389,8 +389,8 @@ export default function App() {
     catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
   }
   async function runGroupVid(shortsNum, groupNum) {
-    setStatus(`G${groupNum} 영상…`);
-    try { const d = await api.videoGroup({ shortsNum, groupNum, engine: videoEngine, flowVideoModel, flowCount, imgEngine, styleId: styleId || null }); setDto(d); setStatus(`G${groupNum} 영상 완료`); }
+    setStatus(`G${groupNum} 비디오…`);
+    try { const d = await api.videoGroup({ shortsNum, groupNum, engine: videoEngine, flowVideoModel, flowCount, imgEngine, styleId: styleId || null }); setDto(d); setStatus(`G${groupNum} 비디오 완료`); }
     catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
   }
   function playFrom(shortsNum, groupNum) {
@@ -899,11 +899,11 @@ export default function App() {
             {imgEngine === 'comfy' && <button className="ghost" title="ComfyUI 서버·SDXL 설정" style={{ padding: '6px 9px' }} onClick={openComfy}>⚙ Comfy</button>}
             <button className="ghost" disabled={!loaded} onClick={() => runImg(null)}>🖼 이미지</button>
             <span className="hdiv" />
-            <select title="i2v 영상 엔진" value={videoEngine} onChange={(e) => setVideoEngine(e.target.value)}>
-              <option value="grok10">Grok(10초)</option><option value="grok">Grok(6초)</option><option value="flow">Flow(8초)</option><option value="comfy">ComfyUI (LTX/Wan)</option>
+            <select title="i2v 비디오 엔진" value={videoEngine} onChange={(e) => setVideoEngine(e.target.value)}>
+              <option value="grok">Grok</option><option value="flow">Flow(8초)</option><option value="comfy">ComfyUI (LTX/Wan)</option>
             </select>
             {videoEngine === 'comfy' && <button className="ghost" title="ComfyUI i2v 설정" style={{ padding: '6px 9px' }} onClick={openComfy}>⚙ Comfy</button>}
-            {(videoEngine === 'grok10' || videoEngine === 'grok') && <button className="ghost" title="Grok(X) 멀티계정 등록·로그인·한도" style={{ padding: '6px 9px' }} onClick={openGrokAcc}>⚙ 계정</button>}
+            {videoEngine === 'grok' && <button className="ghost" title="Grok(X) 멀티계정 등록·로그인·한도" style={{ padding: '6px 9px' }} onClick={openGrokAcc}>⚙ 계정</button>}
             {videoEngine === 'flow' && (
               <span title="Flow 영상 옵션">
                 <select style={{ width: 'auto' }} value={flowVideoModel} onChange={(e) => setFlowVideoModel(e.target.value)}>
@@ -915,7 +915,7 @@ export default function App() {
               </span>
             )}
             <span title="영상으로 만들 그룹 범위 (N번~N번). 롱폼 기본=도입부 그룹만">🎬 <input type="number" min="1" style={{ width: 44 }} value={vidFrom} onChange={(e) => setVidFrom(e.target.value)} />~<input type="number" min="1" style={{ width: 44 }} value={vidTo} onChange={(e) => setVidTo(e.target.value)} /></span>
-            <button className="ghost" disabled={!loaded} title={`G${vidFrom}~G${vidTo} 그룹을 i2v 영상화 (이미지 있는 것만)`} onClick={() => runVid(null)}>영상</button>
+            <button className="ghost" disabled={!loaded} title={`G${vidFrom}~G${vidTo} 그룹을 i2v 비디오로 변환 (이미지 있는 것만)`} onClick={() => runVid(null)}>비디오</button>
           </div>
         </div>
         {/* 하단 행 — 3영역(좌: 프로젝트 관리) | 4영역(우: 미리보기·만들기·.vrew 등) */}
