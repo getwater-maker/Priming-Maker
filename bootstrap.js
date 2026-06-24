@@ -4,7 +4,18 @@
  */
 const path = require('path');
 const os = require('os');
-const { app } = require('electron');
+const { app, protocol } = require('electron');
+
+// media:// 커스텀 프로토콜 권한 등록 — 반드시 app 'ready' 이전에 호출해야 한다.
+//   아래 라이트 업데이터를 await 하는 동안 app 이 ready 가 되어버리므로, main.js 가 아니라 여기서
+//   (await 보다 먼저, 동기로) 등록한다. main.js 는 ready 가 아닐 때만 보조로 다시 시도한다.
+try {
+  protocol.registerSchemesAsPrivileged([
+    { scheme: 'media', privileges: { secure: true, supportFetchAPI: true, stream: true, bypassCSP: true } },
+  ]);
+} catch (err) {
+  process.stderr.write(`[bootstrap] registerSchemesAsPrivileged 실패: ${err && err.message}\n`);
+}
 
 // 기존 앱(~/.flow-app, ~/.shots-maker)과 캐시/세션 충돌 방지 — 통합 앱 전용 디렉토리
 try {

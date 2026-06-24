@@ -55,10 +55,17 @@ function resolveAiNotice(preset, want) {
   return { ...preset, aiNotice: { ...base, enabled: !!want } };
 }
 
-// 로컬 이미지/영상 미리보기용 커스텀 프로토콜 (app ready 전에 등록 필요)
-protocol.registerSchemesAsPrivileged([
-  { scheme: 'media', privileges: { secure: true, supportFetchAPI: true, stream: true, bypassCSP: true } },
-]);
+// 로컬 이미지/영상 미리보기용 커스텀 프로토콜 (app ready 전에 등록 필요).
+//   ⚠️ bootstrap.js 가 라이트 업데이터를 await 한 뒤 main.js 를 require 하므로, 이 시점엔 app 이 이미
+//   ready 일 수 있다. ready 이후엔 registerSchemesAsPrivileged 가 예외를 던져 main.js 로딩이 거기서
+//   멈추고 창이 안 뜬다. → bootstrap.js 가 await 이전에 먼저 등록하고, 여기선 ready 가 아닐 때만 시도.
+if (!app.isReady()) {
+  try {
+    protocol.registerSchemesAsPrivileged([
+      { scheme: 'media', privileges: { secure: true, supportFetchAPI: true, stream: true, bypassCSP: true } },
+    ]);
+  } catch (_) {}
+}
 
 let win = null;
 const S = { parsed: null, scriptPath: null, outRoot: null, preset: null, ttsMgr: null, flowEng: null, flowEngProfileDir: null, abort: false, mode: 'longform',
