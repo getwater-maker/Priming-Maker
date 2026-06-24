@@ -491,7 +491,8 @@ async function generateHookVideosGrok(project, videoDir, logger, abortSignal, vi
         } catch (e) {
           res = { success: false, error: e && e.message ? e.message : String(e) };
         }
-        if ((res && res.success && res.videoPath) || (abortSignal && abortSignal())) break;
+        // 성공 · 한도 도달 · 사용자 중단 이면 즉시 종료 (한도는 재시도해도 안 풀리므로 헛시도 방지)
+        if ((res && res.success && res.videoPath) || (res && res.limitReached) || (abortSignal && abortSignal())) break;
         if (attempt < ATTEMPTS) {
           log(`↻ 그룹${g.num} 영상 재시도 (${attempt}/${ATTEMPTS - 1}) — 이전 실패: ${res && res.error}`);
           try { await eng.stop(); } catch {} // 브라우저 정리 → 다음 시도에서 start() 새로 진입

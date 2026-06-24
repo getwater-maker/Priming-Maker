@@ -1,5 +1,5 @@
 {
-  "version": "0.1.15",
+  "version": "0.1.16",
   "deps": "3a5115dcd9e379dc8abaabe10ad1041adcaf5828",
   "files": {
     "AGENTS.md": "1a0fd73c104ff40f5cce110a3ffac07a7aa77205",
@@ -27,7 +27,7 @@
     "core/mode-profiles.js": "b6d4ca2005b2f06e6e9848fa8e2c710c303c2b7a",
     "core/ollama-config.js": "73d42a2f2c3e45df9b351c68e90f438066161f9a",
     "core/parsers/longform-parser.js": "b9462349c9f7fe6ed03e7fb76486c6fc152a5b0d",
-    "core/pipeline.js": "a5cac4d3b788604ff159b66d60c4912cd216ae28",
+    "core/pipeline.js": "d2d0b4fbcbef842c1208e11712edaf449553e40d",
     "core/project-model.js": "7c31feb413dbae38b8f683f1a56975ac36b0cf13",
     "core/prompt-io.js": "cb429515d67ef5ebf8f254e4fc8d92279b95b81c",
     "core/sentence-splitter.js": "5a31dcee24e7e5ce89bb3b15f34ef9ee0e8f8084",
@@ -43,7 +43,7 @@
     "light-updater.js": "c9be26807112942a9cf4a88dfcd14a1004634762",
     "main.js": "0e958a171f471d5c346432fcf0219f5bc466fb45",
     "package-lock.json": "2b2cb85d9cd416d71e5bc6ba63b49bbec1302108",
-    "package.json": "657a712b062099b3a7cf6bec5fe75ceb3451d5f2",
+    "package.json": "5d3c34cd86a954f152127ae2e52f648bc7702cc8",
     "preload.js": "d9429be719e26ec7f122b87e0d73f40e0efce31a",
     "renderer/dist/assets/index-CFGHQTg-.js": "96779dff55c6101cc3617bf50845db9cd73ad4c6",
     "renderer/dist/assets/index-p0zt6x82.css": "7af2dc845800a3b300679a0d132ac02f4e433841",
