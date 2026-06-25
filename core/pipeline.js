@@ -159,7 +159,7 @@ function atempoWavToMp3(wavPath, mp3Path, tempo) {
 // ── 오디오 채우기 ───────────────────────────────────────
 // TTS 는 항상 정속(1.0) 합성 → speedFactor(기본 1.15) 만큼 atempo 로 배속 구운 MP3 로 변환.
 //   배속이 음성에 직접 반영되므로 Vrew 배속(playbackRate) 불필요. 8초 그룹·.vrew 모두 이 음성 사용.
-async function fillTtsList(sentences, preset, ttsMgr, workDir, onLine, abortSignal, speedFactor = 1.15, label = '', onProgress = null) {
+async function fillTtsList(sentences, preset, ttsMgr, workDir, onLine, abortSignal, speedFactor = 1.15, label = '', onProgress = null, force = false) {
   fs.mkdirSync(workDir, { recursive: true });
   const sf = (speedFactor != null && Number(speedFactor) > 0) ? Number(speedFactor) : 1;
   if (sf !== 1 && (!ffmpegPath || !fs.existsSync(ffmpegPath))) {
@@ -189,11 +189,12 @@ async function fillTtsList(sentences, preset, ttsMgr, workDir, onLine, abortSign
   for (const s of sentences) {
     if (abortSignal && abortSignal()) { if (onLine) onLine('⏹ TTS 중단'); break; }
     // 이미 음성이 있으면 건너뜀 — '비어있는 것만' 채움. (분할 등으로 재구성돼도 문장은 그대로라 재사용)
-    if (s.ttsAudioPath && fs.existsSync(s.ttsAudioPath)) { if (onProgress) { try { onProgress(); } catch {} } continue; }
+    //   force=true('🔁 다시 변환') 면 기존 음성·캐시를 모두 무시하고 무조건 재합성.
+    if (!force && s.ttsAudioPath && fs.existsSync(s.ttsAudioPath)) { if (onProgress) { try { onProgress(); } catch {} } continue; }
     const _genT0 = Date.now(); // 생성 소요시간 측정 (RTF = 생성시간/음성길이)
-    // ♻ 캐시 재활용 — 같은 (문장+배속+목소리) 면 재합성 없이 캐시에서 복사.
+    // ♻ 캐시 재활용 — 같은 (문장+배속+목소리) 면 재합성 없이 캐시에서 복사. (force 면 건너뜀)
     const cacheKey = TtsCache.keyFor(s.text, sf, synthOpts);
-    const hit = TtsCache.get(cacheKey);
+    const hit = force ? null : TtsCache.get(cacheKey);
     if (hit) {
       const out = path.join(workDir, `${s.num}.${hit.ext}`);
       try { fs.copyFileSync(hit.file, out); s.ttsAudioPath = out; }
@@ -242,9 +243,9 @@ async function fillTtsList(sentences, preset, ttsMgr, workDir, onLine, abortSign
 }
 
 // 프로젝트 전체 문장 TTS (fillTtsList 래퍼)
-async function fillTts(project, preset, ttsMgr, workDir, onLine, abortSignal, speedFactor = 1.15, onProgress = null) {
+async function fillTts(project, preset, ttsMgr, workDir, onLine, abortSignal, speedFactor = 1.15, onProgress = null, force = false) {
   const lbl = project.mode === 'longform' ? '롱폼' : `쇼츠${project.shortsNum}`;
-  return fillTtsList(project.sentences, preset, ttsMgr, workDir, onLine, abortSignal, speedFactor, lbl, onProgress);
+  return fillTtsList(project.sentences, preset, ttsMgr, workDir, onLine, abortSignal, speedFactor, lbl, onProgress, force);
 }
 
 function makeSilentMp3(durSec, outPath) {

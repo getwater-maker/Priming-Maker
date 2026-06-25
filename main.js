@@ -425,7 +425,7 @@ function ensureDirs(outRoot) {
 
 ipcMain.handle('tts-build', async (_e, args = {}) => {
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
-  const { shortsNum = null, dry = false, presetName = null, speed = 1.15 } = args;
+  const { shortsNum = null, dry = false, presetName = null, speed = 1.15, force = false } = args;
   const clipMaxSec = (args.clipMaxSec && Number(args.clipMaxSec) > 0) ? Number(args.clipMaxSec) : 8.0; // 영상 엔진별 그룹 캡(Grok 6/Flow 8)
   S.abort = false;
   if (!dry) {
@@ -444,7 +444,7 @@ ipcMain.handle('tts-build', async (_e, args = {}) => {
     const ttsDir = shortsDirs(S.outRoot, pr.shortsNum).tts;
     if (S.abort) { log('⏹ 중단됨'); break; }
     if (dry) { P.fillSilent(pr, ttsDir); log(`✓ ${prLabel(pr)} 무음 오디오`); }
-    else { await P.fillTts(pr, S.preset, S.ttsMgr, ttsDir, log, () => S.abort, speed, pushDtoUpdate); log(`✓ ${prLabel(pr)} 음성 완료`); }
+    else { if (force) log(`🔁 ${prLabel(pr)} 전체 다시 변환 (기존 음성·캐시 무시)`); await P.fillTts(pr, S.preset, S.ttsMgr, ttsDir, log, () => S.abort, speed, pushDtoUpdate, force); log(`✓ ${prLabel(pr)} 음성 완료`); }
     // 음성변환 직후: (쇼츠만) 문장 기준 clipMaxSec(영상 엔진별 6/8초) 미만 단위로 그룹 자동 재구성.
     //   롱폼은 group-builder 가 이미 의미 단위로 묶었으므로 8초 재패킹을 건너뛴다.
     if (getModeProfile(currentMode()).grouping.strategy === 'tts-greedy' && pr.format !== 'grouped') {

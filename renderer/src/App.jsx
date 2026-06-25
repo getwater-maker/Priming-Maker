@@ -300,10 +300,11 @@ export default function App() {
     catch (e) { logline('대본 제거 오류: ' + e.message); }
   }
   // 작업 소요시간은 백엔드에서 단계별로 측정해 dto-update(d.timings)로 전송 → setTimings 로 표시.
-  async function runTts(shortsNum) {
-    setStatus('TTS 생성중…');
+  async function runTts(shortsNum, force = false) {
+    if (force && !window.confirm('현재 대본의 모든 음성을 새로 변환합니다.\n기존 음성과 캐시를 무시하고 다시 합성합니다. 진행할까요?')) return;
+    setStatus(force ? 'TTS 다시 변환중…' : 'TTS 생성중…');
     try {
-      const d = await api.ttsBuild({ shortsNum, dry: false, presetName: presetName || null, speed: ttsSpeed || null, clipMaxSec: _clipMaxSec() });
+      const d = await api.ttsBuild({ shortsNum, dry: false, presetName: presetName || null, speed: ttsSpeed || null, clipMaxSec: _clipMaxSec(), force });
       setDto(d); setStatus('오디오 완료');
     } catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
   }
@@ -890,6 +891,7 @@ export default function App() {
           <div className="hright">
             <span title="음성 배속 (합성 1.0 → atempo 변환)">🎤 배속 <input type="number" value={ttsSpeed} step="0.05" min="0.5" max="2" style={{ width: 52 }} onChange={(e) => setTtsSpeed(e.target.value)} /></span>
             <button className="ghost" disabled={!loaded} onClick={() => runTts(null)}>🎤 TTS</button>
+            <button className="ghost" disabled={!loaded} title="기존 음성·캐시를 무시하고 현재 대본 전체 음성을 새로 합성" onClick={() => runTts(null, true)}>🔁 다시 변환</button>
             <span className="hdiv" />
             <select title="이미지 스타일" value={styleId} onChange={(e) => setStyleId(e.target.value)}>
               <option value="">스타일 없음</option>
