@@ -46,6 +46,12 @@ function parseScript(scriptPath, mode = 'shorts', thresholds = {}) {
     result = parseCutScriptFile(scriptPath);
   }
   result.mode = m;
+  // 화면/라벨용 제목은 대본 H1 이 아니라 파일명(.md 제외)으로 통일 — 사용자가 보는 파일명 그대로 노출.
+  //   (텍스트 붙여넣기 parseScriptText 는 파일이 없으므로 H1 유지)
+  try {
+    const base = path.basename(scriptPath).replace(/\.md$/i, '').trim();
+    if (base) { result.fileTitle = base; for (const pr of result.projects) pr.fileTitle = base; }
+  } catch {}
   for (const pr of result.projects) pr.mode = m;
   return result; // { fileTitle, meta, mode, projects: Project[] }
 }

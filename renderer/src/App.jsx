@@ -1312,7 +1312,9 @@ function Cards({ dto, isLf, capCharsN, onTts, onImg, onVid, onBulk, onPlayShorts
         let capN = 0;
         return (
           <div className="card" key={pr.shortsNum}>
-            <h2>🎞 {dto.fileTitle ? `${dto.fileTitle} | ` : ''}{pr.title} <span className="meta">({pr.aspect} · {pr.cuts.length}컷)</span>
+            <h2>🎞 {dto.mode === 'longform'
+              ? (dto.fileTitle || pr.title)
+              : <>{dto.fileTitle ? `${dto.fileTitle} | ` : ''}{pr.title}</>} <span className="meta">({pr.aspect} · {pr.cuts.length}컷)</span>
               {total > 0 && <span className="total">합계 {fmtMinSec(total)}{rtf != null && <span className="rtf" title="RTF = TTS 생성시간 ÷ 음성길이 (낮을수록 빠름)">│ RTF {rtf.toFixed(2)}</span>}</span>}
               <span className="cardbtns">
                 <button className="ghost" onClick={() => onTts(pr.shortsNum)}>🎤 TTS</button>
