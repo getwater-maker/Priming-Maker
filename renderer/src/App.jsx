@@ -939,7 +939,11 @@ export default function App() {
                   <button className="ghost" disabled={!loaded} title={`G${vidFrom}~G${vidTo} 그룹을 i2v 비디오로 변환 (이미지 있는 것만)`} onClick={() => runVid(null)}>비디오</button>
                 </>)}
           </div>
-          <div className="hside right">
+          <div className="hside" />
+        </div>
+        {/* 제작 액션 행 — 한 줄, 오른쪽 정렬 */}
+        <div className="hrow">
+          <div className="hright">
             <button className="ghost" disabled={!loaded || impBusy} title="각 그룹 내용을 분석해 이미지 프롬프트를 자동 작성·적용 (Ollama)" onClick={runMakePrompts}>{impBusy ? '⏳ 작성중…' : '✍ 프롬프트작성'}</button>
             <button className="ghost" disabled={!loaded} title="Ollama 서버·모델 설정 / 웹 LLM 답변 붙여넣기(고급)" style={{ padding: '6px 9px' }} onClick={openOllama}>⚙</button>
             <button className="ghost" disabled={!loaded} title="모든 편을 이어서 미리보기 재생" onClick={() => playShorts(null)}>▶ 미리보기</button>
