@@ -873,7 +873,7 @@ export default function App() {
     <>
       <div className="topsticky">
       <header>
-        {/* 상단 행 — 1영역(좌: 타이틀·모드·채널·대본) | 2영역(우: 배속·TTS·이미지·영상 생성컨트롤) */}
+        {/* 상단 행 — 대본·프로젝트 관리 (열기·수정·저장·불러오기·초기화 한 줄로) */}
         <div className="hrow">
           <div className="hleft">
             <h1>🎬 Priming{appVersion ? <span className="ver">v{appVersion}</span> : null}</h1>
@@ -887,8 +887,20 @@ export default function App() {
             <button className="ghost" title="채널(프리셋) 설정 편집" style={{ padding: '6px 9px' }} onClick={openChannelEditor}>⚙</button>
             <button onClick={openScript}>📂 대본 열기</button>
             <button className="ghost" disabled={!loaded} title="대본 내용 수정 → 재파싱(원본 .md 갱신)" onClick={openScriptEdit}>✏ 대본수정</button>
+            <button className="ghost" disabled={!loaded} title="수동 저장(자동저장도 항상 켜져 있음)" onClick={saveProject}>💾 작업저장</button>
+            <button className="ghost" title="저장한 프로젝트 불러오기" onClick={loadProject}>📂 불러오기</button>
+            <button className="ghost" title="새 대본 작업 — 현재 화면 비우기" onClick={resetProject}>🆕 초기화</button>
+            {loaded && (
+              <span className="autosave-ind" title="작업은 자동으로 수시 저장됩니다. 같은 대본을 다시 열면 이어서 작업할 수 있어요.">
+                {autoSavedAt ? `✓ 자동저장 ${new Date(autoSavedAt).toLocaleTimeString()}` : '자동저장 켜짐'}
+              </span>
+            )}
           </div>
-          <div className="hright">
+        </div>
+        {/* 생성·제작 행 — 가운데: TTS·이미지·비디오 생성컨트롤 / 오른쪽: 프롬프트·미리보기·만들기·출력 */}
+        <div className="hrow hrow3">
+          <div className="hside" />
+          <div className="hcenter">
             <span title="음성 배속 (합성 1.0 → atempo 변환)">🎤 배속 <input type="number" value={ttsSpeed} step="0.05" min="0.5" max="2" style={{ width: 52 }} onChange={(e) => setTtsSpeed(e.target.value)} /></span>
             <button className="ghost" disabled={!loaded} onClick={() => runTts(null)}>🎤 TTS</button>
             <button className="ghost" disabled={!loaded} title="기존 음성·캐시를 무시하고 현재 대본 전체 음성을 새로 합성" onClick={() => runTts(null, true)}>🔁 다시 변환</button>
@@ -927,20 +939,7 @@ export default function App() {
                   <button className="ghost" disabled={!loaded} title={`G${vidFrom}~G${vidTo} 그룹을 i2v 비디오로 변환 (이미지 있는 것만)`} onClick={() => runVid(null)}>비디오</button>
                 </>)}
           </div>
-        </div>
-        {/* 하단 행 — 3영역(좌: 프로젝트 관리) | 4영역(우: 미리보기·만들기·.vrew 등) */}
-        <div className="hrow">
-          <div className="hleft">
-            <button className="ghost" disabled={!loaded} title="수동 저장(자동저장도 항상 켜져 있음)" onClick={saveProject}>💾 작업저장</button>
-            <button className="ghost" title="저장한 프로젝트 불러오기" onClick={loadProject}>📂 불러오기</button>
-            {loaded && (
-              <span className="autosave-ind" title="작업은 자동으로 수시 저장됩니다. 같은 대본을 다시 열면 이어서 작업할 수 있어요.">
-                {autoSavedAt ? `✓ 자동저장 ${new Date(autoSavedAt).toLocaleTimeString()}` : '자동저장 켜짐'}
-              </span>
-            )}
-            <button className="ghost" title="새 대본 작업 — 현재 화면 비우기" onClick={resetProject}>🆕 초기화</button>
-          </div>
-          <div className="hright">
+          <div className="hside right">
             <button className="ghost" disabled={!loaded || impBusy} title="각 그룹 내용을 분석해 이미지 프롬프트를 자동 작성·적용 (Ollama)" onClick={runMakePrompts}>{impBusy ? '⏳ 작성중…' : '✍ 프롬프트작성'}</button>
             <button className="ghost" disabled={!loaded} title="Ollama 서버·모델 설정 / 웹 LLM 답변 붙여넣기(고급)" style={{ padding: '6px 9px' }} onClick={openOllama}>⚙</button>
             <button className="ghost" disabled={!loaded} title="모든 편을 이어서 미리보기 재생" onClick={() => playShorts(null)}>▶ 미리보기</button>

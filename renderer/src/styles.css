@@ -14,6 +14,11 @@ header{background:var(--bg);border-bottom:1px solid var(--line);padding:8px 16px
 .hleft{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .hright{display:flex;align-items:center;gap:7px;flex-wrap:wrap;justify-content:flex-end;margin-left:auto}
 .hrow.r2{justify-content:flex-end}
+/* 생성행 — 가운데(TTS·이미지·비디오) 정렬 + 오른쪽(제작 액션). 좌우 1fr 가 같아 중앙 묶음이 항상 중앙. */
+.hrow3{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:9px;justify-content:initial}
+.hrow3 > .hcenter{display:flex;align-items:center;gap:7px;flex-wrap:wrap;justify-content:center;min-width:0}
+.hrow3 > .hside{display:flex;align-items:center;gap:7px;flex-wrap:wrap;min-width:0}
+.hrow3 > .hside.right{justify-content:flex-end}
 /* 헤더+분할바 고정 — 스크롤 내려도 항상 보임 */
 .topsticky{position:sticky;top:0;z-index:50;background:var(--bg)}
 /* 2영역 구분자 — TTS 다음·이미지 다음 세로선 */
