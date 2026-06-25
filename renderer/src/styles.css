@@ -51,8 +51,11 @@ main{flex:1;overflow:auto;padding:14px 16px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px 14px;margin-bottom:14px;
   box-shadow:0 1px 3px rgba(80,60,40,.04)}
 /* 카드 헤더(제목+툴바) — 스크롤해도 헤더 바로 아래에 고정(편마다 섹션 헤더처럼 핀). */
+/* transform: translateZ(0) = 자체 합성 레이어로 승격 → 뒤 콘텐츠(autoplay 비디오 썸네일 포함)가
+   sticky 헤더를 뚫고 비치는 Chromium 합성 버그 방지. (sticky 동작에는 영향 없음) */
 .card h2{font-size:15px;color:var(--strong);margin:-12px -14px 8px;padding:12px 14px 8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;
-  position:sticky;top:0;z-index:20;background:var(--card);border-bottom:1px solid var(--line);border-radius:14px 14px 0 0}
+  position:sticky;top:0;z-index:30;background:var(--card);border-bottom:1px solid var(--line);border-radius:14px 14px 0 0;
+  transform:translateZ(0);will-change:transform}
 .total{font-size:12px;color:var(--ok);font-weight:700;background:#eef5ea;border:1px solid #d7e8cd;border-radius:6px;padding:1px 8px}
 /* 합계 옆 러닝타임(분:초) — 구분바 포함 */
 .total .rtf{margin-left:6px;padding-left:6px;color:var(--hook,#b9772f)}
