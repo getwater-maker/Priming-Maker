@@ -188,7 +188,7 @@ class GensparkEngine {
     } catch {}
 
     this.log('[Genspark] 브라우저 시작 (Genspark AI 이미지)...');
-    this.context = await chromium.launchPersistentContext(this.profileDir, {
+    const _gsLaunchOpts = {
       headless: false,
       viewport: null,
       args: [
@@ -198,7 +198,14 @@ class GensparkEngine {
       ignoreDefaultArgs: ['--enable-automation'],
       acceptDownloads: true,
       permissions: ['clipboard-read', 'clipboard-write'],
-    });
+    };
+    // 시스템 정식 Chrome 우선 → Playwright 전용 Chromium 다운로드 불필요(새 PC 호환). 없으면 번들 Chromium 폴백.
+    try {
+      this.context = await chromium.launchPersistentContext(this.profileDir, { ..._gsLaunchOpts, channel: 'chrome' });
+    } catch (e) {
+      this.log(`[Genspark] ⚠ 정식 Chrome 실행 실패 (${String(e.message).split('\n')[0].slice(0, 100)}) — 번들 Chromium 폴백 (Chrome 설치 권장: https://www.google.com/chrome)`);
+      this.context = await chromium.launchPersistentContext(this.profileDir, _gsLaunchOpts);
+    }
     this.page = this.context.pages()[0] || await this.context.newPage();
     await this.page.addInitScript(() => {
       Object.defineProperty(navigator, 'webdriver', { get: () => false });
