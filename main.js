@@ -306,7 +306,15 @@ ipcMain.handle('genspark-login', async (_e, args = {}) => {
   try {
     const { GensparkEngine } = require('./genspark-engine');
     const eng = new GensparkEngine({ profileId: accId, logger: log });
-    await eng.login();
+    await eng.login(async () => {
+      // 창을 연 채로, 사용자가 로그인 마치고 버튼 누를 때까지 대기 (자동 감지 미사용)
+      await dialog.showMessageBox(win, {
+        type: 'info', buttons: ['로그인 완료'], defaultId: 0, noLink: true,
+        title: 'Genspark 로그인',
+        message: '열린 크롬 창에서 Genspark(구글) 로그인을 완료하세요.',
+        detail: '로그인을 마친 뒤 이 [로그인 완료] 버튼을 누르면 쿠키가 저장되고 창이 닫힙니다.',
+      });
+    });
     log('✓ Genspark 로그인 완료(쿠키 저장).');
     return { ok: true };
   } catch (e) { log('Genspark 로그인 오류: ' + e.message); return { ok: false, error: e.message }; }
@@ -324,7 +332,14 @@ ipcMain.handle('grok-login', async (_e, args = {}) => {
   try {
     const { GrokEngine } = require('./grok-engine');
     const eng = new GrokEngine({ profileId: accId, logger: log });
-    await eng.login();
+    await eng.login(async () => {
+      await dialog.showMessageBox(win, {
+        type: 'info', buttons: ['로그인 완료'], defaultId: 0, noLink: true,
+        title: 'Grok(X) 로그인',
+        message: '열린 크롬 창에서 X(트위터) 계정으로 로그인을 완료하세요.',
+        detail: '로그인을 마친 뒤 이 [로그인 완료] 버튼을 누르면 쿠키가 저장되고 창이 닫힙니다.',
+      });
+    });
     log('✓ Grok 로그인 완료(쿠키 저장).');
     return { ok: true };
   } catch (e) { log('Grok 로그인 오류: ' + e.message); return { ok: false, error: e.message }; }

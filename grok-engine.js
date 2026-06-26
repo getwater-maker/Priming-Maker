@@ -268,7 +268,7 @@ class GrokEngine {
     } catch (_) {}
   }
 
-  async start() {
+  async start(opts = {}) {
     // 페이지가 닫혔으면 컨텍스트도 폐기 후 재시작
     if (this.page && this.page.isClosed && this.page.isClosed()) {
       try { await this.context?.close(); } catch {}
@@ -332,7 +332,9 @@ class GrokEngine {
     await this._dismissAnyDialog();
 
     // 로그인 상태 확인
-    const loginIndicator = await this.page.$(GROK_SELECTORS.loginIndicator);
+    // 로그인 전용 모드(login())에서는 자동 감지를 건너뜀 — 셀렉터가 사이트 UI 변경에 취약해
+    //   false positive/negative 로 창이 일찍 닫히는 문제 때문. 대신 main 이 '로그인 완료' 다이얼로그로 대기시킨다.
+    const loginIndicator = opts.skipLoginWait ? null : await this.page.$(GROK_SELECTORS.loginIndicator);
     if (loginIndicator) {
       this.log('[Grok] 로그인이 필요합니다. 브라우저에서 X 계정으로 로그인하세요. (한 번 로그인하면 이후엔 자동)');
       // 로그인 표시가 사라질 때까지 최대 5분 폴링.
@@ -355,8 +357,10 @@ class GrokEngine {
   }
 
   // 로그인 전용 — 브라우저를 열어 X 로그인(최대 5분 대기) 후 쿠키 저장하고 닫음. (멀티계정 로그인)
-  async login() {
-    await this.start();
+  async login(onConfirm) {
+    await this.start({ skipLoginWait: true });   // 창만 열고(자동 감지 X) 사용자 로그인 대기
+    // onConfirm: main 이 넘긴 '로그인 완료' 다이얼로그 대기. 사용자가 누를 때까지 창 유지.
+    if (typeof onConfirm === 'function') { try { await onConfirm(); } catch {} }
     this.log('[Grok] 로그인 완료 — 쿠키 저장 후 창을 닫습니다.');
     await this.stop();
     return { ok: true };
