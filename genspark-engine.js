@@ -219,10 +219,19 @@ class GensparkEngine {
     const loginIndicator = await this.page.$(GENSPARK_SELECTORS.loginIndicator);
     if (loginIndicator) {
       this.log('[Genspark] 로그인이 필요합니다. 브라우저에서 Genspark 계정으로 로그인하세요. (한 번 로그인하면 이후엔 자동)');
-      await this.page.waitForFunction(
-        () => !document.querySelector('a[href*="login" i], button:has-text("Sign in"), button:has-text("Log in")'),
-        { timeout: 300000 }
-      ).catch(() => {});
+      // 로그인 표시가 사라질 때까지 최대 5분 폴링.
+      //   ⚠ document.querySelector 는 :has-text() 미지원(Playwright 전용) → 페이지에서 직접 쓰면 SyntaxError 로
+      //     즉시 throw → 예전엔 창이 바로 닫혔음. 그래서 Playwright page.$(셀렉터)로 메인 프로세스에서 폴링한다.
+      //   OAuth(구글 등) 진행 중에는 genspark.ai 가 아니므로 판단을 미룬다(다른 도메인에서 표시가 없다고 로그인 완료로 오인 방지).
+      const deadline = Date.now() + 300000;
+      while (Date.now() < deadline) {
+        await this.page.waitForTimeout(2000);
+        let onSite = false;
+        try { onSite = /genspark\.ai/i.test(this.page.url()); } catch { break; }
+        if (!onSite) continue;
+        const still = await this.page.$(GENSPARK_SELECTORS.loginIndicator).catch(() => null);
+        if (!still) break;
+      }
       this.log('[Genspark] 로그인 감지 — 진행합니다.');
     } else {
       this.log('[Genspark] 이미 로그인되어 있습니다.');

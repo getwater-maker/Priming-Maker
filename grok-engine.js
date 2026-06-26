@@ -335,11 +335,19 @@ class GrokEngine {
     const loginIndicator = await this.page.$(GROK_SELECTORS.loginIndicator);
     if (loginIndicator) {
       this.log('[Grok] 로그인이 필요합니다. 브라우저에서 X 계정으로 로그인하세요. (한 번 로그인하면 이후엔 자동)');
-      // grok.com 안의 다른 페이지로 이동하면 로그인 완료로 간주 (최대 5분 대기)
-      await this.page.waitForFunction(
-        () => !document.querySelector('a[href*="login" i], button:has-text("Sign in"), button:has-text("Log in")'),
-        { timeout: 300000 }
-      ).catch(() => {});
+      // 로그인 표시가 사라질 때까지 최대 5분 폴링.
+      //   ⚠ document.querySelector 는 :has-text() 미지원(Playwright 전용) → 페이지에서 직접 쓰면 SyntaxError 로
+      //     즉시 throw → 예전엔 창이 바로 닫혔음. 그래서 Playwright page.$(셀렉터)로 메인 프로세스에서 폴링한다.
+      //   X(x.com) 로그인 진행 중에는 grok.com 이 아니므로 판단을 미룬다(오인 방지).
+      const deadline = Date.now() + 300000;
+      while (Date.now() < deadline) {
+        await this.page.waitForTimeout(2000);
+        let onSite = false;
+        try { onSite = /grok\.com/i.test(this.page.url()); } catch { break; }
+        if (!onSite) continue;
+        const still = await this.page.$(GROK_SELECTORS.loginIndicator).catch(() => null);
+        if (!still) break;
+      }
       this.log('[Grok] 로그인 감지 — 진행합니다.');
     } else {
       this.log('[Grok] 이미 로그인되어 있습니다.');
