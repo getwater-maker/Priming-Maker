@@ -83,6 +83,8 @@ export default function App() {
   // 모달/플레이어 상태
   const [chOpen, setChOpen] = useState(false);
   const [ch, setCh] = useState(null);          // 편집 중 프리셋 폼
+  const [newChanOpen, setNewChanOpen] = useState(false); // 새 채널 이름 입력 모달
+  const [newChanName, setNewChanName] = useState('');
   const [chStyles, setChStyles] = useState([]);
   const [chRefList, setChRefList] = useState([]); // 참조음성 파일 목록
   const [impOpen, setImpOpen] = useState(false);
@@ -642,12 +644,15 @@ export default function App() {
   }
 
   // ── 채널 설정 편집 ──
-  async function addChannel() {
-    const name = (window.prompt('새 채널 이름 (현재 채널 설정을 복사합니다):', '') || '').trim();
-    if (!name) return;
+  // Electron 렌더러는 window.prompt 를 지원하지 않으므로(조용히 null) 이름 입력은 별도 모달로 받는다.
+  function addChannel() { setNewChanName(''); setNewChanOpen(true); }
+  async function createChannel() {
+    const name = (newChanName || '').trim();
+    if (!name) { setStatus('채널 이름을 입력하세요'); return; }
     try {
       const ps = await api.addPreset({ name, fromName: presetName || null });
       setPresets(ps || []); setPresetName(name);
+      setNewChanOpen(false);
       setStatus(`채널 "${name}" 추가됨 — 세부 설정을 편집하세요`);
       await openChannelEditor(name);   // 바로 편집창 열기
     } catch (e) { alert('채널 추가 실패:\n' + e.message); }
@@ -1078,6 +1083,19 @@ export default function App() {
         </div>
         <div id="playerBar"><span id="playerInfo" ref={playerInfoRef} /><button className="ghost" onClick={stopPlayer}>■ 닫기</button></div>
       </div>
+
+      {newChanOpen && (
+        <div className="modal-bg show" onClick={(e) => { if (e.target.classList.contains('modal-bg')) setNewChanOpen(false); }}>
+          <div className="modal-card" style={{ maxWidth: 420 }}>
+            <h3>＋ 새 채널 추가</h3>
+            <div className="meta" style={{ marginBottom: 8 }}>현재 채널 <b>「{presetName || '-'}」</b>의 설정을 복사해 새 채널을 만듭니다. 만든 뒤 편집창에서 세부 설정을 바꾸세요.</div>
+            <input autoFocus placeholder="새 채널 이름" style={{ width: '100%', boxSizing: 'border-box', padding: '7px 9px' }}
+              value={newChanName} onChange={(e) => setNewChanName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') createChannel(); }} />
+            <div className="mbtns"><button onClick={createChannel}>만들기</button><button className="ghost" onClick={() => setNewChanOpen(false)}>취소</button></div>
+          </div>
+        </div>
+      )}
 
       {chOpen && ch && (
         <div className="modal-bg show" onClick={(e) => { if (e.target.classList.contains('modal-bg')) setChOpen(false); }}>
