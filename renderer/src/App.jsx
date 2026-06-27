@@ -316,7 +316,7 @@ export default function App() {
     if (force && !window.confirm('현재 대본의 모든 음성을 새로 변환합니다.\n기존 음성과 캐시를 무시하고 다시 합성합니다. 진행할까요?')) return;
     setStatus(force ? 'TTS 다시 변환중…' : 'TTS 생성중…');
     try {
-      const d = await api.ttsBuild({ shortsNum, dry: false, presetName: presetName || null, speed: ttsSpeed || null, clipMaxSec: _clipMaxSec(), captionMaxChars: effCap, force });
+      const d = await api.ttsBuild({ shortsNum, dry: false, presetName: presetName || null, speed: ttsSpeed || null, clipMaxSec: _clipMaxSec(), force });
       setDto(d); setStatus('오디오 완료');
     } catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
   }
