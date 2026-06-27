@@ -745,6 +745,9 @@ async function runComfyImages(project, imagesDir, logger, styleId, onlyNums) {
   const { ComfyEngine } = require('./comfy-engine');
   const eng = new ComfyEngine(cfg, logger);
   if (!(await eng.health())) throw new Error(`ComfyUI 연결 실패 (${cfg.baseUrl}) — ComfyUI 실행/주소 확인 (⚙ Comfy)`);
+  // 실제 사용 엔진을 로그에 정직하게 — 커스텀 워크플로(Krea2 등) 지정+존재면 그 이름, 아니면 내장 SDXL.
+  const usingCustomWf = !!(cfg.imageWorkflowPath && fs.existsSync(cfg.imageWorkflowPath));
+  const comfyLabel = usingCustomWf ? `커스텀:${path.basename(cfg.imageWorkflowPath).replace(/\.json$/i, '')}` : 'SDXL';
   const stylePrompt = styleId ? (require('./core/style-store').getPrompt(styleId) || '') : '';
   const pfx = stylePrompt ? `${stylePrompt}, ` : '';
   let done = 0, total = 0;
@@ -755,7 +758,7 @@ async function runComfyImages(project, imagesDir, logger, styleId, onlyNums) {
     if (g.imagePath && fs.existsSync(g.imagePath)) continue; // 이미 있음(캐시 프리필/이전 생성)
     total++;
     const out = path.join(imagesDir, `${String(g.num).padStart(2, '0')}.png`);
-    logger(`🖼 ComfyUI(SDXL) G${g.num} 생성…`);
+    logger(`🖼 ComfyUI(${comfyLabel}) G${g.num} 생성…`);
     const r = await eng.textToImage({ prompt: pfx + g.imagePrompt, aspect: project.aspect || '9:16', outputPath: out, abortSignal: () => S.abort });
     if (r.success) { g.imagePath = out; g.imageStatus = 'done'; g.imageEngine = 'comfy'; done++; pushDtoUpdate(); } // comfy 표시 → LoRA 수집 제외
     else logger(`✗ G${g.num} 실패: ${r.error}`);
