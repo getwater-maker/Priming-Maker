@@ -502,6 +502,7 @@ ipcMain.handle('tts-build', async (_e, args = {}) => {
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
   const { shortsNum = null, dry = false, presetName = null, speed = 1.15, force = false } = args;
   const clipMaxSec = (args.clipMaxSec && Number(args.clipMaxSec) > 0) ? Number(args.clipMaxSec) : 8.0; // 영상 엔진별 그룹 캡(Grok 6/Flow 8)
+  const capMaxChars = (args.captionMaxChars && Number(args.captionMaxChars) > 0) ? Number(args.captionMaxChars) : (getModeProfile(currentMode()).captionMaxChars || 7);
   S.abort = false;
   if (!dry) {
     S.preset = P.getPreset(presetName);
@@ -527,6 +528,15 @@ ipcMain.handle('tts-build', async (_e, args = {}) => {
       log(`  ↳ ${clipMaxSec}초 미만 단위로 그룹 재구성: ${m.before} → ${m.after}개`);
     } else if (pr.format === 'grouped') {
       log(`  ↳ 작성된 그룹 구조 유지 (그룹 ${pr.groups.length}개) — 자동 재구성 생략`);
+    }
+    // 📝 SRT 자막 — 대본 파일이 있는 폴더 하위 'SRT/' 에 대본 파일명과 동일하게 저장(TTS 직후, 실제 음성 길이 기준).
+    //   (편이 여럿이면 vrewBaseName 이 _N 접미). 무음(dry)·텍스트붙여넣기(scriptPath 없음)면 생략.
+    if (!dry && S.scriptPath) {
+      try {
+        const srtPath = path.join(path.dirname(S.scriptPath), 'SRT', vrewBaseName(pr) + '.srt');
+        P.writeSrt(pr, srtPath, capMaxChars);     // writeSrt 가 SRT 폴더를 자동 생성
+        log(`  📝 SRT 저장: ${srtPath}`);
+      } catch (e) { log(`  ⚠ SRT 저장 실패: ${e.message}`); }
     }
     pushDtoUpdate();
   }
@@ -1560,6 +1570,14 @@ async function runMakeAllCore(opts = {}) {
           log(`  ↳ ${prLabel(pr)} 작성된 그룹 구조 유지 (그룹 ${pr.groups.length}개) — 자동 재구성 생략`);
         }
         log(`✓ ${prLabel(pr)} 음성 완료`);
+        // 📝 SRT — 대본 폴더 하위 'SRT/' 에 대본 파일명과 동일하게 저장 (TTS 직후).
+        if (!dry && S.scriptPath) {
+          try {
+            const srtPath = path.join(path.dirname(S.scriptPath), 'SRT', vrewBaseName(pr) + '.srt');
+            P.writeSrt(pr, srtPath, captionMaxChars);
+            log(`  📝 ${prLabel(pr)} SRT 저장: ${srtPath}`);
+          } catch (e) { log(`  ⚠ SRT 저장 실패: ${e.message}`); }
+        }
       } catch (e) { log(`${prLabel(pr)} 음성 오류: ${e.message}`); }
       S.timings.tts += (Date.now() - t0) / 1000;
       pushDtoUpdate();
