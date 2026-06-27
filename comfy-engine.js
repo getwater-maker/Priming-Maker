@@ -56,6 +56,8 @@ class ComfyEngine {
     this.imageTimeoutSec = Number(cfg.imageTimeoutSec) > 0 ? Number(cfg.imageTimeoutSec) : 180;
     this.imageWorkflowPath = cfg.imageWorkflowPath || '';
     this.imagePromptNodeId = cfg.imagePromptNodeId || '';
+    this.imageWidthNodeId = cfg.imageWidthNodeId || '';   // 커스텀 이미지 워크플로 해상도 노드(빈값=자동탐지)
+    this.imageHeightNodeId = cfg.imageHeightNodeId || '';
     this.videoWidthNodeId = cfg.videoWidthNodeId || '';   // i2v 해상도 노드(빈값=title 자동탐지)
     this.videoHeightNodeId = cfg.videoHeightNodeId || '';
     this.videoDurationNodeId = cfg.videoDurationNodeId || ''; // i2v 길이(초) 노드
@@ -328,14 +330,38 @@ class ComfyEngine {
       '9': { class_type: 'SaveImage', inputs: { filename_prefix: 'priming', images: ['10', 0] } },
     };
   }
-  // 커스텀 t2i 워크플로 로드 + 프롬프트/seed 주입.
-  _buildImageWorkflow(positive) {
+  // 커스텀 t2i 워크플로 로드 + 프롬프트/해상도/seed 주입.
+  _buildImageWorkflow(positive, aspect) {
     let wf = JSON.parse(fs.readFileSync(this.imageWorkflowPath, 'utf8'));
     if (wf.nodes && !wf['1'] && typeof wf.nodes === 'object') throw new Error('UI 포맷 워크플로입니다. "저장(API 포맷)"으로 저장하세요.');
     const graph = JSON.parse(JSON.stringify(wf));
     if (positive) {
       const pId = this.imagePromptNodeId || Object.keys(graph).find((id) => graph[id].class_type === 'CLIPTextEncode' && 'text' in (graph[id].inputs || {}));
       if (pId && graph[pId] && graph[pId].inputs) graph[pId].inputs.text = String(positive);
+    }
+    // 📐 해상도 — 프로젝트 비율(롱폼 16:9 / 쇼츠 9:16 / 1:1)에 맞춰 EmptyLatentImage 의 width/height 주입.
+    //   워크플로의 ResolutionSelector 등 고정 해상도를 덮어써서, 롱폼·쇼츠 모두 한 워크플로로 처리.
+    //   imageWidthNodeId/imageHeightNodeId 가 지정되면 그 노드(value/width/height)에 기록(커스텀 노드 대응).
+    const dim = this._imageDims(aspect);
+    const setNum = (id, keys, val) => {
+      const inp = id && graph[id] && graph[id].inputs;
+      if (!inp) return false;
+      for (const k of keys) { if (k in inp) { inp[k] = val; return true; } }
+      return false;
+    };
+    let wSet = setNum(this.imageWidthNodeId, ['value', 'width'], dim.w);
+    let hSet = setNum(this.imageHeightNodeId, ['value', 'height'], dim.h);
+    if (!wSet || !hSet) {
+      // 자동 — width·height 입력을 함께 가진 latent 노드(EmptyLatentImage/EmptySD3LatentImage 등)에 직접 주입.
+      for (const id of Object.keys(graph)) {
+        const inp = graph[id].inputs || {};
+        if (('width' in inp) && ('height' in inp)) {
+          if (!wSet) inp.width = dim.w;
+          if (!hSet) inp.height = dim.h;
+          wSet = hSet = true;
+          break;
+        }
+      }
     }
     for (const id of Object.keys(graph)) {
       const inp = graph[id].inputs || {};
@@ -379,7 +405,7 @@ class ComfyEngine {
       if (!(await this.health())) return { success: false, error: `ComfyUI 연결 실패 (${this.baseUrl})` };
       let graph;
       if (this.imageWorkflowPath && fs.existsSync(this.imageWorkflowPath)) {
-        graph = this._buildImageWorkflow(prompt);
+        graph = this._buildImageWorkflow(prompt, aspect);
       } else {
         const d = this._imageDims(aspect);
         graph = this._buildSdxlGraph({ positive: prompt, negative: negative || this.imageNegative, w: d.w, h: d.h, uw: d.uw, uh: d.uh });

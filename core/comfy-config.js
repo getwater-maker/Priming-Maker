@@ -35,6 +35,8 @@ const DEFAULTS = {
   imageTimeoutSec: 180, // 이미지 1장 최대 대기
   imageWorkflowPath: '', // (선택) 커스텀 t2i API 워크플로. 비우면 내장 SDXL 그래프 사용
   imagePromptNodeId: '', // 커스텀 워크플로의 긍정 프롬프트 노드 id
+  imageWidthNodeId: '',  // 커스텀 워크플로 해상도 노드(빈값=width·height 가진 latent 노드 자동탐지 후 비율 주입)
+  imageHeightNodeId: '',
   // i2v 출력 해상도 노드(비율 맞춤용) — 빈값이면 _meta.title 이 width/height 인 PrimitiveInt 자동탐지.
   videoWidthNodeId: '',
   videoHeightNodeId: '',
