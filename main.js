@@ -344,6 +344,66 @@ ipcMain.handle('grok-login', async (_e, args = {}) => {
     return { ok: true };
   } catch (e) { log('Grok 로그인 오류: ' + e.message); return { ok: false, error: e.message }; }
 });
+
+// ── STT (음성·영상 → 텍스트) — OmniVoice Whisper. 원본과 같은 폴더에 같은 이름 .txt 생성. ──
+//   동영상은 ffmpeg 로 오디오 추출 후 전사. 긴 파일은 asr-client 가 청크 분할. ■ 중단(S.abort)으로 멈춤.
+const STT_VIDEO_EXT = new Set(['.mp4', '.mov', '.mkv', '.webm', '.avi', '.m4v', '.ts', '.mpg', '.mpeg', '.wmv']);
+ipcMain.handle('stt-transcribe', async () => {
+  const r = await dialog.showOpenDialog(win, {
+    title: 'STT 할 음성·영상 파일 선택 (여러 개 가능)',
+    properties: ['openFile', 'multiSelections'],
+    filters: [
+      { name: '음성·영상', extensions: ['mp3', 'wav', 'm4a', 'flac', 'ogg', 'aac', 'wma', 'mp4', 'mov', 'mkv', 'webm', 'avi', 'm4v', 'ts', 'mpg', 'mpeg', 'wmv'] },
+      { name: '모든 파일', extensions: ['*'] },
+    ],
+  });
+  if (r.canceled || !r.filePaths || !r.filePaths.length) return { ok: false, canceled: true };
+
+  const media = require('./core/media-utils');
+  const asr = require('./tts/asr-client');
+  S.abort = false;
+
+  try {
+    const st = await asr.checkAsrStatus();
+    if (!st.reachable) log('⚠ OmniVoice(STT) 백엔드 연결 안 됨 — Whisper 서버가 켜져 있는지 확인하세요. 그래도 시도합니다.');
+    else if (!st.loaded) log('ℹ Whisper 모델 미로드 — 첫 파일은 모델 로딩으로 5분+ 걸릴 수 있습니다.');
+  } catch {}
+
+  const results = [];
+  for (const file of r.filePaths) {
+    if (S.abort) { log('⏹ STT 중단됨'); break; }
+    const dir = path.dirname(file);
+    const base = path.basename(file, path.extname(file));
+    const ext = path.extname(file).toLowerCase();
+    const outTxt = path.join(dir, base + '.txt');
+    let audioPath = file;
+    let tmpAudio = null;
+    log(`🎧 STT 시작: ${path.basename(file)}`);
+    try {
+      if (STT_VIDEO_EXT.has(ext)) {
+        tmpAudio = path.join(os.tmpdir(), `pf-stt-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.mp3`);
+        log('  ↳ 동영상에서 오디오 추출 중…');
+        await media.extractAudioMp3(file, tmpAudio);
+        audioPath = tmpAudio;
+      }
+      const text = await asr.transcribeLong(audioPath, {
+        abortSignal: () => S.abort,
+        onProgress: (p) => { if (p && p.total > 1) log(`  … 전사 ${p.done}/${p.total} 청크`); },
+      });
+      fs.writeFileSync(outTxt, String(text || '').trim() + '\n', 'utf8');
+      log(`✓ 저장: ${path.basename(outTxt)} (${String(text || '').length}자)`);
+      results.push({ file, txt: outTxt, ok: true });
+    } catch (e) {
+      log(`✗ STT 실패 (${path.basename(file)}): ${e.message}`);
+      results.push({ file, ok: false, error: e.message });
+    } finally {
+      if (tmpAudio) { try { fs.rmSync(tmpAudio, { force: true }); } catch {} }
+    }
+  }
+  const okN = results.filter((x) => x.ok).length;
+  log(`🎧 STT 완료: 성공 ${okN}/${results.length}`);
+  return { ok: true, results };
+});
 // 참조음성 목록 — ~/.flow-app/ref-audio 의 음성 파일들 (드롭다운 + 미리듣기용)
 ipcMain.handle('list-ref-audio', () => {
   const dir = path.join(os.homedir(), '.flow-app', 'ref-audio');

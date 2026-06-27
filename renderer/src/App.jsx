@@ -300,6 +300,16 @@ export default function App() {
     catch (e) { logline('대본 제거 오류: ' + e.message); }
   }
   // 작업 소요시간은 백엔드에서 단계별로 측정해 dto-update(d.timings)로 전송 → setTimings 로 표시.
+  async function runStt() {
+    setStatus('STT 변환 중… (음성·영상 → txt)');
+    try {
+      const r = await api.sttTranscribe();
+      if (!r || r.canceled) { setStatus('STT 취소'); return; }
+      const tot = (r.results || []).length;
+      const okN = (r.results || []).filter((x) => x.ok).length;
+      setStatus(`STT 완료 (${okN}/${tot}) — 원본 폴더에 .txt 생성`);
+    } catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
+  }
   async function runTts(shortsNum, force = false) {
     if (force && !window.confirm('현재 대본의 모든 음성을 새로 변환합니다.\n기존 음성과 캐시를 무시하고 다시 합성합니다. 진행할까요?')) return;
     setStatus(force ? 'TTS 다시 변환중…' : 'TTS 생성중…');
@@ -890,6 +900,7 @@ export default function App() {
             <button className="ghost" disabled={!loaded} title="수동 저장(자동저장도 항상 켜져 있음)" onClick={saveProject}>💾 작업저장</button>
             <button className="ghost" title="저장한 프로젝트 불러오기" onClick={loadProject}>📂 불러오기</button>
             <button className="ghost" title="새 대본 작업 — 현재 화면 비우기" onClick={resetProject}>🆕 초기화</button>
+            <button className="ghost" title="음성·영상 파일을 텍스트로 변환(STT) → 원본과 같은 폴더에 같은 이름 .txt 생성 (OmniVoice Whisper)" onClick={runStt}>🎧 STT</button>
             {loaded && (
               <span className="autosave-ind" title="작업은 자동으로 수시 저장됩니다. 같은 대본을 다시 열면 이어서 작업할 수 있어요.">
                 {autoSavedAt ? `✓ 자동저장 ${new Date(autoSavedAt).toLocaleTimeString()}` : '자동저장 켜짐'}

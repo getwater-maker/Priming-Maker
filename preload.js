@@ -82,6 +82,7 @@ contextBridge.exposeInMainWorld('api', {
   importPrompts: (args) => ipcRenderer.invoke('import-prompts', args),
   generatePromptsApi: (args) => ipcRenderer.invoke('generate-prompts-api', args),
   openFolder: () => ipcRenderer.invoke('open-folder'),
+  sttTranscribe: () => ipcRenderer.invoke('stt-transcribe'),
   onLog: (cb) => ipcRenderer.on('log', (_e, line) => cb(line)),
   onDtoUpdate: (cb) => ipcRenderer.on('dto-update', (_e, dto) => cb(dto)),
   onAutosaved: (cb) => ipcRenderer.on('autosaved', (_e, info) => cb(info)),
