@@ -973,14 +973,14 @@ export default function App() {
             </select>
             <select title="이미지 생성툴" value={imgEngine === 'comfy' ? 'comfy' : 'rotate'} onChange={(e) => setImgEngine(e.target.value)}>
               <option value="rotate">순환 (Flow+Genspark)</option>
-              <option value="comfy">{comfyImgWf ? `ComfyUI(커스텀: ${comfyImgWf.split(/[\\/]/).pop().replace(/\.json$/i, '').slice(0, 20)})` : 'ComfyUI(SDXL)'}</option>
+              <option value="comfy">{comfyImgWf ? 'Krea2_Turbo' : 'SDXL'}</option>
             </select>
             {imgEngine !== 'comfy' && <button className="ghost" title="순환 엔진/순서·계정 설정" style={{ padding: '6px 9px' }} onClick={openImgRotation}>⚙ 순환</button>}
             {imgEngine === 'comfy' && <button className="ghost" title="ComfyUI 서버·SDXL 설정" style={{ padding: '6px 9px' }} onClick={openComfy}>⚙ Comfy</button>}
             <button className="ghost" disabled={!loaded} onClick={() => runImg(null)}>🖼 이미지</button>
             <span className="hdiv" />
             <select title="i2v 비디오 엔진" value={videoEngine} onChange={(e) => setVideoEngine(e.target.value)}>
-              <option value="grok">Grok</option><option value="flow">Flow(8초)</option><option value="comfy">ComfyUI (LTX/Wan)</option><option value="none">없음 (이미지만)</option>
+              <option value="grok">Grok</option><option value="flow">Flow(8초)</option><option value="comfy">LTX2.3</option><option value="none">없음 (이미지만)</option>
             </select>
             {videoEngine === 'comfy' && <button className="ghost" title="ComfyUI i2v 설정" style={{ padding: '6px 9px' }} onClick={openComfy}>⚙ Comfy</button>}
             {videoEngine === 'grok' && <button className="ghost" title="Grok(X) 멀티계정 등록·로그인·한도" style={{ padding: '6px 9px' }} onClick={openGrokAcc}>⚙ 계정</button>}
