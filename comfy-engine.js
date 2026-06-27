@@ -46,13 +46,7 @@ class ComfyEngine {
     this.imageNodeId = cfg.imageNodeId || '';
     this.promptNodeId = cfg.promptNodeId || '';
     this.timeoutSec = Number(cfg.timeoutSec) > 0 ? Number(cfg.timeoutSec) : 600;
-    // SDXL 이미지(t2i) 설정
-    this.imageCheckpoint = cfg.imageCheckpoint || 'dreamshaperXL_sfwLightningDPMSDE.safetensors';
-    this.imageSteps = Number(cfg.imageSteps) > 0 ? Number(cfg.imageSteps) : 8;
-    this.imageCfg = Number(cfg.imageCfg) > 0 ? Number(cfg.imageCfg) : 2.0;
-    this.imageSampler = cfg.imageSampler || 'dpmpp_sde';
-    this.imageScheduler = cfg.imageScheduler || 'karras';
-    this.imageNegative = cfg.imageNegative || '';
+    // 이미지(t2i) — 커스텀 워크플로(Krea2 등) 전용. imageWorkflowPath 필수.
     this.imageTimeoutSec = Number(cfg.imageTimeoutSec) > 0 ? Number(cfg.imageTimeoutSec) : 180;
     this.imageWorkflowPath = cfg.imageWorkflowPath || '';
     this.imagePromptNodeId = cfg.imagePromptNodeId || '';
@@ -62,7 +56,6 @@ class ComfyEngine {
     this.videoHeightNodeId = cfg.videoHeightNodeId || '';
     this.videoDurationNodeId = cfg.videoDurationNodeId || ''; // i2v 길이(초) 노드
     this.videoMaxSec = Number(cfg.videoMaxSec) > 0 ? Number(cfg.videoMaxSec) : 0; // 0 = 캡 없음(그룹 TTS 길이 그대로)
-    this.videoFps = Number(cfg.videoFps) > 0 ? Number(cfg.videoFps) : 0; // 0=초 모드(LTX), >0=프레임 모드(Wan)
     this.clientId = 'priming_' + Math.random().toString(36).slice(2, 10);
     this.log = logger;
   }
@@ -182,16 +175,12 @@ class ComfyEngine {
       else if (!hDone && /height/.test(t)) { n.inputs.value = d.h; hDone = true; }
     }
   }
-  // i2v 길이 — 그룹 TTS 재생시간으로 설정. 초 모드(LTX)면 초, 프레임 모드(Wan, videoFps>0)면 프레임(4n+1).
-  //   길이 노드의 value/length/num_frames/frames 중 있는 필드(리터럴)에 기록. videoMaxSec>0 일 때만 상한.
+  // i2v 길이(LTX 초 단위) — 그룹 TTS 재생시간으로 설정. videoMaxSec>0 일 때만 상한.
+  //   길이 노드의 value/length 등 있는 필드(리터럴)에 기록.
   _setVideoDuration(graph, durSec) {
     const ceil = Math.max(1, Math.ceil(Number(durSec) || 0));
     const sec = this.videoMaxSec > 0 ? Math.min(this.videoMaxSec, ceil) : ceil;
-    let target = sec; // 초 모드(LTX)
-    if (this.videoFps > 0) { // 프레임 모드(Wan): frames = sec×fps → 4n+1 보정
-      let f = Math.round(sec * this.videoFps);
-      target = Math.max(5, Math.round((f - 1) / 4) * 4 + 1);
-    }
+    const target = sec;
     const FIELDS = ['value', 'length', 'num_frames', 'frames', 'frame_count', 'video_frames'];
     const setOn = (n) => { if (!n || !n.inputs) return false; for (const f of FIELDS) { if (f in n.inputs && typeof n.inputs[f] !== 'object') { n.inputs[f] = target; return true; } } return false; };
     if (this.videoDurationNodeId && graph[this.videoDurationNodeId] && setOn(graph[this.videoDurationNodeId])) return target;
@@ -309,28 +298,13 @@ class ComfyEngine {
     return tmp;
   }
 
-  // ── SDXL 텍스트→이미지(t2i) ──────────────────────────────
-  // 비율별 native(SDXL 1MP) + 업스케일 목표.
+  // 비율별 t2i 해상도 — 커스텀 워크플로의 EmptyLatentImage 에 주입(롱폼 16:9 / 쇼츠 9:16).
   _imageDims(aspect) {
-    if (aspect === '16:9') return { w: 1344, h: 768, uw: 1920, uh: 1080 };
-    if (aspect === '1:1') return { w: 1024, h: 1024, uw: 1080, uh: 1080 };
-    return { w: 768, h: 1344, uw: 1080, uh: 1920 }; // 9:16 기본
+    if (aspect === '16:9') return { w: 1344, h: 768 };
+    if (aspect === '1:1') return { w: 1024, h: 1024 };
+    return { w: 768, h: 1344 }; // 9:16 기본
   }
-  // 내장 SDXL 그래프(API 포맷) — native 생성 → lanczos 업스케일 → 저장.
-  _buildSdxlGraph({ positive, negative, w, h, uw, uh }) {
-    const seed = Math.floor(Math.random() * 1e15);
-    return {
-      '4': { class_type: 'CheckpointLoaderSimple', inputs: { ckpt_name: this.imageCheckpoint } },
-      '6': { class_type: 'CLIPTextEncode', inputs: { text: String(positive || ''), clip: ['4', 1] } },
-      '7': { class_type: 'CLIPTextEncode', inputs: { text: String(negative || ''), clip: ['4', 1] } },
-      '5': { class_type: 'EmptyLatentImage', inputs: { width: w, height: h, batch_size: 1 } },
-      '3': { class_type: 'KSampler', inputs: { seed, steps: this.imageSteps, cfg: this.imageCfg, sampler_name: this.imageSampler, scheduler: this.imageScheduler, denoise: 1, model: ['4', 0], positive: ['6', 0], negative: ['7', 0], latent_image: ['5', 0] } },
-      '8': { class_type: 'VAEDecode', inputs: { samples: ['3', 0], vae: ['4', 2] } },
-      '10': { class_type: 'ImageScale', inputs: { upscale_method: 'lanczos', width: uw, height: uh, crop: 'disabled', image: ['8', 0] } },
-      '9': { class_type: 'SaveImage', inputs: { filename_prefix: 'priming', images: ['10', 0] } },
-    };
-  }
-  // 커스텀 t2i 워크플로 로드 + 프롬프트/해상도/seed 주입.
+  // 커스텀 t2i 워크플로(Krea2 등) 로드 + 프롬프트/해상도/seed 주입.
   _buildImageWorkflow(positive, aspect) {
     let wf = JSON.parse(fs.readFileSync(this.imageWorkflowPath, 'utf8'));
     if (wf.nodes && !wf['1'] && typeof wf.nodes === 'object') throw new Error('UI 포맷 워크플로입니다. "저장(API 포맷)"으로 저장하세요.');
@@ -403,13 +377,10 @@ class ComfyEngine {
   async textToImage({ prompt, negative, aspect, outputPath, abortSignal }) {
     try {
       if (!(await this.health())) return { success: false, error: `ComfyUI 연결 실패 (${this.baseUrl})` };
-      let graph;
-      if (this.imageWorkflowPath && fs.existsSync(this.imageWorkflowPath)) {
-        graph = this._buildImageWorkflow(prompt, aspect);
-      } else {
-        const d = this._imageDims(aspect);
-        graph = this._buildSdxlGraph({ positive: prompt, negative: negative || this.imageNegative, w: d.w, h: d.h, uw: d.uw, uh: d.uh });
+      if (!this.imageWorkflowPath || !fs.existsSync(this.imageWorkflowPath)) {
+        return { success: false, error: '이미지 워크플로(Krea2 등 API JSON)가 지정되지 않았습니다 — ⚙ Comfy 에서 지정하세요.' };
       }
+      const graph = this._buildImageWorkflow(prompt, aspect);
       const promptId = await this._queue(graph);
       const img = await this._waitImage(promptId, abortSignal);
       const out = await this._downloadImage(img, outputPath);

@@ -738,16 +738,16 @@ function collectForLora(project, styleId, logger) {
   if (n && logger) logger(`📦 LoRA 수집: ${n}장 적립 (총 ${Lora.count()}장)`);
 }
 
-// ComfyUI(SDXL) 이미지 — HTTP API(브라우저 X). 그룹별 g.imagePrompt 로 텍스트→이미지. 로컬/런팟 공용.
+// ComfyUI 이미지(커스텀 워크플로, 예 Krea2) — HTTP API(브라우저 X). 그룹별 g.imagePrompt 로 텍스트→이미지.
 async function runComfyImages(project, imagesDir, logger, styleId, onlyNums) {
   fs.mkdirSync(imagesDir, { recursive: true });
   const cfg = require('./core/comfy-config').load();
   const { ComfyEngine } = require('./comfy-engine');
   const eng = new ComfyEngine(cfg, logger);
   if (!(await eng.health())) throw new Error(`ComfyUI 연결 실패 (${cfg.baseUrl}) — ComfyUI 실행/주소 확인 (⚙ Comfy)`);
-  // 실제 사용 엔진을 로그에 정직하게 — 커스텀 워크플로(Krea2 등) 지정+존재면 그 이름, 아니면 내장 SDXL.
+  // 사용 워크플로 이름을 로그에 표시 (이미지=커스텀 워크플로 전용, 예 Krea2).
   const usingCustomWf = !!(cfg.imageWorkflowPath && fs.existsSync(cfg.imageWorkflowPath));
-  const comfyLabel = usingCustomWf ? `커스텀:${path.basename(cfg.imageWorkflowPath).replace(/\.json$/i, '')}` : 'SDXL';
+  const comfyLabel = usingCustomWf ? path.basename(cfg.imageWorkflowPath).replace(/\.json$/i, '') : '워크플로 미설정';
   const stylePrompt = styleId ? (require('./core/style-store').getPrompt(styleId) || '') : '';
   const pfx = stylePrompt ? `${stylePrompt}, ` : '';
   let done = 0, total = 0;

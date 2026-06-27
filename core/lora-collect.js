@@ -6,7 +6,7 @@
  * Genspark/Flow 로 만든 "한국사에 맞는" 이미지를 한 폴더에 (이미지 + 캡션.txt) 쌍으로 적립한다.
  *   - 캡션 = `<trigger>, <대본 이미지프롬프트>` (스타일은 트리거에 배게 하고 내용만 캡션에).
  *   - 중복 방지: 파일 내용 sha1 해시. 같은 이미지는 한 번만.
- *   - ComfyUI(SDXL) 결과는 수집하지 않음(학습 오염 방지) — 호출부에서 제외.
+ *   - ComfyUI 결과는 수집하지 않음(학습 오염 방지) — 호출부에서 제외.
  *
  * 설정: ~/.priming-maker/lora-collect.json  { enabled, dir, trigger }
  * 데이터셋: <dir>/<hash>.<ext> + <hash>.txt + manifest.json

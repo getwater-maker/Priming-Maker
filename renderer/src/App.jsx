@@ -37,7 +37,7 @@ function phaseBadge(p, isLf) {
 }
 
 const QSTATUS = { idle: '대기', running: '진행중', done: '완료', failed: '실패' };
-const ENGINE_META = { genspark: { name: 'Genspark (Nano Banana 2)' }, flow: { name: 'Google Flow' }, comfy: { name: 'ComfyUI (SDXL)' } };
+const ENGINE_META = { genspark: { name: 'Genspark (Nano Banana 2)' }, flow: { name: 'Google Flow' }, comfy: { name: 'ComfyUI (Krea2 Turbo)' } };
 
 export default function App() {
   const [mode, setMode] = useState('longform'); // 'longform'(주 사용) | 'shorts'
@@ -973,10 +973,10 @@ export default function App() {
             </select>
             <select title="이미지 생성툴" value={imgEngine === 'comfy' ? 'comfy' : 'rotate'} onChange={(e) => setImgEngine(e.target.value)}>
               <option value="rotate">순환 (Flow+Genspark)</option>
-              <option value="comfy">{comfyImgWf ? 'Krea2_Turbo' : 'SDXL'}</option>
+              <option value="comfy">{comfyImgWf ? 'Krea2_Turbo' : 'Krea2_Turbo (워크플로 미설정)'}</option>
             </select>
             {imgEngine !== 'comfy' && <button className="ghost" title="순환 엔진/순서·계정 설정" style={{ padding: '6px 9px' }} onClick={openImgRotation}>⚙ 순환</button>}
-            {imgEngine === 'comfy' && <button className="ghost" title="ComfyUI 서버·SDXL 설정" style={{ padding: '6px 9px' }} onClick={openComfy}>⚙ Comfy</button>}
+            {imgEngine === 'comfy' && <button className="ghost" title="ComfyUI 서버·이미지(Krea2)/영상 설정" style={{ padding: '6px 9px' }} onClick={openComfy}>⚙ Comfy</button>}
             <button className="ghost" disabled={!loaded} onClick={() => runImg(null)}>🖼 이미지</button>
             <span className="hdiv" />
             <select title="i2v 비디오 엔진" value={videoEngine} onChange={(e) => setVideoEngine(e.target.value)}>
@@ -1154,7 +1154,7 @@ export default function App() {
       {comfyOpen && comfy && (
         <div className="modal-bg show" onClick={(e) => { if (e.target.classList.contains('modal-bg')) setComfyOpen(false); }}>
           <div className="modal-card">
-            <h3>⚙ ComfyUI 설정 (SDXL 이미지 · LTX 영상)</h3>
+            <h3>⚙ ComfyUI 설정 (이미지 · LTX 영상)</h3>
             <div className="meta" style={{ marginBottom: 8 }}>로컬 PC / RunPod / <b>ComfyUI 클라우드(comfy.org)</b>. 클라우드는 GPU·설치 불필요 — 체크 후 API 키만 넣으면 됩니다.</div>
             <div className="frow"><label>클라우드 모드</label><label style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1 }}><input type="checkbox" style={{ width: 'auto' }} checked={!!comfy.cloud} onChange={(e) => setComfy({ ...comfy, cloud: e.target.checked, baseUrl: e.target.checked && /127\.0\.0\.1|localhost/.test(comfy.baseUrl || '') ? 'https://cloud.comfy.org' : comfy.baseUrl })} /><span className="meta">comfy.org 공식 클라우드 사용 (Standard 이상 구독 필요)</span></label></div>
             {comfy.cloud && (
@@ -1162,23 +1162,18 @@ export default function App() {
             )}
             <div className="frow"><label>서버 주소</label><input placeholder={comfy.cloud ? 'https://cloud.comfy.org' : 'http://127.0.0.1:8188'} value={comfy.baseUrl} onChange={(e) => setComfy({ ...comfy, baseUrl: e.target.value })} /><button className="ghost" style={{ flex: '0 0 auto' }} onClick={testComfyConn}>연결테스트</button></div>
             <div className="subhead">🖼 이미지 (t2i)</div>
-            <div className="frow"><label>이미지 워크플로</label><input placeholder="ComfyUI '저장(API 포맷)' JSON 경로 (예: Krea2 Turbo). 비우면 내장 SDXL 사용" value={comfy.imageWorkflowPath || ''} onChange={(e) => setComfy({ ...comfy, imageWorkflowPath: e.target.value })} /><button className="ghost" style={{ flex: '0 0 auto' }} onClick={pickImageWorkflow}>찾기</button></div>
+            <div className="frow"><label>이미지 워크플로</label><input placeholder="ComfyUI '저장(API 포맷)' JSON 경로 (예: Krea2 Turbo)" value={comfy.imageWorkflowPath || ''} onChange={(e) => setComfy({ ...comfy, imageWorkflowPath: e.target.value })} /><button className="ghost" style={{ flex: '0 0 auto' }} onClick={pickImageWorkflow}>찾기</button></div>
             <div className="frow"><label>프롬프트 노드</label><input placeholder="비우면 CLIPTextEncode 자동탐지 (Krea2 등 다른 인코더면 그 긍정 프롬프트 노드 ID 입력)" value={comfy.imagePromptNodeId || ''} onChange={(e) => setComfy({ ...comfy, imagePromptNodeId: e.target.value })} /></div>
-            <div className="meta" style={{ marginBottom: 4 }}><b>Krea2 Turbo 등으로 바꾸려면</b>: ComfyUI에서 그 워크플로를 <b>저장(API 포맷)</b>으로 내보내 위 경로에 지정하세요. 프롬프트가 안 들어가면 프롬프트 노드 ID를 직접 입력. (해상도·모델은 워크플로에 저장된 값을 그대로 사용)</div>
-            <div className="subhead">내장 SDXL 설정 (이미지 워크플로가 비어 있을 때만 사용)</div>
-            <div className="frow"><label>SDXL 체크포인트</label><input placeholder="dreamshaperXL_sfwLightningDPMSDE.safetensors" value={comfy.imageCheckpoint || ''} onChange={(e) => setComfy({ ...comfy, imageCheckpoint: e.target.value })} /></div>
-            <div className="frow"><label>스텝/CFG</label><input className="n" type="number" style={{ width: 60 }} value={comfy.imageSteps} onChange={(e) => setComfy({ ...comfy, imageSteps: e.target.value })} /><input className="n" type="number" step="0.5" style={{ width: 60 }} value={comfy.imageCfg} onChange={(e) => setComfy({ ...comfy, imageCfg: e.target.value })} /><span className="meta">Lightning 기본 8 / 2 (dpmpp_sde·karras)</span></div>
-            <div className="frow"><label>네거티브</label><input placeholder="중국·일본·중복 차단" value={comfy.imageNegative || ''} onChange={(e) => setComfy({ ...comfy, imageNegative: e.target.value })} /></div>
-            <div className="subhead">📹 영상 (i2v · LTX / Wan 등)</div>
-            <div className="frow"><label>워크플로</label><input placeholder="ComfyUI '저장(API 포맷)' JSON 경로 (LTX 또는 Wan)" value={comfy.workflowPath} onChange={(e) => setComfy({ ...comfy, workflowPath: e.target.value })} /><button className="ghost" style={{ flex: '0 0 auto' }} onClick={pickWorkflow}>찾기</button></div>
+            <div className="meta" style={{ marginBottom: 4 }}>ComfyUI에서 워크플로를 <b>저장(API 포맷)</b>으로 내보내 위 경로에 지정하세요(필수). 프롬프트가 안 들어가면 프롬프트 노드 ID를 직접 입력. <b>해상도는 프로그램이 비율(롱폼 16:9 / 쇼츠 9:16)에 맞춰 자동 주입</b>합니다.</div>
+            <div className="subhead">📹 영상 (i2v · LTX)</div>
+            <div className="frow"><label>워크플로</label><input placeholder="ComfyUI '저장(API 포맷)' JSON 경로 (LTX)" value={comfy.workflowPath} onChange={(e) => setComfy({ ...comfy, workflowPath: e.target.value })} /><button className="ghost" style={{ flex: '0 0 auto' }} onClick={pickWorkflow}>찾기</button></div>
             <div className="frow"><label>이미지 노드</label><input placeholder="비우면 LoadImage 자동탐지" value={comfy.imageNodeId} onChange={(e) => setComfy({ ...comfy, imageNodeId: e.target.value })} /></div>
             <div className="frow"><label>프롬프트 노드</label><input placeholder="비우면 CLIPTextEncode 자동탐지" value={comfy.promptNodeId} onChange={(e) => setComfy({ ...comfy, promptNodeId: e.target.value })} /></div>
             <div className="frow"><label>너비/높이 노드</label><input placeholder="너비 노드ID(비우면 자동)" value={comfy.videoWidthNodeId || ''} onChange={(e) => setComfy({ ...comfy, videoWidthNodeId: e.target.value })} /><input placeholder="높이 노드ID" value={comfy.videoHeightNodeId || ''} onChange={(e) => setComfy({ ...comfy, videoHeightNodeId: e.target.value })} /></div>
             <div className="frow"><label>길이 노드</label><input placeholder="길이/프레임 노드ID(비우면 자동)" value={comfy.videoDurationNodeId || ''} onChange={(e) => setComfy({ ...comfy, videoDurationNodeId: e.target.value })} /></div>
-            <div className="frow"><label>fps(프레임 모드)</label><input className="n" type="number" style={{ width: 60 }} value={comfy.videoFps || 0} onChange={(e) => setComfy({ ...comfy, videoFps: e.target.value })} /><span className="meta">0=초 단위(LTX) · Wan은 16 (길이=초×fps, 4n+1 보정)</span></div>
             <div className="frow"><label>최대 길이(초)</label><input className="n" type="number" style={{ width: 60 }} value={comfy.videoMaxSec || 0} onChange={(e) => setComfy({ ...comfy, videoMaxSec: e.target.value })} /><span className="meta">0=캡 없음(TTS 길이 그대로)</span></div>
             <div className="frow"><label>영상 타임아웃(초)</label><input type="number" value={comfy.timeoutSec} onChange={(e) => setComfy({ ...comfy, timeoutSec: e.target.value })} /></div>
-            <div className="meta">⚠ 영상 출력은 <b>SaveVideo/VHS(mp4)</b> 노드 필요. Wan은 fps=16 + 길이 노드를 Wan 워크플로의 length 노드로 지정.</div>
+            <div className="meta">⚠ 영상 출력은 <b>SaveVideo/VHS(mp4)</b> 노드 필요. 길이는 LTX Duration(초) 노드에 자동 기록(자동탐지).</div>
             <div className="mbtns"><button onClick={saveComfy}>저장</button><button className="ghost" onClick={() => setComfyOpen(false)}>취소</button></div>
           </div>
         </div>
@@ -1255,7 +1250,7 @@ export default function App() {
                   <input type="checkbox" checked={lora.enabled !== false} onChange={(e) => saveLora({ enabled: e.target.checked })} />
                   📦 LoRA 학습용 이미지 수집 <span className="meta">(Genspark/Flow만 · 누적 {lora.count || 0}장)</span>
                 </label>
-                <div className="meta" style={{ marginTop: 4 }}>한국사 이미지를 모아 → 나중에 LoRA 학습 → SDXL로 한국사 이미지 생성. ComfyUI 결과는 제외.</div>
+                <div className="meta" style={{ marginTop: 4 }}>한국사 이미지를 모아 → 나중에 LoRA 학습용. ComfyUI 결과는 제외.</div>
                 <div className="frow" style={{ marginTop: 4 }}>
                   <label>트리거</label>
                   <input style={{ width: 110 }} value={lora.trigger || 'joseon'} onChange={(e) => setLora({ ...lora, trigger: e.target.value })} onBlur={(e) => saveLora({ trigger: e.target.value })} />
