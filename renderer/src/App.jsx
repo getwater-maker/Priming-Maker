@@ -537,6 +537,7 @@ export default function App() {
     catch (e) { logline('테스트 오류: ' + e.message); setStatus('테스트 오류'); }
   }
   async function pickWorkflow() { const f = await api.pickFile({ filters: [{ name: 'ComfyUI 워크플로(API json)', extensions: ['json'] }] }); if (f) setComfy((c) => ({ ...c, workflowPath: f })); }
+  async function pickImageWorkflow() { const f = await api.pickFile({ filters: [{ name: 'ComfyUI 워크플로(API json)', extensions: ['json'] }] }); if (f) setComfy((c) => ({ ...c, imageWorkflowPath: f })); }
   function showPrompt(c, label) {
     // 실제 생성에 쓰이는 최종 이미지 프롬프트 = 선택한 스타일 + 대본 프롬프트.
     const st = styles.find((x) => x.id === styleId);
@@ -1158,11 +1159,14 @@ export default function App() {
               <div className="frow"><label>API 키</label><input type="password" placeholder="X-API-Key (계정 대시보드에서 발급)" value={comfy.apiKey || ''} onChange={(e) => setComfy({ ...comfy, apiKey: e.target.value })} /></div>
             )}
             <div className="frow"><label>서버 주소</label><input placeholder={comfy.cloud ? 'https://cloud.comfy.org' : 'http://127.0.0.1:8188'} value={comfy.baseUrl} onChange={(e) => setComfy({ ...comfy, baseUrl: e.target.value })} /><button className="ghost" style={{ flex: '0 0 auto' }} onClick={testComfyConn}>연결테스트</button></div>
-            <div className="subhead">🖼 이미지 (SDXL t2i)</div>
+            <div className="subhead">🖼 이미지 (t2i)</div>
+            <div className="frow"><label>이미지 워크플로</label><input placeholder="ComfyUI '저장(API 포맷)' JSON 경로 (예: Krea2 Turbo). 비우면 내장 SDXL 사용" value={comfy.imageWorkflowPath || ''} onChange={(e) => setComfy({ ...comfy, imageWorkflowPath: e.target.value })} /><button className="ghost" style={{ flex: '0 0 auto' }} onClick={pickImageWorkflow}>찾기</button></div>
+            <div className="frow"><label>프롬프트 노드</label><input placeholder="비우면 CLIPTextEncode 자동탐지 (Krea2 등 다른 인코더면 그 긍정 프롬프트 노드 ID 입력)" value={comfy.imagePromptNodeId || ''} onChange={(e) => setComfy({ ...comfy, imagePromptNodeId: e.target.value })} /></div>
+            <div className="meta" style={{ marginBottom: 4 }}><b>Krea2 Turbo 등으로 바꾸려면</b>: ComfyUI에서 그 워크플로를 <b>저장(API 포맷)</b>으로 내보내 위 경로에 지정하세요. 프롬프트가 안 들어가면 프롬프트 노드 ID를 직접 입력. (해상도·모델은 워크플로에 저장된 값을 그대로 사용)</div>
+            <div className="subhead">내장 SDXL 설정 (이미지 워크플로가 비어 있을 때만 사용)</div>
             <div className="frow"><label>SDXL 체크포인트</label><input placeholder="dreamshaperXL_sfwLightningDPMSDE.safetensors" value={comfy.imageCheckpoint || ''} onChange={(e) => setComfy({ ...comfy, imageCheckpoint: e.target.value })} /></div>
             <div className="frow"><label>스텝/CFG</label><input className="n" type="number" style={{ width: 60 }} value={comfy.imageSteps} onChange={(e) => setComfy({ ...comfy, imageSteps: e.target.value })} /><input className="n" type="number" step="0.5" style={{ width: 60 }} value={comfy.imageCfg} onChange={(e) => setComfy({ ...comfy, imageCfg: e.target.value })} /><span className="meta">Lightning 기본 8 / 2 (dpmpp_sde·karras)</span></div>
             <div className="frow"><label>네거티브</label><input placeholder="중국·일본·중복 차단" value={comfy.imageNegative || ''} onChange={(e) => setComfy({ ...comfy, imageNegative: e.target.value })} /></div>
-            <div className="meta">비우면 내장 SDXL 그래프 사용(native→1080 업스케일). 커스텀 워크플로를 쓰려면 imageWorkflowPath 를 설정파일에 직접 지정하세요.</div>
             <div className="subhead">📹 영상 (i2v · LTX / Wan 등)</div>
             <div className="frow"><label>워크플로</label><input placeholder="ComfyUI '저장(API 포맷)' JSON 경로 (LTX 또는 Wan)" value={comfy.workflowPath} onChange={(e) => setComfy({ ...comfy, workflowPath: e.target.value })} /><button className="ghost" style={{ flex: '0 0 auto' }} onClick={pickWorkflow}>찾기</button></div>
             <div className="frow"><label>이미지 노드</label><input placeholder="비우면 LoadImage 자동탐지" value={comfy.imageNodeId} onChange={(e) => setComfy({ ...comfy, imageNodeId: e.target.value })} /></div>
