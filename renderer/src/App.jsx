@@ -642,9 +642,31 @@ export default function App() {
   }
 
   // ── 채널 설정 편집 ──
-  async function openChannelEditor() {
-    if (!presetName) { logline('채널을 먼저 선택하세요'); return; }
-    const p = await api.getPresetDetail(presetName);
+  async function addChannel() {
+    const name = (window.prompt('새 채널 이름 (현재 채널 설정을 복사합니다):', '') || '').trim();
+    if (!name) return;
+    try {
+      const ps = await api.addPreset({ name, fromName: presetName || null });
+      setPresets(ps || []); setPresetName(name);
+      setStatus(`채널 "${name}" 추가됨 — 세부 설정을 편집하세요`);
+      await openChannelEditor(name);   // 바로 편집창 열기
+    } catch (e) { alert('채널 추가 실패:\n' + e.message); }
+  }
+  async function deleteChannel() {
+    if (!ch || !ch.name) return;
+    if (!window.confirm(`채널 "${ch.name}" 을(를) 삭제할까요? 되돌릴 수 없습니다.`)) return;
+    try {
+      const ps = await api.removePreset({ name: ch.name });
+      setChOpen(false); setPresets(ps || []);
+      if (ps && ps.length) setPresetName(ps[0].name);
+      setStatus(`채널 "${ch.name}" 삭제됨`);
+    } catch (e) { alert('채널 삭제 실패:\n' + e.message); }
+  }
+  async function openChannelEditor(nameArg) {
+    // ⚙ 버튼 onClick 은 이벤트 객체를 넘기므로, 문자열일 때만 인자 이름으로 사용.
+    const useName = (typeof nameArg === 'string' && nameArg) ? nameArg : presetName;
+    if (!useName) { logline('채널을 먼저 선택하세요'); return; }
+    const p = await api.getPresetDetail(useName);
     if (!p) { logline('채널 정보를 찾을 수 없습니다'); return; }
     let gkey = '';
     try { gkey = await api.getGeminiKey(); } catch (_) {}
@@ -915,6 +937,7 @@ export default function App() {
               {presets.map((p) => <option key={p.name} value={p.name}>{p.name}</option>)}
             </select>
             <button className="ghost" title="채널(프리셋) 설정 편집" style={{ padding: '6px 9px' }} onClick={openChannelEditor}>⚙</button>
+            <button className="ghost" title="새 채널 추가 (현재 채널 설정을 복사해서 시작)" style={{ padding: '6px 9px' }} onClick={addChannel}>＋ 채널</button>
             <button onClick={openScript}>📂 대본 열기</button>
             <button className="ghost" disabled={!loaded} title="대본 내용 수정 → 재파싱(원본 .md 갱신)" onClick={openScriptEdit}>✏ 대본수정</button>
             <button className="ghost" disabled={!loaded} title="수동 저장(자동저장도 항상 켜져 있음)" onClick={saveProject}>💾 작업저장</button>
@@ -1102,7 +1125,7 @@ export default function App() {
             <div className="frow"><label>쇼츠 출력</label><input placeholder="쇼츠 .vrew 출력 폴더" value={ch.outShort} onChange={(e) => setCh({ ...ch, outShort: e.target.value })} /><button className="ghost" style={{ flex: '0 0 auto' }} onClick={pickOutShort}>찾기</button></div>
             <div className="frow"><label>Gemini 키</label><input placeholder="제미나이 음성용 API 키" value={ch.gemini} onChange={(e) => setCh({ ...ch, gemini: e.target.value })} /></div>
             <div className="frow chk"><label>AI 고지</label><input type="checkbox" style={{ flex: '0 0 auto', width: 'auto' }} checked={ch.aiNotice} onChange={(e) => setCh({ ...ch, aiNotice: e.target.checked })} /> <span className="meta">실제 표시는 작업바의 <b>'AI 고지'</b> 토글로 결정 — 기본값 <b>롱폼 표시 · 쇼츠 미표시</b> (언제든 변경)</span></div>
-            <div className="mbtns"><button onClick={saveChannel}>저장</button><button className="ghost" onClick={() => setChOpen(false)}>취소</button></div>
+            <div className="mbtns"><button onClick={saveChannel}>저장</button><button className="ghost" title="이 채널 삭제" style={{ color: '#c0392b' }} onClick={deleteChannel}>🗑 채널 삭제</button><span style={{ flex: 1 }} /><button className="ghost" onClick={() => setChOpen(false)}>취소</button></div>
           </div>
         </div>
       )}

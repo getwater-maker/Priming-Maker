@@ -1198,6 +1198,33 @@ ipcMain.handle('save-preset', (_e, args = {}) => {
   log(`채널 "${args.name}" 설정 저장`);
   return store.loadAll().map((x) => ({ name: x.name, engine: x.engine, isDefault: !!x.isDefault }));
 });
+// 채널 추가 — 현재(또는 지정) 채널 설정을 복사해 새 이름으로 생성.
+ipcMain.handle('add-preset', (_e, args = {}) => {
+  const store = require('./tts/preset-store');
+  const name = String((args && args.name) || '').trim();
+  if (!name) throw new Error('채널 이름을 입력하세요.');
+  const all = store.loadAll();
+  if (all.some((p) => p.name === name)) throw new Error('같은 이름의 채널이 이미 있습니다.');
+  const src = all.find((p) => p.name === ((args && args.fromName) || '')) || store.getDefault() || all[0] || {};
+  const copy = { ...src };
+  delete copy.id; delete copy.isDefault;       // 새 id 부여 + 기본채널 플래그 제거
+  copy.name = name;
+  store.add(copy);
+  log(`채널 "${name}" 추가 (복사 원본: ${src.name || '기본값'})`);
+  return P.listPresets();
+});
+// 채널 삭제 — 마지막 1개는 보호.
+ipcMain.handle('remove-preset', (_e, args = {}) => {
+  const store = require('./tts/preset-store');
+  const name = String((args && args.name) || '').trim();
+  const all = store.loadAll();
+  if (all.length <= 1) throw new Error('마지막 채널은 삭제할 수 없습니다.');
+  const p = all.find((x) => x.name === name);
+  if (!p) throw new Error('채널을 찾을 수 없습니다.');
+  store.remove(p.id);
+  log(`채널 "${name}" 삭제`);
+  return P.listPresets();
+});
 // Gemini API 키 (secret-store, gemini 엔진 공용) — GPU 없는 PC에서 음성 생성용
 ipcMain.handle('get-gemini-key', () => {
   try { const s = require('./tts/secret-store').get('gemini'); return (s && s.key) || ''; } catch { return ''; }
