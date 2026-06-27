@@ -97,6 +97,7 @@ export default function App() {
   const [scriptText, setScriptText] = useState('');
   const [comfyOpen, setComfyOpen] = useState(false);
   const [comfy, setComfy] = useState(null);
+  const [comfyImgWf, setComfyImgWf] = useState(''); // ComfyUI 이미지 커스텀 워크플로 경로(있으면 라벨=커스텀)
   const [ollamaOpen, setOllamaOpen] = useState(false);
   const [ollama, setOllama] = useState(null);           // { baseUrl, model }
   const [ollamaModels, setOllamaModels] = useState([]); // 서버에 설치된 모델 목록
@@ -146,6 +147,7 @@ export default function App() {
     api.onDtoUpdate((d) => { if (d) { setDto(d); if (d.timings) setTimings(d.timings); if (d.queue) setQueue(d.queue); } });
     api.onAutosaved((info) => setAutoSavedAt((info && info.at) || Date.now()));
     api.getAppVersion().then((v) => { if (v) setAppVersion(v); }).catch(() => {});
+    api.getComfyConfig().then((c) => setComfyImgWf((c && c.imageWorkflowPath) || '')).catch(() => {});
     loadPresets().then(loadStyles);
     // 시작/재로드 시 큐 복원 — 지난 세션 큐 + 활성 대본 화면 복구
     api.listQueue().then((r) => {
@@ -528,7 +530,7 @@ export default function App() {
     catch (e) { logline('Comfy 설정 읽기 오류: ' + e.message); }
   }
   async function saveComfy() {
-    try { await api.setComfyConfig(comfy); setComfyOpen(false); setStatus('ComfyUI 설정 저장됨'); }
+    try { await api.setComfyConfig(comfy); setComfyImgWf((comfy && comfy.imageWorkflowPath) || ''); setComfyOpen(false); setStatus('ComfyUI 설정 저장됨'); }
     catch (e) { logline('저장 오류: ' + e.message); }
   }
   async function testComfyConn() {
@@ -971,7 +973,7 @@ export default function App() {
             </select>
             <select title="이미지 생성툴" value={imgEngine === 'comfy' ? 'comfy' : 'rotate'} onChange={(e) => setImgEngine(e.target.value)}>
               <option value="rotate">순환 (Flow+Genspark)</option>
-              <option value="comfy">ComfyUI(SDXL)</option>
+              <option value="comfy">{comfyImgWf ? `ComfyUI(커스텀: ${comfyImgWf.split(/[\\/]/).pop().replace(/\.json$/i, '').slice(0, 20)})` : 'ComfyUI(SDXL)'}</option>
             </select>
             {imgEngine !== 'comfy' && <button className="ghost" title="순환 엔진/순서·계정 설정" style={{ padding: '6px 9px' }} onClick={openImgRotation}>⚙ 순환</button>}
             {imgEngine === 'comfy' && <button className="ghost" title="ComfyUI 서버·SDXL 설정" style={{ padding: '6px 9px' }} onClick={openComfy}>⚙ Comfy</button>}
