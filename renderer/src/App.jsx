@@ -430,14 +430,34 @@ export default function App() {
       setStatus(ok ? '📤 요청서 클립보드 복사 완료 — 웹 LLM에 붙여넣으세요' : '복사 실패');
     } catch (e) { logline('내보내기 오류: ' + e.message); }
   }
-  // ✍ 프롬프트작성 — 프롬프트가 비어있는 그룹의 이미지+i2v 프롬프트만 채움 (Ollama, 미도달 시 Gemini 폴백).
+  // ✍ 프롬프트작성 — 빈 그룹의 이미지+i2v 프롬프트를 GPU(Ollama)로 채움.
+  //   GPU 미연결(다른 PC·출장 등)이면 → 요청서를 클립보드에 복사하고 '붙여넣기' 창을 열어
+  //   아무 LLM(챗GPT/클로드/제미나이…)에 붙여넣어 답을 받아 등록하는 수동 흐름으로 자동 전환.
   async function runMakePrompts() {
     if (!dto) { setStatus('대본을 먼저 여세요'); return; }
-    setImpBusy(true); setStatus('✍ 빈 프롬프트 자동작성 중… (Ollama)');
+    setImpBusy(true); setStatus('✍ 빈 프롬프트 자동작성 중… (GPU Ollama)');
     try {
       const d = await api.generatePromptsApi({ provider: 'ollama', styleName: styleName(), fromNum: parseInt(vidFrom, 10) || 1, toNum: parseInt(vidTo, 10) || 1 });
       setDto(d); setStatus('✍ 빈 프롬프트 작성 완료');
-    } catch (e) { logline('프롬프트작성 오류: ' + e.message); setStatus('프롬프트작성 실패 — ⚙에서 Ollama 확인'); alert('프롬프트 작성 실패:\n' + e.message); }
+    } catch (e) {
+      logline('프롬프트작성(GPU Ollama) 실패: ' + e.message);
+      // GPU 미연결 → 복사·붙여넣기 방식으로 자동 전환 (요청서를 클립보드에 복사 + 붙여넣기 창 열기)
+      let copied = false;
+      try {
+        const text = await api.exportPrompts({ styleName: styleName() });
+        try { await navigator.clipboard.writeText(text); copied = true; } catch (_) {}
+      } catch (_) {}
+      setImpText('');
+      setImpOpen(true);
+      setStatus('GPU(Ollama) 미연결 — 복사·붙여넣기 방식으로 전환');
+      alert(
+        'GPU(Ollama)에 연결할 수 없습니다.\n'
+        + (copied ? '요청서를 클립보드에 복사해 두었습니다.\n' : '※ 자동 복사 실패 — 붙여넣기 창의 [📤 요청서 복사] 버튼을 누르세요.\n')
+        + '\n[복사·붙여넣기로 프롬프트 만들기]\n'
+        + '① 챗GPT·클로드·제미나이 등 아무 LLM에 붙여넣어 답을 받으세요.\n'
+        + '② 받은 답 전체를 붙여넣기 창에 넣고 [붙여넣은 텍스트 적용]을 누르세요.'
+      );
+    }
     finally { setImpBusy(false); }
   }
   // 그룹 분할 — 10초 초과 그룹을 2개로(균형). 두 그룹 프롬프트 초기화.
@@ -1267,8 +1287,8 @@ export default function App() {
       {impOpen && (
         <div className="modal-bg show" onClick={(e) => { if (e.target.classList.contains('modal-bg')) setImpOpen(false); }}>
           <div className="modal-card" style={{ maxWidth: 680 }}>
-            <h3>📥 웹 LLM 답변 붙여넣기 (고급)</h3>
-            <div className="meta" style={{ marginBottom: 8 }}>평소엔 <b>✍ 프롬프트작성</b>(Ollama)이면 충분합니다. 더 좋은 결과를 원하면: ① <b>📤 요청서 복사</b> → claude.ai 등에 붙여넣기 → ② 받은 답변을 아래에 붙여넣고 [적용].</div>
+            <h3>📥 복사·붙여넣기로 프롬프트 만들기</h3>
+            <div className="meta" style={{ marginBottom: 8 }}>GPU(Ollama)에 연결되면 <b>✍ 프롬프트작성</b>이 자동으로 처리합니다. <b>GPU가 꺼져 있거나 출장(원격)·다른 PC라 연결이 안 될 때</b>는 이 방법을 쓰세요: ① <b>📤 요청서 복사</b> → 챗GPT·클로드·제미나이 등 <b>아무 LLM</b>에 붙여넣기 → ② 받은 답변 전체를 아래에 붙여넣고 [적용].</div>
             <div style={{ marginBottom: 6 }}><button className="ghost" disabled={!loaded} title="현재 모드(롱폼/쇼츠)에 맞는 요청서를 클립보드에 복사" onClick={exportPrompts}>📤 요청서 복사</button></div>
             <textarea rows="12" placeholder="여기에 웹 LLM 답변(## [1-1] … 이미지: …)을 붙여넣으세요" style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'monospace', fontSize: 12 }} value={impText} onChange={(e) => setImpText(e.target.value)} />
             <div className="mbtns"><button onClick={applyImport}>붙여넣은 텍스트 적용</button><button className="ghost" onClick={() => setImpOpen(false)}>닫기</button></div>
