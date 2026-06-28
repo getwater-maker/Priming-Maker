@@ -1839,21 +1839,20 @@ ipcMain.handle('video-group', async (_e, args = {}) => {
 // 빈(또는 특정) 그룹 1개만 이미지 재생성 (Genspark 단일)
 ipcMain.handle('regen-group', async (_e, args = {}) => {
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
-  const { shortsNum, groupNum, styleId = null } = args;
+  const { shortsNum, groupNum, styleId = null, engine = 'genspark' } = args;
   const pr = S.parsed.projects.find((p) => p.shortsNum === shortsNum);
   const g = pr && pr.groups.find((x) => x.num === groupNum);
   if (!g) return P.toDTO(S.parsed);
   if (!g.imagePrompt || !g.imagePrompt.trim()) { log(`G${groupNum}: 이미지 프롬프트 없음`); return P.toDTO(S.parsed); }
   S.abort = false;
-  const stylePrompt = styleId ? (require('./core/style-store').getPrompt(styleId) || '') : '';
   const mediaDir = shortsDirs(S.outRoot, shortsNum).media;
-  log(`🔄 ${prLabel(pr)} G${groupNum} 이미지 재생성 (Genspark)…`);
+  log(`🔄 ${prLabel(pr)} G${groupNum} 이미지 재생성 (${engine})…`);
   try {
-    g.imagePath = null; g.imageStatus = 'generating'; pushDtoUpdate(); // 강제 재생성(캐시 필터 우회)
-    await P.generateImagesGenspark(pr, mediaDir, log, () => S.abort, stylePrompt, [groupNum], pushDtoUpdate);
-    // 새 이미지를 캐시에 갱신(이후 재활용 시 이 결과 사용)
-    const MC = require('./core/media-cache');
-    if (g.imagePath && fs.existsSync(g.imagePath)) MC.put(MC.imageKey(g.imagePrompt, styleId || '', pr.aspect || '9:16', 'genspark'), g.imagePath, path.extname(g.imagePath).slice(1));
+    g.imagePath = null; g.imageStatus = 'generating'; g.imageEngine = null; pushDtoUpdate(); // 강제 재생성(기존/캐시 우회)
+    // 헤더에서 선택한 엔진을 그대로 사용 — comfy(Krea2)면 ComfyUI, 아니면 순환(genspark/flow). 이 그룹만.
+    if (engine === 'comfy') await runComfyImages(pr, mediaDir, log, styleId, [groupNum]);
+    else await runRotatingImages(pr, mediaDir, log, styleId, engine, [groupNum]);
+    cacheGeneratedImages(pr, styleId, engine); // 새 결과 캐시 갱신(엔진 태그 맞춤)
     log(`✓ G${groupNum} 재생성 완료`);
   } catch (e) { log(`✗ G${groupNum} 재생성 실패: ${e.message}`); }
   return P.toDTO(S.parsed);

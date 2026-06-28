@@ -398,7 +398,7 @@ export default function App() {
   }
   async function runRegen(shortsNum, groupNum) {
     setStatus(`G${groupNum} 이미지 재생성…`);
-    try { const d = await api.regenGroup({ shortsNum, groupNum, styleId: styleId || null }); setDto(d); setStatus('재생성 완료'); }
+    try { const d = await api.regenGroup({ shortsNum, groupNum, styleId: styleId || null, engine: imgEngine }); setDto(d); setStatus('재생성 완료'); }
     catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
   }
   // 그룹 단위 버튼 (PrimingFlow)
