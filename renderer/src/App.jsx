@@ -247,7 +247,7 @@ export default function App() {
 
   useEffect(() => {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
-  }, [logText]);
+  }, [logText, logCollapsed]);
 
 
   async function loadPresets() {

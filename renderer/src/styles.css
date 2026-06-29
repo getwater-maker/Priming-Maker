@@ -145,7 +145,9 @@ h1 .ver{font-size:11px;font-weight:600;color:#a89878;margin-left:6px;vertical-al
 #logwrap{position:fixed;right:14px;bottom:14px;width:330px;height:230px;z-index:40;
   background:#2b2620;color:#d8cdbb;border:1px solid var(--accent);border-radius:10px;overflow:hidden;
   display:flex;flex-direction:column;font-family:Consolas,monospace;font-size:12px;box-shadow:0 6px 22px rgba(0,0,0,.35)}
-#logwrap.collapsed{height:32px}
+/* 최소화: 로그를 완전히 숨기지 않고 최근 2줄만 보이게 (바 + 2줄) */
+#logwrap.collapsed{height:auto}
+#logwrap.collapsed #log{flex:0 0 auto;height:40px;padding-top:4px;padding-bottom:6px}
 #logbar{padding:6px 10px;background:#231f1a;color:#c7b89f;display:flex;align-items:center;gap:8px;font-size:11px;cursor:pointer;flex-wrap:nowrap;white-space:nowrap}
 #logbar>b{flex:0 0 auto}
 #logbar>button{flex:0 0 auto}
