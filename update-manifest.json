@@ -1,5 +1,5 @@
 {
-  "version": "0.1.37",
+  "version": "0.1.38",
   "deps": "3a5115dcd9e379dc8abaabe10ad1041adcaf5828",
   "files": {
     "AGENTS.md": "1a0fd73c104ff40f5cce110a3ffac07a7aa77205",
@@ -10,7 +10,7 @@
     "bootstrap.js": "6cbd41b3842151ac184808cec1280d547b649600",
     "build-shorts.js": "9dfbb4dfee70ffb9105148b9744081e2bb287957",
     "CLAUDE.md": "2913e319177498b2c9c56ccba2729764bb50b993",
-    "comfy-engine.js": "64fa6446d645f569555d452908f8eaa162664d73",
+    "comfy-engine.js": "b17a9fa234c742077586f2bada0e48f793fd3f7a",
     "core/accounts.js": "e36e07bbbf9eec4d56b584c3add8a1077fbe0cec",
     "core/caption-splitter.js": "68b72deb61586c430cc446c2334399d37cebb9fd",
     "core/comfy-config.js": "31be6cb33d072809f3d4bd2c3ba44a793bc956d6",
@@ -35,6 +35,7 @@
     "core/tts-cache.js": "8654afda97826e0d73cc3f49a53ef171e06bcb4e",
     "core/upscaler.js": "f8abfaf3bf55d3de9345c55699149ec859b4deaa",
     "docs/대본-작성-가이드.md": "7b86d94a23532f1aa8ee83835a08e1c399870289",
+    "docs/대본-형식-변환-지침.md": "238c352023c13571e150a1d3a36e1324ffcc6ef7",
     "dummy-tts.mp3": "59f63dcb6c2532ee673513a4a74ff6c3c678c851",
     "flow-engine.js": "0b84b5c603b963615bf31caff10db6771c70008e",
     "genspark-engine.js": "fe7e694fd25a3833b55deae19b2c4a96b0d9bc64",
@@ -44,7 +45,7 @@
     "light-updater.js": "c9be26807112942a9cf4a88dfcd14a1004634762",
     "main.js": "af3a48b2d587f8ff7454c93b51ca1d7017d94fb9",
     "package-lock.json": "2b2cb85d9cd416d71e5bc6ba63b49bbec1302108",
-    "package.json": "9c44817899e3d5d7f366b7f445f8c3a3a1b56d17",
+    "package.json": "21a95544dc8b64cc8dc7a744ab7566974550ea4b",
     "preload.js": "388bb4969cea093aec12d03a89b6a5d450584bfe",
     "renderer/dist/assets/index-BqBcbPxY.js": "5ff0a667f8d1dd84b7df74d635fe577c2fc6aaae",
     "renderer/dist/assets/index-CYU9nS3o.css": "e40c5bf2cac8ecc638f2ad3e9b576851d77fe3e1",

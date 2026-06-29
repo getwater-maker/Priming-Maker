@@ -153,12 +153,13 @@ class ComfyEngine {
   }
 
   // 워크플로 로드 + 이미지/프롬프트/seed 주입
-  // i2v 출력 비율 — LTX 워크플로의 width/height(PrimitiveInt) 노드를 비율에 맞게 설정.
-  //   (워크플로가 720×1280 등으로 고정돼 있으면 그대로면 항상 9:16 이 나오므로 덮어씀)
+  // i2v 출력 비율·해상도 — LTX 워크플로의 width/height(PrimitiveInt) 노드에 주입.
+  //   저해상(≈480p)으로 생성 → 이후 Real-ESRGAN 으로 1080p 업스케일(maybeUpscale, 로컬 자동).
+  //   클라우드면 낮은 해상도 = 크레딧·시간 절약. 32의 배수(LTX 요건) 유지.
   _videoDims(aspect) {
-    if (aspect === '16:9') return { w: 1280, h: 720 };
-    if (aspect === '1:1') return { w: 960, h: 960 };
-    return { w: 720, h: 1280 }; // 9:16 기본
+    if (aspect === '16:9') return { w: 832, h: 480 };
+    if (aspect === '1:1') return { w: 640, h: 640 };
+    return { w: 480, h: 832 }; // 9:16 기본
   }
   _setVideoDims(graph, aspect) {
     const d = this._videoDims(aspect);
