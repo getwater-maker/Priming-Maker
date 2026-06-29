@@ -50,9 +50,9 @@ export default function App() {
   // 헤더 컨트롤
   const [presetName, setPresetName] = useState('');
   const [styleId, setStyleId] = useState('chibi');
-  const [imgEngine, setImgEngine] = useState('rotate'); // 'rotate'(Flow+Genspark 순환) | 'comfy'
+  const [imgEngine, setImgEngine] = useState('comfy'); // 기본 'comfy'(Krea2_Turbo) | 'rotate'(Flow+Genspark 순환)
   const [aspect, setAspect] = useState('16:9');
-  const [videoEngine, setVideoEngine] = useState('grok');
+  const [videoEngine, setVideoEngine] = useState('comfy'); // 기본 'comfy'(LTX2.3)
   const [vidFrom, setVidFrom] = useState(1);   // I2V 범위 시작 그룹
   const [vidTo, setVidTo] = useState(1);        // I2V 범위 끝 그룹 (롱폼 기본=도입부 끝)
   const [timings, setTimings] = useState({ tts: 0, image: 0, video: 0, make: 0 }); // 작업 소요시간(초)

@@ -1,5 +1,5 @@
 {
-  "version": "0.1.38",
+  "version": "0.1.39",
   "deps": "3a5115dcd9e379dc8abaabe10ad1041adcaf5828",
   "files": {
     "AGENTS.md": "1a0fd73c104ff40f5cce110a3ffac07a7aa77205",
@@ -45,11 +45,11 @@
     "light-updater.js": "c9be26807112942a9cf4a88dfcd14a1004634762",
     "main.js": "af3a48b2d587f8ff7454c93b51ca1d7017d94fb9",
     "package-lock.json": "2b2cb85d9cd416d71e5bc6ba63b49bbec1302108",
-    "package.json": "21a95544dc8b64cc8dc7a744ab7566974550ea4b",
+    "package.json": "2bb8917d3ff0871769419a2260d4ff2685c77953",
     "preload.js": "388bb4969cea093aec12d03a89b6a5d450584bfe",
-    "renderer/dist/assets/index-BqBcbPxY.js": "5ff0a667f8d1dd84b7df74d635fe577c2fc6aaae",
     "renderer/dist/assets/index-CYU9nS3o.css": "e40c5bf2cac8ecc638f2ad3e9b576851d77fe3e1",
-    "renderer/dist/index.html": "5ec1c3efd6c4a660573d25d062ee048673ffeedd",
+    "renderer/dist/assets/index-Rt6Ql8p0.js": "fa5e3769e7565c402ba38bef223e6b968237c1cc",
+    "renderer/dist/index.html": "b71497dfbe8534bb5e9da263eeabe54066d27153",
     "renderer/index.html": "11a8eca1c5cc6c227f210236f7b09853e35ad73b",
     "tts/asr-client.js": "4f548bdd8e5e7f41ab4b7090e4ee86c1695a77d0",
     "tts/gemini-usage-store.js": "8d0948c2b8a0116d5465f3b6ee2be410bd9be68d",
