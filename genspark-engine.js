@@ -528,11 +528,12 @@ class GensparkEngine {
   async _detectLimitMessage() {
     try {
       return await this.page.evaluate(() => {
-        const RE = /(한도|제한|사용량|초과|남은|limit|quota|credit|too many|rate.?limit|upgrade|플랜|업그레이드|내일|reset)/i;
-        const sels = '[role="alert"],[role="status"],[class*="toast" i],[class*="error" i],[class*="limit" i],[class*="banner" i],[class*="notice" i],[class*="warn" i]';
+        const RE = /(한도|제한|사용량|초과|남은|세션|재설정|limit|quota|credit|too many|rate.?limit|upgrade|플랜|업그레이드|내일|reset|session)/i;
+        // 토스트/배너 + 모달 팝업("세션 한도 도달" 등 role=dialog/alertdialog·modal·popup)도 검사.
+        const sels = '[role="alert"],[role="status"],[role="dialog"],[role="alertdialog"],[class*="toast" i],[class*="error" i],[class*="limit" i],[class*="banner" i],[class*="notice" i],[class*="warn" i],[class*="modal" i],[class*="dialog" i],[class*="popup" i]';
         for (const el of Array.from(document.querySelectorAll(sels))) {
           const t = (el.textContent || '').trim();
-          if (t && t.length < 140 && RE.test(t)) return t;
+          if (t && t.length < 200 && RE.test(t)) return t;
         }
         return null;
       });
