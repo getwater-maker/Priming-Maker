@@ -34,17 +34,17 @@ const BUILT_IN_STYLES = [
   { id: 'comic',             name: '만화/코믹',           prompt: 'comic book style, bold outlines, dynamic composition, vivid colors, action panels' },
   { id: '3d',                name: '3D 렌더링',           prompt: '3D rendered scene, ray tracing, realistic materials, cinematic lighting, Unreal Engine' },
   { id: 'stickman',          name: '졸라맨 (스틱맨)',     prompt: 'simple stick figure drawing, black lines on white background, minimalist doodle, hand-drawn sketch style, funny stick characters' },
-  { id: 'ghibli',            name: '지브리 (미야자키)',   prompt: 'Studio Ghibli anime style, soft watercolor backgrounds, warm lighting, detailed nature, Hayao Miyazaki inspired' },
-  { id: 'disney',            name: '디즈니/픽사',         prompt: 'A cute warm 3D-animated illustration with big expressive eyes and soft rounded features, Pixar/Disney-like warmth' },
+  { id: 'ghibli',            name: '수채 감성 애니',       prompt: 'hand-painted anime style, soft watercolor backgrounds, warm natural lighting, lush detailed nature, gentle nostalgic atmosphere, cel-shaded illustration' },
+  { id: 'disney',            name: '말랑 3D 애니',         prompt: 'cute warm 3D-animated illustration, big expressive eyes, soft rounded features, smooth shading, friendly heartwarming character design, glossy render' },
   { id: 'chibi',             name: '치비 (귀여운)',       prompt: 'chibi anime style, cute super-deformed characters, big eyes, small body, kawaii, pastel colors' },
   { id: 'retro',             name: '레트로 80s',          prompt: 'retro 80s synthwave, neon colors, grid landscape, sunset, VHS aesthetic, vaporwave' },
   { id: 'sketch',            name: '연필 스케치',         prompt: 'pencil sketch drawing, graphite on paper, detailed cross-hatching, artistic hand-drawn' },
-  { id: 'pop',               name: '팝아트',              prompt: 'pop art style, Roy Lichtenstein, bold colors, halftone dots, comic book aesthetic, Andy Warhol inspired' },
+  { id: 'pop',               name: '팝아트',              prompt: 'pop art style, bold flat colors, thick black outlines, halftone dot shading, comic book aesthetic, high contrast, retro print look' },
   { id: 'monochrome',        name: '모노크롬',            prompt: 'monochrome digital painting, smooth grayscale shading, black and white, strong contrast, dramatic cinematic lighting, realistic idealized llustration, detailed rendering, 4K' },
   { id: 'infographic-3d',    name: '인포그래픽 3D',       prompt: '아래 내용의 대표이미지 한컷을 3D인포그래픽 작성, 한글로 작성, 어른들이 보기 편하게 작성, no watermark' },
   { id: 'infographic-2d',    name: '인포그래픽 2D',       prompt: '아래 내용의 대표이미지 한컷을 2D인포그래픽 작성, 한글로 작성, 어른들이 보기 편하게 작성, no watermark' },
   { id: 'biblical-chibi',    name: '치비 (성경시대)',     prompt: 'chibi anime style, cute super-deformed characters with big sparkling eyes and small bodies, kawaii, soft pastel earth tones (ochre, sand, olive, terracotta), ancient biblical era setting, characters wearing flowing robes and tunics, simple head coverings, leather sandals, bearded elders, Holy Land scenery with olive trees and stone buildings, gentle reverent atmosphere, hand-drawn anime illustration, NOT modern clothing, NOT Korean historical drama, NOT photorealistic' },
-  { id: 'three-kingdoms',    name: '삼국지 (동양 흑백 수묵)', prompt: 'classical East Asian ink-wash painting style, traditional oriental brush art, digital painting, smooth grayscale shading, monochrome black and white, realistic idealized rendering, strong contrast, cinematic lighting, detailed, 4K' },
+  { id: 'three-kingdoms',    name: '흑백 수묵화',          prompt: 'monochrome ink-wash painting style, traditional brush and ink art, smooth grayscale shading, black and white, fine ink rendering, realistic idealized rendering, strong contrast, cinematic lighting, detailed, 4K' },
 ];
 
 function _loadUserStyles() {
