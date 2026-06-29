@@ -1540,12 +1540,14 @@ async function runMakeAllCore(opts = {}) {
   const projects = S.parsed.projects.filter((pr) => !shortsNum || pr.shortsNum === shortsNum);
 
   // ── 1·2단계: 음성(TTS) + 이미지 ──
-  //   이미지 엔진이 Genspark/Flow(브라우저, 로컬 GPU 미사용)면 TTS 와 '병렬' → 더 빠름(GPU 비충돌).
-  //   ComfyUI(로컬 GPU)면 TTS(OmniVoice GPU)와 겹치면 VRAM 충돌 → '순차'.
+  //   이미지가 로컬 GPU 를 안 쓰면(Genspark/Flow 브라우저, 또는 ComfyUI 클라우드) TTS(로컬 GPU)와 '병렬' → 더 빠름.
+  //   로컬 ComfyUI(로컬 GPU)면 TTS(OmniVoice GPU)와 VRAM 충돌 → '순차'.
   //   또한 cut/prose 처럼 TTS 후 그룹 재구성이 일어나면 이미지가 그룹에 의존 → 안전하게 순차.
   const willRegroup = (pr) => (!dry && clipMaxSec && getModeProfile(currentMode()).grouping.strategy === 'tts-greedy' && pr.format !== 'grouped');
   const browserImg = (engine === 'genspark' || engine === 'flow');
-  const canParallel = !dry && browserImg && !projects.some(willRegroup);
+  const comfyCloud = engine === 'comfy' && (() => { try { return !!require('./core/comfy-config').load().cloud; } catch { return false; } })();
+  const noLocalGpuImg = browserImg || comfyCloud;   // 이미지가 로컬 GPU 미사용 → TTS 와 병렬 안전
+  const canParallel = !dry && noLocalGpuImg && !projects.some(willRegroup);
 
   const ttsStage = async () => {
     log('🎙 1단계 — 음성(TTS) 일괄 변환…');
@@ -1588,12 +1590,12 @@ async function runMakeAllCore(opts = {}) {
   };
 
   if (canParallel) {
-    log(`⚡ 1·2단계 병렬 — TTS ∥ 이미지(${engine}, 브라우저 엔진이라 GPU 비충돌)`);
+    log(`⚡ 1·2단계 병렬 — TTS ∥ 이미지(${engine}${comfyCloud ? ' 클라우드' : ''}, 로컬 GPU 비충돌)`);
     await Promise.all([ttsStage(), imageStage()]);
   } else {
     await ttsStage();
     if (!dry && !S.abort) {
-      if (engine === 'comfy') log('🖼 2단계 — 이미지(ComfyUI, GPU) — TTS 후 순차 진행');
+      if (engine === 'comfy') log('🖼 2단계 — 이미지(로컬 ComfyUI, GPU) — TTS 후 순차 진행');
       await imageStage();
     }
   }
