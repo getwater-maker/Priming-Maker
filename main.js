@@ -1544,7 +1544,7 @@ async function runMakeAllCore(opts = {}) {
   //   로컬 ComfyUI(로컬 GPU)면 TTS(OmniVoice GPU)와 VRAM 충돌 → '순차'.
   //   또한 cut/prose 처럼 TTS 후 그룹 재구성이 일어나면 이미지가 그룹에 의존 → 안전하게 순차.
   const willRegroup = (pr) => (!dry && clipMaxSec && getModeProfile(currentMode()).grouping.strategy === 'tts-greedy' && pr.format !== 'grouped');
-  const browserImg = (engine === 'genspark' || engine === 'flow');
+  const browserImg = (engine === 'genspark' || engine === 'flow' || engine === 'rotate'); // 순환=Genspark/Flow(브라우저), ComfyUI 제외라 로컬 GPU 미사용
   const comfyCloud = engine === 'comfy' && (() => { try { return !!require('./core/comfy-config').load().cloud; } catch { return false; } })();
   const noLocalGpuImg = browserImg || comfyCloud;   // 이미지가 로컬 GPU 미사용 → TTS 와 병렬 안전
   const canParallel = !dry && noLocalGpuImg && !projects.some(willRegroup);
