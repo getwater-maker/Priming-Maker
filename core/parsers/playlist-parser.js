@@ -37,6 +37,7 @@ function parsePlaylistText(text) {
   const lines = String(text || '').replace(/\r\n/g, '\n').split('\n');
   let fileTitle = '플레이리스트';
   let concept = '';
+  let bgPrompt = ''; // 배경 영상/이미지 영문 프롬프트 (선택)
   const tracks = [];
   let cur = null;
   let order = 0;
@@ -55,6 +56,9 @@ function parsePlaylistText(text) {
     // H1 제목
     let m = line.match(/^#\s+(.*)$/);
     if (m) { fileTitle = m[1].replace(/^🎵\s*/, '').replace(/^플리\s*[:：]\s*/, '').trim() || fileTitle; continue; }
+    // 배경(영상/이미지) 프롬프트 — 컨셉 매칭보다 먼저(둘 다 '>' 로 시작 가능)
+    m = line.match(/^>?\s*(?:배경|background|bg)\s*[:：]\s*(.*)$/i);
+    if (m && !bgPrompt) { bgPrompt = m[1].trim(); continue; }
     // 컨셉(> 인용 또는 '컨셉:')
     m = line.match(/^>\s*(?:컨셉|concept)\s*[:：]\s*(.*)$/i) || line.match(/^>\s*(.*)$/);
     if (m && !concept) { concept = m[1].trim(); continue; }
@@ -80,7 +84,7 @@ function parsePlaylistText(text) {
 
   // num 누락/중복 보정 — 순서대로 1..N 재부여(빈값일 때만)
   tracks.forEach((t, i) => { if (!t.num || isNaN(t.num)) t.num = i + 1; });
-  return { kind: 'playlist', fileTitle, concept, tracks };
+  return { kind: 'playlist', fileTitle, concept, bgPrompt, tracks };
 }
 
 module.exports = { parsePlaylistText, isInstrumental };

@@ -2186,6 +2186,74 @@ ipcMain.handle('make-playlist', async (_e, args = {}) => {
   return currentDTO();
 });
 
+// 플리 배경 영상(무한루프) + .vrew 생성 — 음악(mp3) 이 있는 곡들로 영상화.
+//   배경 1개(Krea2 이미지 → LTX 짧은 클립 → 부메랑 seamless 루프) 를 곡 길이만큼 곡마다 반복 →
+//   곡=클립[ 곡 mp3 + 배경 루프 + 곡 제목 자막 ] 로 .vrew. Vrew 에서 마무리·내보내기.
+ipcMain.handle('make-playlist-video', async () => {
+  if (!S.parsed || S.parsed.kind !== 'playlist') { log('열린 플리가 없습니다 — 스펙을 먼저 여세요.'); return currentDTO(); }
+  const tracks = (S.parsed.tracks || []).filter((t) => t.audioPath && fs.existsSync(t.audioPath));
+  if (!tracks.length) { log('⚠ 먼저 ⚡ 음악을 생성하세요 (mp3 없는 곡은 영상에서 제외).'); return currentDTO(); }
+  S.abort = false;
+  const cfg = require('./core/comfy-config').load();
+  const { ComfyEngine } = require('./comfy-engine');
+  const eng = new ComfyEngine(cfg, log); // 이미지(Krea2)·영상(LTX) — 이미지/영상은 클라우드 설정 그대로
+  if (!(await eng.health())) { log(`ComfyUI 연결 실패 (${cfg.baseUrl}) — 이미지/영상 서버를 확인하세요.`); return currentDTO(); }
+  const PV = require('./core/playlist-video');
+  const outRoot = S.outRoot || playlistOutRoot(S.scriptPath || 'playlist.md', S.preset);
+  try { fs.mkdirSync(outRoot, { recursive: true }); } catch {}
+  const t0 = Date.now();
+
+  // 1) 배경 프롬프트 — 스펙의 '배경:' > 컨셉 > 제목 순. 스타일 프리픽스 적용.
+  const bgRaw = (S.parsed.bgPrompt && S.parsed.bgPrompt.trim()) || S.parsed.concept || S.parsed.fileTitle
+    || 'calm ambient scenery, slow gentle motion, cinematic, soft light';
+  const stylePrompt = (S.preset && S.preset.styleId) ? (require('./core/style-store').getPrompt(S.preset.styleId) || '') : '';
+  const fullImgPrompt = `${stylePrompt ? stylePrompt.trim().replace(/[,\s]+$/, '') + ', ' : ''}${bgRaw.trim().replace(/[,\s]+$/, '')}, no text, no watermark`;
+
+  // 2) 배경 이미지(Krea2)
+  log(`🖼 배경 이미지 생성(Krea2) — "${bgRaw.slice(0, 60)}"`);
+  const bgImg = path.join(outRoot, '_bg.png');
+  const ri = await eng.textToImage({ prompt: fullImgPrompt, aspect: '16:9', outputPath: bgImg, abortSignal: () => S.abort });
+  if (!ri.success) { log('✗ 배경 이미지 실패: ' + ri.error); return currentDTO(); }
+
+  // 3) 배경 영상(LTX i2v 짧은 클립)
+  if (S.abort) { log('⏹ 중단됨'); return currentDTO(); }
+  log('🎬 배경 영상 클립 생성(LTX i2v)…');
+  const bgClip = path.join(outRoot, '_bg_clip.mp4');
+  const rv = await eng.imageToVideo({ imagePath: ri.imagePath, prompt: bgRaw, outputPath: bgClip, aspect: '16:9', durationSec: null, abortSignal: () => S.abort });
+  if (!rv.success) { log('✗ 배경 영상 실패: ' + rv.error + ' — 이미지 배경으로 .vrew 만 생성합니다.'); }
+
+  // 4) seamless 부메랑 → 곡 길이만큼 곡별 루프
+  let boomerang = null;
+  if (rv.success && rv.videoPath) {
+    try {
+      boomerang = path.join(outRoot, '_bg_boomerang.mp4');
+      await PV.makeBoomerang(rv.videoPath, boomerang, log);
+      for (const t of tracks) {
+        if (S.abort) break;
+        const lp = path.join(outRoot, `_bgloop_${String(t.num).padStart(2, '0')}.mp4`);
+        try { await PV.loopBoomerangTo(boomerang, lp, t.durationSec || 180); t._bgLoop = lp; log(`  ✓ G${t.num} 배경 루프 (${(t.durationSec || 180)}초)`); }
+        catch (e) { log(`  ✗ G${t.num} 배경 루프 실패: ${e.message}`); }
+      }
+    } catch (e) { log('✗ 배경 루프 생성 실패: ' + e.message + ' — 이미지 배경으로 대체'); }
+    finally { try { if (boomerang) fs.unlinkSync(boomerang); } catch {} }
+  }
+
+  // 5) Project 구성 + .vrew
+  log('📦 플리 .vrew 생성…');
+  const proj = PV.buildPlaylistProject({ ...S.parsed, tracks }, { bgImagePath: ri.imagePath });
+  const baseName = _safeFolder(S.parsed.fileTitle || '플레이리스트').slice(0, 60) || '플레이리스트';
+  const vrewPath = path.join(outRoot, `${baseName}.vrew`);
+  try {
+    const res = await P.buildProjectVrew(proj, vrewPath, null, log, 14, 1); // 제목 자막 14자 분할, 배속 1
+    log(`✓ ${path.basename(vrewPath)} (clip ${res.clipCount}) — Vrew 에서 열어 마무리하세요`);
+    shell.openPath(vrewPath);
+  } catch (e) { log('✗ .vrew 생성 실패: ' + e.message); }
+  S.timings.make = Math.round((Date.now() - t0) / 1000);
+  log(`🎬 플리 영상/​.vrew 완료 (${S.timings.make}초)`);
+  try { shell.openPath(outRoot); } catch {}
+  return currentDTO();
+});
+
 // 대본 수정 — 편집한 텍스트로 재파싱(+원본 .md 갱신).
 ipcMain.handle('get-script-text', () => {
   try { return fs.readFileSync(S.scriptPath, 'utf8'); } catch { return ''; }

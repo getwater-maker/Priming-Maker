@@ -70,6 +70,7 @@ contextBridge.exposeInMainWorld('api', {
   setMode: (args) => ipcRenderer.invoke('set-mode', args),
   openPlaylistSpec: (args) => ipcRenderer.invoke('open-playlist-spec', args),
   makePlaylist: (args) => ipcRenderer.invoke('make-playlist', args),
+  makePlaylistVideo: (args) => ipcRenderer.invoke('make-playlist-video', args),
   getScriptText: () => ipcRenderer.invoke('get-script-text'),
   applyScriptText: (args) => ipcRenderer.invoke('apply-script-text', args),
   makeAll: (args) => ipcRenderer.invoke('make-all', args),

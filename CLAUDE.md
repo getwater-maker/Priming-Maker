@@ -20,6 +20,14 @@
   워크스페이스 직렬화/복원 3-way. 플리는 .smproj 스냅샷 스킵(워크스페이스+스펙.md 가 진실). App.jsx `PlaylistView` + `isPl` 분기.
 - ⏳ **실측 필요**: ACE-Step "API 포맷" 워크플로 JSON 이 있어야 실제 생성됨(없으면 graceful 에러). 노드 자동탐지 구조는 실제 워크플로로 1회 검증 필요.
   미설정/실패는 이미지·영상과 동일하게 {success:false} 로 안전 처리. 음악 품질 검증(ACE-Step 1곡) 후 워크플로 export 가 선행.
+- 🎬 **플리 배경(무한루프 영상)+.vrew (2026-07-01, v0.1.47)**: 음악만 만들던 플리를 **영상화**까지. PlaylistView 헤더
+  「🎬 배경+vrew」(IPC `make-playlist-video`). 흐름: 스펙 `> 배경:`(없으면 컨셉/제목) → Krea2 이미지(16:9)
+  → LTX i2v 짧은 클립 → **부메랑(정방향+역방향)으로 seamless** → 곡마다 곡 길이(+1s)로 stream-copy 루프
+  (`core/playlist-video.js` makeBoomerang/loopBoomerangTo, ffmpeg=media-utils.getFfmpegPath). 그 뒤
+  `buildPlaylistProject`(곡=그룹[배경 루프 videoPath]+문장[곡제목=자막, mp3=오디오], aspect 16:9) → `P.buildProjectVrew`
+  로 `<출력>/플리/<제목>.vrew`. 배경 1개 공통 + 곡 제목 자막(YouTube 챕터·단속 차별화). vrew-builder 는 16:9+videoPath
+  면 영상 트랙 사용(line 844, 비율 무관). 영상 실패 시 이미지 배경으로 폴백. playlist-parser 에 bgPrompt 파싱 추가.
+  ⏳ **실측 필요**: Vrew 에서 .vrew 정상 로드(배경 영상 트랙·곡별 길이 매칭)·LTX 480p 배경 화질(필요 시 업스케일 추가).
 
 ## 🐞 쇼츠 9:16 .vrew = 화면비 가로로 표시 + 내보내기 실패 — 실제 원인 2가지 (2026-06-24)
 > ⚠️ 이전의 "videoRatio 역수" 진단은 **오진**이었음. videoRatio 는 화면비와 무관한 상수(정상 .vrew 는
