@@ -47,6 +47,9 @@ const DEFAULTS = {
   audioLyricsNodeId: '',   // 가사 노드 id (빈값=tags 와 같은 노드의 lyrics, 또는 자동탐지). 인스트루멘탈이면 빈 문자열 주입
   audioDurationNodeId: '', // 길이(초) 노드 id (빈값=EmptyAceStepLatentAudio 의 seconds 자동탐지)
   audioTimeoutSec: 600,    // 곡 1개 최대 대기(초)
+  // ACE-Step 는 요청한 seconds 를 채우려다 곡이 끝나면 뒤를 무음으로 남긴다(예: 4분 요청 → 1:30 음악+무음).
+  //   true 면 생성 후 ffmpeg 로 앞/뒤 무음을 자동 트림 → 저장본 = 실제 음악 길이. (곡 중간 무음은 보존)
+  audioTrimSilence: true,
 };
 
 function load() {

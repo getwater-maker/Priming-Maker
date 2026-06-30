@@ -62,6 +62,7 @@ class ComfyEngine {
     this.audioLyricsNodeId = cfg.audioLyricsNodeId || '';
     this.audioDurationNodeId = cfg.audioDurationNodeId || '';
     this.audioTimeoutSec = Number(cfg.audioTimeoutSec) > 0 ? Number(cfg.audioTimeoutSec) : 600;
+    this.audioTrimSilence = cfg.audioTrimSilence !== false; // 기본 ON — 생성 후 앞/뒤 무음 트림
     this.clientId = 'priming_' + Math.random().toString(36).slice(2, 10);
     this.log = logger;
   }
@@ -456,6 +457,26 @@ class ComfyEngine {
     }
     throw new Error(`타임아웃 (${this.audioTimeoutSec}초)`);
   }
+  // 앞/뒤 무음 트림 — ACE-Step 가 요청 길이를 못 채워 남긴 꼬리 무음 제거(곡 중간은 보존).
+  //   areverse 트릭으로 양 끝만 자른다(가운데 침묵은 유지). ffmpeg 없거나 실패 시 원본 유지.
+  _trimSilence(filePath) {
+    if (!_ffmpegPath || !fs.existsSync(_ffmpegPath) || !fs.existsSync(filePath)) return filePath;
+    const ext = path.extname(filePath).toLowerCase();
+    const tmp = filePath.replace(/(\.[^.]+)$/, '_trim$1');
+    const af = 'silenceremove=start_periods=1:start_duration=0:start_threshold=-50dB:detection=peak,areverse,'
+             + 'silenceremove=start_periods=1:start_duration=0:start_threshold=-50dB:detection=peak,areverse';
+    const codec = ext === '.mp3' ? ['-c:a', 'libmp3lame', '-q:a', '2']
+      : ext === '.flac' ? ['-c:a', 'flac']
+      : ext === '.wav' ? ['-c:a', 'pcm_s16le'] : [];
+    try {
+      const rr = spawnSync(_ffmpegPath, ['-y', '-i', filePath, '-af', af, ...codec, tmp], { stdio: 'ignore' });
+      if (rr.status === 0 && fs.existsSync(tmp) && fs.statSync(tmp).size > 1024) {
+        fs.unlinkSync(filePath); fs.renameSync(tmp, filePath);
+        this.log('[Comfy] 무음 트림 적용 (실제 음악 길이로)');
+      } else if (fs.existsSync(tmp)) { fs.unlinkSync(tmp); }
+    } catch { try { if (fs.existsSync(tmp)) fs.unlinkSync(tmp); } catch {} }
+    return filePath;
+  }
   // 오디오 다운로드 — ComfyUI 출력 확장자(mp3/flac 등)를 보존해 저장. 실제 저장 경로 반환.
   async _downloadAudio(au, outputPath) {
     const q = new URLSearchParams({ filename: au.filename, subfolder: au.subfolder || '', type: au.type || 'output' });
@@ -480,6 +501,7 @@ class ComfyEngine {
       const promptId = await this._queue(graph);
       const au = await this._waitAudio(promptId, abortSignal);
       const out = await this._downloadAudio(au, outputPath);
+      if (this.audioTrimSilence) this._trimSilence(out);
       this.log(`[Comfy] 음악 완료 → ${path.basename(out)}`);
       return { success: true, audioPath: out };
     } catch (e) {
