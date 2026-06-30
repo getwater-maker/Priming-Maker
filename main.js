@@ -1601,6 +1601,15 @@ async function runMakeAllCore(opts = {}) {
   const noLocalGpuImg = browserImg || comfyCloud;   // 이미지가 로컬 GPU 미사용 → TTS 와 병렬 안전
   const canParallel = !dry && noLocalGpuImg && !projects.some(willRegroup);
 
+  // ── 3단계 파이프라인 조건 ──
+  //   비디오가 ComfyUI '클라우드'(REST·로컬 GPU 미사용)면, 그룹 이미지(+필요 시 그 그룹 TTS)가 준비되는 즉시
+  //   그 그룹 영상을 바로 시작 → TTS∥이미지∥비디오 3단계가 겹친다(이미지 다 끝나길 안 기다림).
+  //   (브라우저 비디오 grok/flow 는 단일 브라우저 인스턴스 충돌·복잡도 때문에 기존 3단계 일괄 유지.)
+  const comfyVideoCloud = videoEngine === 'comfy' && (() => { try { return !!require('./core/comfy-config').load().cloud; } catch { return false; } })();
+  const videoPipeline = canParallel && comfyVideoCloud;
+  const needTtsForVideo = (() => { try { return require('./core/comfy-config').load().matchVideoToAudio !== false; } catch { return true; } })(); // comfy 영상 길이=그룹 TTS → 그 그룹 TTS 도 필요
+  let ttsStageDone = false, imageStageDone = false;
+
   const ttsStage = async () => {
     log('🎙 1단계 — 음성(TTS) 일괄 변환…');
     for (const pr of projects) {
@@ -1621,6 +1630,7 @@ async function runMakeAllCore(opts = {}) {
       S.timings.tts += (Date.now() - t0) / 1000;
       pushDtoUpdate();
     }
+    ttsStageDone = true;
   };
   const imageStage = async () => {
     log('🖼 2단계 — 이미지 일괄 생성…');
@@ -1639,9 +1649,54 @@ async function runMakeAllCore(opts = {}) {
       S.timings.image += (Date.now() - t0) / 1000;
       pushDtoUpdate(); // 이미지 매핑(g.imagePath) UI 썸네일에 반영
     }
+    imageStageDone = true;
   };
 
-  if (canParallel) {
+  // 그룹별 비디오 파이프라인 — 이미지(+필요 시 그 그룹 TTS)가 준비된 그룹부터 즉시 Comfy 클라우드로 영상 생성.
+  const videoStage = async () => {
+    const done = new Set();
+    const vmap = new Map();
+    for (const pr of projects) vmap.set(pr, rangeNums(pr, fromNum, toNum)); // I2V 범위(미지정=전체)
+    const ttsReady = (pr, g) => {
+      if (!needTtsForVideo) return true;
+      const ss = pr.getSentencesOfGroup(g);
+      return ss.length > 0 && ss.every((s) => s.ttsDurationSec != null);
+    };
+    while (!S.abort) {
+      let picked = null;
+      for (const pr of projects) {
+        const vOnly = vmap.get(pr);
+        for (const g of pr.groups) {
+          if (done.has(g)) continue;
+          if (!vOnly.includes(g.num)) { done.add(g); continue; }                          // 영상 범위 밖
+          if (!(g.imagePath && fs.existsSync(g.imagePath)) || !ttsReady(pr, g)) continue;  // 아직 준비 안 됨
+          picked = { pr, g }; break;
+        }
+        if (picked) break;
+      }
+      if (!picked) {
+        if (ttsStageDone && imageStageDone) break; // 단계 끝 + 더 준비될 그룹 없음 → 종료
+        await new Promise((r) => setTimeout(r, 400));
+        continue;
+      }
+      done.add(picked.g);
+      const { pr, g } = picked;
+      const dirs = shortsDirs(S.outRoot, pr.shortsNum);
+      const t0 = Date.now();
+      try {
+        log(`🎬 G${g.num} (${prLabel(pr)}) 이미지 준비 — 즉시 영상 생성(파이프라인)…`);
+        await runComfyVideos(pr, dirs.media, log, { onlyNums: [g.num] });
+        if (!S.abort) await maybeUpscale(pr, log, true);
+      } catch (e) { log(`G${g.num} 영상 실패: ${e.message}`); }
+      S.timings.video += (Date.now() - t0) / 1000;
+      pushDtoUpdate();
+    }
+  };
+
+  if (videoPipeline) {
+    log('⚡ 1·2·3단계 파이프라인 — TTS ∥ 이미지 ∥ 비디오(그룹 이미지 준비 즉시, Comfy 클라우드)');
+    await Promise.all([ttsStage(), imageStage(), videoStage()]);
+  } else if (canParallel) {
     log(`⚡ 1·2단계 병렬 — TTS ∥ 이미지(${engine}${comfyCloud ? ' 클라우드' : ''}, 로컬 GPU 비충돌)`);
     await Promise.all([ttsStage(), imageStage()]);
   } else {
@@ -1655,6 +1710,8 @@ async function runMakeAllCore(opts = {}) {
   // ── 3단계: 비디오 — 전 쇼츠 (videoEngine='none'이면 비디오 없이 이미지만 사용) ──
   if (videoEngine === 'none') {
     log('🎬 3단계 — 비디오 없음(이미지만) — 건너뜀');
+  } else if (videoPipeline) {
+    log('🎬 3단계 — 파이프라인에서 그룹별로 이미 생성 완료');
   } else if (!dry && !S.abort) {
     log('🎬 3단계 — 비디오 일괄 생성…');
     for (const pr of projects) {
