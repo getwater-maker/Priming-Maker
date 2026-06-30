@@ -8,6 +8,7 @@ const fs = require('fs');
 const { app, BrowserWindow, ipcMain, dialog, shell, protocol, net } = require('electron');
 const P = require('./core/pipeline');
 const { getModeProfile } = require('./core/mode-profiles');
+const { parsePlaylistText } = require('./core/parsers/playlist-parser');
 
 // 현재 작업 모드 — open-script 가 설정한 S.mode, 또는 파싱 결과/프로젝트에서 추론.
 function currentMode() {
@@ -75,7 +76,7 @@ const S = { parsed: null, scriptPath: null, outRoot: null, preset: null, ttsMgr:
   // 모드별 작업 큐 — 각 모드(롱폼/쇼츠)가 대본 여러 개(items)를 순서대로 보관.
   //   item = { id, parsed, scriptPath, outRoot, settings, status }. activeId = 현재 편집/표시 중인 항목.
   //   S.parsed/scriptPath/outRoot 는 '활성 항목'의 미러 — 기존 코드 전부 그대로 동작.
-  modes: { longform: { items: [], activeId: null }, shorts: { items: [], activeId: null } } };
+  modes: { longform: { items: [], activeId: null }, shorts: { items: [], activeId: null }, playlist: { items: [], activeId: null } } };
 
 let _qSeq = 0;
 const newItemId = () => 'q' + (++_qSeq);
@@ -114,10 +115,33 @@ function setSingleItem(parsed, scriptPath, outRoot) {
   q.items = []; q.activeId = null;
   return addItem(parsed, scriptPath, outRoot);
 }
+// 모드 3-way 정규화 (롱폼/쇼츠/플리)
+function normMode(m) { return m === 'longform' ? 'longform' : m === 'playlist' ? 'playlist' : 'shorts'; }
 // 지정 모드로 전환 — 그 모드 활성 항목을 S.* 로 복원(재파싱 없음).
 function activateMode(m) {
-  S.mode = (m === 'longform') ? 'longform' : 'shorts';
+  S.mode = normMode(m);
   syncActiveToS();
+}
+// 현재 모드 기준 렌더러 DTO — 플리는 별도 형식(곡 목록), 그 외는 프로젝트 DTO.
+function currentDTO() {
+  if (!S.parsed) return null;
+  if (S.mode === 'playlist' || S.parsed.kind === 'playlist') return playlistDTO(S.parsed);
+  return P.toDTO(S.parsed);
+}
+// 플리 파싱본 → 렌더러 DTO (생성 상태·오디오 경로 포함).
+function playlistDTO(parsed) {
+  return {
+    kind: 'playlist',
+    fileTitle: parsed.fileTitle || '플레이리스트',
+    concept: parsed.concept || '',
+    tracks: (parsed.tracks || []).map((t) => ({
+      num: t.num, title: t.title, tags: t.tags, lyrics: t.lyrics || '',
+      durationSec: t.durationSec || 0,
+      status: t.status || 'idle', // idle | generating | done | fail
+      audioPath: t.audioPath || null,
+      error: t.error || null,
+    })),
+  };
 }
 
 function createWindow() {
@@ -160,7 +184,8 @@ function _mimeOf(p) {
   const e = path.extname(p).toLowerCase();
   return ({ '.mp4': 'video/mp4', '.mov': 'video/quicktime', '.webm': 'video/webm', '.m4v': 'video/mp4',
     '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif',
-    '.wav': 'audio/wav', '.mp3': 'audio/mpeg', '.mpga': 'audio/mpeg' })[e] || 'application/octet-stream';
+    '.wav': 'audio/wav', '.mp3': 'audio/mpeg', '.mpga': 'audio/mpeg',
+    '.flac': 'audio/flac', '.ogg': 'audio/ogg', '.opus': 'audio/ogg', '.m4a': 'audio/mp4' })[e] || 'application/octet-stream';
 }
 
 app.whenReady().then(() => {
@@ -486,6 +511,17 @@ function computeOutRoot(scriptPath, preset, mode) {
   const modeOut = preset && (mode === 'longform' ? preset.outLong : preset.outShort);
   const outBase = modeOut || (preset && preset.outputFolder) || path.join(__dirname, 'output');
   return path.join(outBase, folder);
+}
+// 플리 스펙(.md) 파싱 — 파일 읽어 playlist-parser 로.
+function parsePlaylistFile(specPath) {
+  const text = fs.readFileSync(specPath, 'utf8');
+  return parsePlaylistText(text);
+}
+// 플리 출력 루트 — <채널 outputFolder>/<스펙파일명>/ (곡은 이 폴더에 NN_제목.mp3)
+function playlistOutRoot(specPath, preset) {
+  const folder = _safeFolder(path.basename(specPath).replace(/\.md$/i, ''));
+  const outBase = (preset && (preset.outLong || preset.outputFolder)) || path.join(__dirname, 'output');
+  return path.join(outBase, '플리', folder);
 }
 // 쇼츠별 폴더: media-N(이미지+영상) · tts-N(음성) · subtitles-N(SRT). 루트에 쇼츠N.vrew.
 function shortsDirs(outRoot, n) {
@@ -842,17 +878,17 @@ function queueDTO() {
         id: it.id,
         title: (it.parsed && it.parsed.fileTitle) || (it.scriptPath ? path.basename(it.scriptPath) : '대본'),
         file: it.scriptPath ? path.basename(it.scriptPath) : '',
-        projects: (it.parsed && it.parsed.projects) ? it.parsed.projects.length : 0,
+        projects: (it.parsed && (it.parsed.projects ? it.parsed.projects.length : (it.parsed.tracks || []).length)) || 0,
         status: it.status || 'idle',
         settings: it.settings || null, // 대본별 생성 설정(채널·스타일·배속·엔진·영상범위)
         active: it.id === q.activeId,
       })),
     };
   };
-  return { mode: S.mode, longform: mk('longform'), shorts: mk('shorts') };
+  return { mode: S.mode, longform: mk('longform'), shorts: mk('shorts'), playlist: mk('playlist') };
 }
 function pushDtoUpdate() {
-  try { if (win && !win.isDestroyed() && S.parsed) { const d = P.toDTO(S.parsed); d.timings = { ...S.timings }; d.queue = queueDTO(); win.webContents.send('dto-update', d); } } catch {}
+  try { if (win && !win.isDestroyed() && S.parsed) { const d = currentDTO(); if (d) { d.timings = { ...S.timings }; d.queue = queueDTO(); win.webContents.send('dto-update', d); } } } catch {}
   scheduleAutoSave(); // 데이터가 바뀔 때마다(디바운스) 자동저장
 }
 
@@ -1354,6 +1390,7 @@ function buildSnapshot() {
 }
 function writeSnapshotSync() {
   if (!S.parsed) return null;
+  if (S.parsed.kind === 'playlist') return null; // 플리는 워크스페이스+스펙(.md)이 진실 — .smproj 스냅샷 불필요
   try {
     const { projDir, file } = snapshotFile();
     fs.mkdirSync(projDir, { recursive: true });
@@ -1389,7 +1426,7 @@ function writeWorkspace() {
       const q = S.modes[mode];
       return { activeId: q.activeId, items: q.items.map((it) => ({ id: it.id, scriptPath: it.scriptPath, settings: it.settings || null, status: it.status || 'idle' })) };
     };
-    const ws = { version: 1, mode: S.mode, longform: ser('longform'), shorts: ser('shorts') };
+    const ws = { version: 1, mode: S.mode, longform: ser('longform'), shorts: ser('shorts'), playlist: ser('playlist') };
     const f = workspaceFile(); const tmp = f + '.tmp';
     fs.mkdirSync(path.dirname(f), { recursive: true });
     fs.writeFileSync(tmp, JSON.stringify(ws, null, 2), 'utf8'); fs.renameSync(tmp, f);
@@ -1419,7 +1456,22 @@ function restoreWorkspace() {
       }
       q.activeId = activeNewId || (q.items.length ? q.items[q.items.length - 1].id : null);
     }
-    S.mode = (ws.mode === 'longform') ? 'longform' : 'shorts';
+    // 플리 — 스펙(.md)을 playlist-parser 로 재파싱해 복원.
+    if (ws.playlist && Array.isArray(ws.playlist.items)) {
+      const q = S.modes.playlist; let activeNewId = null;
+      for (const wi of ws.playlist.items) {
+        if (!wi.scriptPath || !fs.existsSync(wi.scriptPath)) continue;
+        try {
+          const parsed = parsePlaylistFile(wi.scriptPath);
+          const it = { id: newItemId(), parsed, scriptPath: wi.scriptPath, outRoot: playlistOutRoot(wi.scriptPath, S.preset),
+            settings: wi.settings || null, status: (wi.status === 'running' ? 'idle' : (wi.status || 'idle')) };
+          q.items.push(it); restored++;
+          if (wi.id === ws.playlist.activeId) activeNewId = it.id;
+        } catch (e) { log(`플리 복원 실패(${path.basename(wi.scriptPath)}): ${e.message}`); }
+      }
+      q.activeId = activeNewId || (q.items.length ? q.items[q.items.length - 1].id : null);
+    }
+    S.mode = normMode(ws.mode);
     syncActiveToS();
     if (restored) log(`♻ 작업 큐 복원: ${restored}개 대본 (${S.mode})`);
   } catch (e) { log('큐 복원 실패: ' + (e && e.message)); }
@@ -2011,7 +2063,70 @@ ipcMain.handle('set-mode', (_e, args = {}) => {
   activateMode(args.mode);       // 새 모드 것으로 전환
   writeWorkspace();
   log(`↔ 모드 전환: ${S.mode}${S.parsed ? '' : ' (이 모드 대본 없음 — 대본을 여세요)'}`);
-  return { dto: S.parsed ? P.toDTO(S.parsed) : null, queue: queueDTO() };
+  return { dto: currentDTO(), queue: queueDTO() };
+});
+
+// ── 플리(ACE-Step 음악) ──────────────────────────────────────────────
+// 플리 스펙(.md) 열기 → 곡 목록 파싱 → 플리 큐에 적재.
+ipcMain.handle('open-playlist-spec', async (_e, args = {}) => {
+  const preset = args.presetName ? P.getPreset(args.presetName) : (S.preset || null);
+  if (preset) S.preset = preset;
+  const defPath = (preset && (preset.scriptFolder || preset.outputFolder)) || undefined;
+  const r = await dialog.showOpenDialog(win, {
+    title: '플리 스펙(.md) 열기', defaultPath: defPath,
+    properties: ['openFile'], filters: [{ name: '플리 스펙', extensions: ['md'] }],
+  });
+  if (r.canceled || !r.filePaths.length) return null;
+  const specPath = r.filePaths[0];
+  try {
+    const parsed = parsePlaylistFile(specPath);
+    if (!parsed.tracks.length) { log('플리 스펙에 트랙이 없습니다 — 형식을 확인하세요.'); return null; }
+    S.mode = 'playlist';
+    const outRoot = playlistOutRoot(specPath, preset);
+    addItem(parsed, specPath, outRoot, args.settings || null);
+    log(`🎵 플리 열기: ${parsed.fileTitle} (${parsed.tracks.length}곡)`);
+    return { dto: currentDTO(), scriptPath: specPath, outRoot, queue: queueDTO(), mode: S.mode };
+  } catch (e) {
+    log('플리 스펙 파싱 실패: ' + e.message);
+    return null;
+  }
+});
+
+// 플리 전체 생성 — 곡마다 ComfyUI ACE-Step API 호출 → 출력폴더에 저장.
+ipcMain.handle('make-playlist', async (_e, args = {}) => {
+  if (!S.parsed || S.parsed.kind !== 'playlist') { log('열린 플리가 없습니다 — 스펙을 먼저 여세요.'); return currentDTO(); }
+  S.abort = false;
+  const cfg = require('./core/comfy-config').load();
+  const { ComfyEngine } = require('./comfy-engine');
+  // 음악 전용 서버(audioBaseUrl)가 있으면 클라우드 설정 무시하고 그 로컬 주소로 — 이미지/영상은 클라우드, 음악만 로컬 가능.
+  const acfg = (cfg.audioBaseUrl && cfg.audioBaseUrl.trim())
+    ? { ...cfg, cloud: false, apiKey: '', baseUrl: cfg.audioBaseUrl.trim() }
+    : cfg;
+  const eng = new ComfyEngine(acfg, log);
+  if (!(await eng.health())) { log(`ComfyUI 연결 실패 (${acfg.baseUrl}) — 음악 서버 실행/주소를 확인하세요.`); return currentDTO(); }
+  const outRoot = S.outRoot || playlistOutRoot(S.scriptPath || 'playlist.md', S.preset);
+  try { fs.mkdirSync(outRoot, { recursive: true }); } catch {}
+  const tracks = S.parsed.tracks;
+  const only = (args && Number(args.num)) || null; // 특정 곡만(재생성) — null=전체
+  const t0 = Date.now();
+  let done = 0, fail = 0;
+  log(`🎵 플리 생성 시작 — ${only ? `${only}번 곡만` : `${tracks.length}곡`} → ${outRoot}`);
+  for (const t of tracks) {
+    if (only && t.num !== only) continue;
+    if (S.abort) { log('⛔ 중단됨'); break; }
+    t.status = 'generating'; t.error = null; pushDtoUpdate();
+    const base = `${String(t.num).padStart(2, '0')}_${_safeFolder(t.title).slice(0, 40)}`;
+    const outPath = path.join(outRoot, base + '.mp3');
+    log(`  ▶ ${t.num}. ${t.title} (${t.durationSec || 180}초)`);
+    const r = await eng.textToAudio({ tags: t.tags, lyrics: t.lyrics, durationSec: t.durationSec || 180, outputPath: outPath, abortSignal: () => S.abort });
+    if (r.success) { t.status = 'done'; t.audioPath = r.audioPath; done++; log(`  ✓ ${path.basename(r.audioPath)}`); }
+    else { t.status = 'fail'; t.error = r.error; fail++; log(`  ✗ 실패: ${r.error}`); }
+    pushDtoUpdate();
+  }
+  S.timings.make = Math.round((Date.now() - t0) / 1000);
+  log(`🎵 플리 생성 완료 — 성공 ${done}곡 · 실패 ${fail}곡 (${S.timings.make}초)`);
+  try { if (done > 0) shell.openPath(outRoot); } catch {}
+  return currentDTO();
 });
 
 // 대본 수정 — 편집한 텍스트로 재파싱(+원본 .md 갱신).

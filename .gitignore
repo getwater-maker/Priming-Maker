@@ -7,3 +7,5 @@ lora-dataset/
 *.vrew.debug.json
 .DS_Store
 Thumbs.db
+# 사용자 로컬 ComfyUI 워크플로(각자 지정) — 배포 제외
+Ace Step/

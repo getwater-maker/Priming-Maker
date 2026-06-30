@@ -46,10 +46,21 @@ const MODE_PROFILES = {
     presetKind: 'channel',
     vrewPrefix: '롱폼',
   },
+  // 플리(playlist) — ACE-Step 음악 생성 전용. TTS·자막·.vrew 없음. 스펙(.md) → 곡 N개 → 폴더.
+  playlist: {
+    label: '플리',
+    defaultAspect: '16:9',
+    aspectOptions: ['16:9'],
+    parser: 'playlist',                            // core/parsers/playlist-parser
+    presetKind: 'channel',
+    vrewPrefix: '플리',
+  },
 };
 
 function normalizeMode(mode) {
-  return mode === 'longform' ? 'longform' : 'shorts';
+  if (mode === 'longform') return 'longform';
+  if (mode === 'playlist') return 'playlist';
+  return 'shorts';
 }
 
 function getModeProfile(mode) {

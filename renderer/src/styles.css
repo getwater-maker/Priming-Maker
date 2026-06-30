@@ -209,6 +209,13 @@ h1 .ver{font-size:11px;font-weight:600;color:#a89878;margin-left:6px;vertical-al
 .modal-card{background:var(--card);border-radius:14px;padding:20px 22px;width:540px;max-width:92vw;
   box-shadow:0 10px 40px rgba(0,0,0,.4)}
 .modal-card.wide{width:736px;max-height:88vh;overflow-y:auto}
+/* ComfyUI 설정 — 넓은 2열 그리드 (한 화면에 모두) */
+.comfymodal{width:940px;max-width:96vw;max-height:92vh;overflow-y:auto}
+.comfymodal .cgrid{display:grid;grid-template-columns:1fr 1fr;gap:0 22px;align-items:center}
+.comfymodal .cgrid>.subhead,.comfymodal .cgrid>.meta,.comfymodal .cgrid>.full{grid-column:1 / -1}
+.comfymodal .cgrid>.frow{margin:5px 0;min-width:0}
+.comfymodal .cgrid>.frow input{min-width:0}
+.comfymodal .cgrid>.subhead{margin:10px 0 2px}
 .engtoggle{display:inline-flex;border:1px solid var(--accent);border-radius:7px;overflow:hidden;flex:1}
 .engtoggle button{border:none;border-radius:0;background:transparent;color:var(--accent-d);padding:6px 10px;flex:1;font-size:12.5px}
 .engtoggle button.active{background:var(--accent);color:#fff}
@@ -242,3 +249,31 @@ h1 .ver{font-size:11px;font-weight:600;color:#a89878;margin-left:6px;vertical-al
 .frow input[readonly]{background:#f3ece0;color:#8a7f72}
 .frow.chk{justify-content:flex-start}
 .mbtns{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}
+
+/* ── 플리(ACE-Step 음악) 화면 ── */
+.plempty{max-width:620px;margin:48px auto;text-align:center;color:var(--base)}
+.plempty h2{color:var(--strong);font-size:20px;margin:0 0 12px}
+.plempty p{margin:8px 0;line-height:1.6}
+.plwrap{padding:8px 4px 40px}
+.plhead{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;padding:6px 4px 12px;border-bottom:1px solid var(--line);margin-bottom:10px}
+.plhead h2{color:var(--strong);font-size:18px;margin:0}
+.pltracks{display:flex;flex-direction:column;gap:8px}
+.pltrack{display:flex;gap:12px;align-items:flex-start;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+.pltrack.s-generating{border-color:var(--accent);box-shadow:0 0 0 2px rgba(212,165,116,.18)}
+.pltrack.s-done{border-color:var(--ok)}
+.pltrack.s-fail{border-color:var(--danger)}
+.plnum{font-size:18px;font-weight:800;color:var(--accent-d);min-width:30px;text-align:center;padding-top:2px}
+.plbody{flex:1;min-width:0}
+.pltitle{font-size:15px;font-weight:700;color:var(--strong);display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.pllen{font-size:11px;font-weight:600;color:var(--base);background:#f3ece0;border-radius:5px;padding:1px 6px}
+.plstatus{font-size:11px;font-weight:700;border-radius:5px;padding:1px 7px}
+.plstatus.s-idle{color:var(--base);background:#f0e8db}
+.plstatus.s-generating{color:#fff;background:var(--accent)}
+.plstatus.s-done{color:#fff;background:var(--ok)}
+.plstatus.s-fail{color:#fff;background:var(--danger)}
+.pltags{font-size:12.5px;color:var(--base);margin-top:4px;font-family:"D2Coding","Consolas",monospace;word-break:break-word}
+.pllyrics{font-size:12px;color:var(--base);margin-top:4px}
+.pllyrics.meta{color:#9a8f80}
+.plerr{font-size:12px;color:var(--danger);margin-top:4px}
+.plaudio{margin-top:8px;width:100%;max-width:420px;height:34px}
+.plactions{display:flex;flex-direction:column;gap:6px;flex-shrink:0}

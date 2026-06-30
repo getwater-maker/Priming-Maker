@@ -40,8 +40,9 @@ const QSTATUS = { idle: '대기', running: '진행중', done: '완료', failed: 
 const ENGINE_META = { genspark: { name: 'Genspark (Nano Banana 2)' }, flow: { name: 'Google Flow' }, comfy: { name: 'ComfyUI (Krea2 Turbo)' } };
 
 export default function App() {
-  const [mode, setMode] = useState('longform'); // 'longform'(주 사용) | 'shorts'
+  const [mode, setMode] = useState('longform'); // 'longform'(주 사용) | 'shorts' | 'playlist'(플리)
   const isLf = mode === 'longform';
+  const isPl = mode === 'playlist';
   const [dto, setDto] = useState(null);
   const [queue, setQueue] = useState(null); // 현재 모드 작업 큐(적재 대본 목록) — main 의 queueDTO
   const [presets, setPresets] = useState([]);
@@ -539,6 +540,7 @@ export default function App() {
     catch (e) { logline('테스트 오류: ' + e.message); setStatus('테스트 오류'); }
   }
   async function pickWorkflow() { const f = await api.pickFile({ filters: [{ name: 'ComfyUI 워크플로(API json)', extensions: ['json'] }] }); if (f) setComfy((c) => ({ ...c, workflowPath: f })); }
+  async function pickAudioWorkflow() { const f = await api.pickFile({ filters: [{ name: 'ComfyUI 워크플로(API json)', extensions: ['json'] }] }); if (f) setComfy((c) => ({ ...c, audioWorkflowPath: f })); }
   async function pickImageWorkflow() { const f = await api.pickFile({ filters: [{ name: 'ComfyUI 워크플로(API json)', extensions: ['json'] }] }); if (f) setComfy((c) => ({ ...c, imageWorkflowPath: f })); }
   function showPrompt(c, label) {
     // 실제 생성에 쓰이는 최종 이미지 프롬프트 = 선택한 스타일 + 대본 프롬프트.
@@ -938,20 +940,22 @@ export default function App() {
           <div className="hleft">
             <h1>🎬 Priming{appVersion ? <span className="ver">v{appVersion}</span> : null}</h1>
             <span className="modetoggle">
-              <button className={isLf ? 'active' : ''} onClick={() => switchMode('longform')}>롱폼 16:9</button>
-              <button className={!isLf ? 'active' : ''} onClick={() => switchMode('shorts')}>쇼츠 9:16</button>
+              <button className={mode === 'longform' ? 'active' : ''} onClick={() => switchMode('longform')}>롱폼</button>
+              <button className={mode === 'shorts' ? 'active' : ''} onClick={() => switchMode('shorts')}>쇼츠</button>
+              <button className={mode === 'playlist' ? 'active' : ''} onClick={() => switchMode('playlist')}>🎵 플리</button>
             </span>
             <select title="채널(프리셋)" value={presetName} onChange={(e) => setPresetName(e.target.value)}>
               {presets.map((p) => <option key={p.name} value={p.name}>{p.name}</option>)}
             </select>
             <button className="ghost" title="채널(프리셋) 설정 편집" style={{ padding: '6px 9px' }} onClick={openChannelEditor}>⚙</button>
             <button className="ghost" title="새 채널 추가 (현재 채널 설정을 복사해서 시작)" style={{ padding: '6px 9px' }} onClick={addChannel}>＋ 채널</button>
-            <button onClick={openScript}>📂 대본 열기</button>
-            <button className="ghost" disabled={!loaded} title="대본 내용 수정 → 재파싱(원본 .md 갱신)" onClick={openScriptEdit}>✏ 대본수정</button>
-            <button className="ghost" disabled={!loaded} title="수동 저장(자동저장도 항상 켜져 있음)" onClick={saveProject}>💾 작업저장</button>
-            <button className="ghost" title="저장한 프로젝트 불러오기" onClick={loadProject}>📂 불러오기</button>
-            <button className="ghost" title="새 대본 작업 — 현재 화면 비우기" onClick={resetProject}>🆕 초기화</button>
-            <button className="ghost" title="음성·영상 파일을 텍스트로 변환(STT) → 원본과 같은 폴더에 같은 이름 .txt 생성 (OmniVoice Whisper)" onClick={runStt}>🎧 STT</button>
+            {!isPl && <button onClick={openScript}>📂 대본 열기</button>}
+            {isPl && <button onClick={openPlaylist}>🎵 플리 스펙 열기</button>}
+            {!isPl && <button className="ghost" disabled={!loaded} title="대본 내용 수정 → 재파싱(원본 .md 갱신)" onClick={openScriptEdit}>✏ 대본수정</button>}
+            {!isPl && <button className="ghost" disabled={!loaded} title="수동 저장(자동저장도 항상 켜져 있음)" onClick={saveProject}>💾 작업저장</button>}
+            {!isPl && <button className="ghost" title="저장한 프로젝트 불러오기" onClick={loadProject}>📂 불러오기</button>}
+            <button className="ghost" title="새 작업 — 현재 화면 비우기" onClick={resetProject}>🆕 초기화</button>
+            {!isPl && <button className="ghost" title="음성·영상 파일을 텍스트로 변환(STT) → 원본과 같은 폴더에 같은 이름 .txt 생성 (OmniVoice Whisper)" onClick={runStt}>🎧 STT</button>}
             {loaded && (
               <span className="autosave-ind" title="작업은 자동으로 수시 저장됩니다. 같은 대본을 다시 열면 이어서 작업할 수 있어요.">
                 {autoSavedAt ? `✓ 자동저장 ${new Date(autoSavedAt).toLocaleTimeString()}` : '자동저장 켜짐'}
@@ -959,6 +963,7 @@ export default function App() {
             )}
           </div>
         </div>
+        {!isPl && (<>
         {/* 생성·제작 행 — 가운데: TTS·이미지·비디오 생성컨트롤 / 오른쪽: 프롬프트·미리보기·만들기·출력 */}
         <div className="hrow hrow3">
           <div className="hside" />
@@ -1017,10 +1022,22 @@ export default function App() {
             <button className="ghost" disabled={!loaded} onClick={() => api.openFolder()}>📁 출력폴더</button>
           </div>
         </div>
+        </>)}
+        {isPl && (
+        <div className="hrow">
+          <div className="hright">
+            <span className="meta" style={{ marginRight: 'auto' }}>{dto && dto.kind === 'playlist' ? `${dto.tracks.length}곡` : '플리 스펙(.md)을 여세요 — 클로드가 채팅에서 만들어 줍니다'}</span>
+            <button disabled={!(dto && dto.kind === 'playlist' && dto.tracks.length)} title="모든 곡을 로컬 ComfyUI(ACE-Step)로 자동 생성 → 출력폴더 저장" onClick={() => runMakePlaylist(null)}>⚡ 음악 전체 생성</button>
+            <button className="ghost" title="진행 중인 생성 중단" onClick={abort}>■ 중단</button>
+            <button className="ghost" title="ComfyUI 서버·ACE-Step 워크플로 설정" style={{ padding: '6px 9px' }} onClick={openComfy}>⚙ Comfy</button>
+            <button className="ghost" disabled={!(dto && dto.kind === 'playlist')} onClick={() => api.openFolder()}>📁 출력폴더</button>
+          </div>
+        </div>
+        )}
       </header>
 
-      {/* 분할/합치기 바 — 스크롤 내려도 항상 보이도록 topsticky(고정) 안. */}
-      <div id="capbar">
+      {/* 분할/합치기 바 — 스크롤 내려도 항상 보이도록 topsticky(고정) 안. (플리 모드 제외) */}
+      {!isPl && <div id="capbar">
         <span className="grow" />
         {splitBar}
         {!isLf && <button className="ghost" title="TTS 후 캡 미만 그룹들을 한 그룹으로 합치기" onClick={mergeGroups}>🔗 합치기</button>}
@@ -1030,11 +1047,15 @@ export default function App() {
           ⏱ TTS {prog.ttsD}/{prog.ttsT} ({fmtSec(timings.tts)}) · 이미지 {prog.imgD}/{prog.imgT} ({fmtSec(timings.image)}) · 영상 {prog.vidD}/{prog.vidT} ({fmtSec(timings.video)}) · <b>합계 {fmtSec(timings.tts + timings.image + timings.video)}</b>
           {timings.make > 0 && <> · ⚡전체 {fmtSec(timings.make)}</>}
         </span>
-      </div>
+      </div>}
       </div>
 
       <div id="body">
         <main>
+          {isPl ? (
+            <PlaylistView dto={dto} onMakeOne={(num) => runMakePlaylist(num)}
+              onPreview={(src) => setPreview({ kind: 'audio', src })} />
+          ) : (<>
           {queue && queue[mode] && queue[mode].items.length > 0 && (
             <div className="qstrip">
               <span className="qlabel">{isLf ? '롱폼' : '쇼츠'} 큐 ({queue[mode].items.length})</span>
@@ -1056,6 +1077,7 @@ export default function App() {
             onMake={runMake} onVrew={runVrew} onAttach={attachAsset} onClear={clearAsset}
             onTitleField={updateTitleField} onPreview={(kind, src) => setPreview({ kind, src })}
             onPlayFrom={playFrom} onGroupTts={runGroupTts} onGroupVid={runGroupVid} onShowPrompt={showPrompt} onSplit={splitGroup} />
+          </>)}
         </main>
         <aside id="logwrap" className={logCollapsed ? 'collapsed' : ''}>
           <div id="logbar" onClick={(e) => { if (e.target.tagName === 'BUTTON') return; setLogCollapsed((v) => !v); }}>
@@ -1073,7 +1095,9 @@ export default function App() {
           <div id="previewBody">
             {preview.kind === 'vid'
               ? <video src={preview.src} controls autoPlay loop />
-              : <img src={preview.src} alt="" />}
+              : preview.kind === 'audio'
+                ? <audio src={preview.src} controls autoPlay style={{ width: 480 }} />
+                : <img src={preview.src} alt="" />}
           </div>
         </div>
       )}
@@ -1153,27 +1177,40 @@ export default function App() {
 
       {comfyOpen && comfy && (
         <div className="modal-bg show" onClick={(e) => { if (e.target.classList.contains('modal-bg')) setComfyOpen(false); }}>
-          <div className="modal-card">
-            <h3>⚙ ComfyUI 설정 (이미지 · LTX 영상)</h3>
-            <div className="meta" style={{ marginBottom: 8 }}>로컬 PC / RunPod / <b>ComfyUI 클라우드(comfy.org)</b>. 클라우드는 GPU·설치 불필요 — 체크 후 API 키만 넣으면 됩니다.</div>
-            <div className="frow"><label>클라우드 모드</label><label style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1 }}><input type="checkbox" style={{ width: 'auto' }} checked={!!comfy.cloud} onChange={(e) => setComfy({ ...comfy, cloud: e.target.checked, baseUrl: e.target.checked && /127\.0\.0\.1|localhost/.test(comfy.baseUrl || '') ? 'https://cloud.comfy.org' : comfy.baseUrl })} /><span className="meta">comfy.org 공식 클라우드 사용 (Standard 이상 구독 필요)</span></label></div>
-            {comfy.cloud && (
-              <div className="frow"><label>API 키</label><input type="password" placeholder="X-API-Key (계정 대시보드에서 발급)" value={comfy.apiKey || ''} onChange={(e) => setComfy({ ...comfy, apiKey: e.target.value })} /></div>
-            )}
-            <div className="frow"><label>서버 주소</label><input placeholder={comfy.cloud ? 'https://cloud.comfy.org' : 'http://127.0.0.1:8188'} value={comfy.baseUrl} onChange={(e) => setComfy({ ...comfy, baseUrl: e.target.value })} /><button className="ghost" style={{ flex: '0 0 auto' }} onClick={testComfyConn}>연결테스트</button></div>
-            <div className="subhead">🖼 이미지 (t2i)</div>
-            <div className="frow"><label>이미지 워크플로</label><input placeholder="ComfyUI '저장(API 포맷)' JSON 경로 (예: Krea2 Turbo)" value={comfy.imageWorkflowPath || ''} onChange={(e) => setComfy({ ...comfy, imageWorkflowPath: e.target.value })} /><button className="ghost" style={{ flex: '0 0 auto' }} onClick={pickImageWorkflow}>찾기</button></div>
-            <div className="frow"><label>프롬프트 노드</label><input placeholder="비우면 CLIPTextEncode 자동탐지 (Krea2 등 다른 인코더면 그 긍정 프롬프트 노드 ID 입력)" value={comfy.imagePromptNodeId || ''} onChange={(e) => setComfy({ ...comfy, imagePromptNodeId: e.target.value })} /></div>
-            <div className="meta" style={{ marginBottom: 4 }}>ComfyUI에서 워크플로를 <b>저장(API 포맷)</b>으로 내보내 위 경로에 지정하세요(필수). 프롬프트가 안 들어가면 프롬프트 노드 ID를 직접 입력. <b>해상도는 프로그램이 비율(롱폼 16:9 / 쇼츠 9:16)에 맞춰 자동 주입</b>합니다.</div>
-            <div className="subhead">📹 영상 (i2v · LTX)</div>
-            <div className="frow"><label>워크플로</label><input placeholder="ComfyUI '저장(API 포맷)' JSON 경로 (LTX)" value={comfy.workflowPath} onChange={(e) => setComfy({ ...comfy, workflowPath: e.target.value })} /><button className="ghost" style={{ flex: '0 0 auto' }} onClick={pickWorkflow}>찾기</button></div>
-            <div className="frow"><label>이미지 노드</label><input placeholder="비우면 LoadImage 자동탐지" value={comfy.imageNodeId} onChange={(e) => setComfy({ ...comfy, imageNodeId: e.target.value })} /></div>
-            <div className="frow"><label>프롬프트 노드</label><input placeholder="비우면 CLIPTextEncode 자동탐지" value={comfy.promptNodeId} onChange={(e) => setComfy({ ...comfy, promptNodeId: e.target.value })} /></div>
-            <div className="frow"><label>너비/높이 노드</label><input placeholder="너비 노드ID(비우면 자동)" value={comfy.videoWidthNodeId || ''} onChange={(e) => setComfy({ ...comfy, videoWidthNodeId: e.target.value })} /><input placeholder="높이 노드ID" value={comfy.videoHeightNodeId || ''} onChange={(e) => setComfy({ ...comfy, videoHeightNodeId: e.target.value })} /></div>
-            <div className="frow"><label>길이 노드</label><input placeholder="길이/프레임 노드ID(비우면 자동)" value={comfy.videoDurationNodeId || ''} onChange={(e) => setComfy({ ...comfy, videoDurationNodeId: e.target.value })} /></div>
-            <div className="frow"><label>최대 길이(초)</label><input className="n" type="number" style={{ width: 60 }} value={comfy.videoMaxSec || 0} onChange={(e) => setComfy({ ...comfy, videoMaxSec: e.target.value })} /><span className="meta">0=캡 없음(TTS 길이 그대로)</span></div>
-            <div className="frow"><label>영상 타임아웃(초)</label><input type="number" value={comfy.timeoutSec} onChange={(e) => setComfy({ ...comfy, timeoutSec: e.target.value })} /></div>
-            <div className="meta">⚠ 영상 출력은 <b>SaveVideo/VHS(mp4)</b> 노드 필요. 길이는 LTX Duration(초) 노드에 자동 기록(자동탐지).</div>
+          <div className="modal-card comfymodal">
+            <h3>⚙ ComfyUI 설정 (이미지 · LTX 영상 · ACE-Step 음악)</h3>
+            <div className="meta" style={{ marginBottom: 8 }}>로컬 PC / RunPod / <b>ComfyUI 클라우드(comfy.org)</b>. 클라우드는 GPU·설치 불필요 — 체크 후 API 키만. <b>음악만 로컬</b>로 분리 가능(아래 음악 서버).</div>
+            <div className="cgrid">
+              <div className="frow full"><label>클라우드 모드</label><label style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1 }}><input type="checkbox" style={{ width: 'auto' }} checked={!!comfy.cloud} onChange={(e) => setComfy({ ...comfy, cloud: e.target.checked, baseUrl: e.target.checked && /127\.0\.0\.1|localhost/.test(comfy.baseUrl || '') ? 'https://cloud.comfy.org' : comfy.baseUrl })} /><span className="meta">comfy.org 공식 클라우드 사용 (Standard 이상 구독 필요)</span></label></div>
+              {comfy.cloud && (
+                <div className="frow full"><label>API 키</label><input type="password" placeholder="X-API-Key (계정 대시보드에서 발급)" value={comfy.apiKey || ''} onChange={(e) => setComfy({ ...comfy, apiKey: e.target.value })} /></div>
+              )}
+              <div className="frow full"><label>서버 주소</label><input placeholder={comfy.cloud ? 'https://cloud.comfy.org' : 'http://127.0.0.1:8188'} value={comfy.baseUrl} onChange={(e) => setComfy({ ...comfy, baseUrl: e.target.value })} /><button className="ghost" style={{ flex: '0 0 auto' }} onClick={testComfyConn}>연결테스트</button></div>
+
+              <div className="subhead">🖼 이미지 (t2i)</div>
+              <div className="frow full"><label>이미지 워크플로</label><input placeholder="ComfyUI '저장(API 포맷)' JSON 경로 (예: Krea2 Turbo)" value={comfy.imageWorkflowPath || ''} onChange={(e) => setComfy({ ...comfy, imageWorkflowPath: e.target.value })} /><button className="ghost" style={{ flex: '0 0 auto' }} onClick={pickImageWorkflow}>찾기</button></div>
+              <div className="frow full"><label>프롬프트 노드</label><input placeholder="비우면 CLIPTextEncode 자동탐지 (Krea2 등 다른 인코더면 그 긍정 프롬프트 노드 ID 입력)" value={comfy.imagePromptNodeId || ''} onChange={(e) => setComfy({ ...comfy, imagePromptNodeId: e.target.value })} /></div>
+              <div className="meta" style={{ marginBottom: 4 }}>워크플로는 <b>저장(API 포맷)</b>으로 내보내 지정(필수). <b>해상도는 비율(롱폼 16:9 / 쇼츠 9:16)에 맞춰 자동 주입</b>.</div>
+
+              <div className="subhead">📹 영상 (i2v · LTX)</div>
+              <div className="frow full"><label>워크플로</label><input placeholder="ComfyUI '저장(API 포맷)' JSON 경로 (LTX)" value={comfy.workflowPath} onChange={(e) => setComfy({ ...comfy, workflowPath: e.target.value })} /><button className="ghost" style={{ flex: '0 0 auto' }} onClick={pickWorkflow}>찾기</button></div>
+              <div className="frow"><label>이미지 노드</label><input placeholder="비우면 LoadImage 자동탐지" value={comfy.imageNodeId} onChange={(e) => setComfy({ ...comfy, imageNodeId: e.target.value })} /></div>
+              <div className="frow"><label>프롬프트 노드</label><input placeholder="비우면 CLIPTextEncode 자동탐지" value={comfy.promptNodeId} onChange={(e) => setComfy({ ...comfy, promptNodeId: e.target.value })} /></div>
+              <div className="frow full"><label>너비/높이 노드</label><input placeholder="너비 노드ID(비우면 자동)" value={comfy.videoWidthNodeId || ''} onChange={(e) => setComfy({ ...comfy, videoWidthNodeId: e.target.value })} /><input placeholder="높이 노드ID" value={comfy.videoHeightNodeId || ''} onChange={(e) => setComfy({ ...comfy, videoHeightNodeId: e.target.value })} /></div>
+              <div className="frow"><label>길이 노드</label><input placeholder="길이/프레임 노드ID(비우면 자동)" value={comfy.videoDurationNodeId || ''} onChange={(e) => setComfy({ ...comfy, videoDurationNodeId: e.target.value })} /></div>
+              <div className="frow"><label>최대 길이(초)</label><input className="n" type="number" style={{ width: 60 }} value={comfy.videoMaxSec || 0} onChange={(e) => setComfy({ ...comfy, videoMaxSec: e.target.value })} /><span className="meta">0=캡 없음</span></div>
+              <div className="frow"><label>영상 타임아웃(초)</label><input type="number" value={comfy.timeoutSec} onChange={(e) => setComfy({ ...comfy, timeoutSec: e.target.value })} /></div>
+              <div className="meta">⚠ 영상 출력은 <b>SaveVideo/VHS(mp4)</b> 노드 필요. 길이는 LTX Duration(초) 노드에 자동 기록.</div>
+
+              <div className="subhead">🎵 음악 (ACE-Step · '플리' 모드)</div>
+              <div className="frow full"><label>음악 서버</label><input placeholder="음악만 로컬로 돌리려면 여기에 (예: http://127.0.0.1:8188). 비우면 위 공통 서버 사용" value={comfy.audioBaseUrl || ''} onChange={(e) => setComfy({ ...comfy, audioBaseUrl: e.target.value })} /></div>
+              <div className="meta" style={{ marginTop: -2, marginBottom: 4 }}>💡 이미지·영상은 클라우드, <b>음악만 로컬 GPU(무료)</b>로 돌리려면 이 칸에 로컬 ComfyUI 주소(클라우드 설정 무시).</div>
+              <div className="frow full"><label>음악 워크플로</label><input placeholder="ComfyUI '저장(API 포맷)' JSON 경로 (ACE-Step)" value={comfy.audioWorkflowPath || ''} onChange={(e) => setComfy({ ...comfy, audioWorkflowPath: e.target.value })} /><button className="ghost" style={{ flex: '0 0 auto' }} onClick={pickAudioWorkflow}>찾기</button></div>
+              <div className="frow"><label>태그 노드</label><input placeholder="비우면 tags 자동탐지" value={comfy.audioTagsNodeId || ''} onChange={(e) => setComfy({ ...comfy, audioTagsNodeId: e.target.value })} /></div>
+              <div className="frow"><label>가사 노드</label><input placeholder="비우면 lyrics 자동탐지" value={comfy.audioLyricsNodeId || ''} onChange={(e) => setComfy({ ...comfy, audioLyricsNodeId: e.target.value })} /></div>
+              <div className="frow full"><label>길이 노드</label><input placeholder="비우면 seconds 자동탐지 (EmptyAceStepLatentAudio)" value={comfy.audioDurationNodeId || ''} onChange={(e) => setComfy({ ...comfy, audioDurationNodeId: e.target.value })} /><input className="n" type="number" style={{ width: 70 }} title="곡 1개 최대 대기(초)" value={comfy.audioTimeoutSec || 600} onChange={(e) => setComfy({ ...comfy, audioTimeoutSec: e.target.value })} /></div>
+              <div className="meta">⚠ 음악 출력은 <b>SaveAudio(MP3/FLAC)</b> 노드 필요. 스타일은 곡별 <b>tags</b>, 길이는 <b>seconds</b> 에 자동 주입. 연주곡은 가사를 비웁니다.</div>
+            </div>
             <div className="mbtns"><button onClick={saveComfy}>저장</button><button className="ghost" onClick={() => setComfyOpen(false)}>취소</button></div>
           </div>
         </div>
@@ -1369,11 +1406,77 @@ export default function App() {
   async function switchMode(m) {
     if (m === mode) return;
     setMode(m);
-    setAspect(m === 'longform' ? '16:9' : '9:16');
-    // 모드별 보관된 대본으로 전환 (없으면 빈 화면). 롱폼/쇼츠 대본은 독립.
+    setAspect(m === 'longform' ? '16:9' : m === 'playlist' ? '16:9' : '9:16');
+    // 모드별 보관된 대본으로 전환 (없으면 빈 화면). 롱폼/쇼츠/플리 대본은 독립.
     try { const r = await api.setMode({ mode: m }); if (r && r.queue) setQueue(r.queue); setDto(r ? r.dto : null); setFtitle(r && r.dto ? (r.dto.fileTitle || '') : ''); }
     catch (e) { logline('모드 전환 오류: ' + e.message); }
   }
+
+  // 플리 스펙(.md) 열기 — 클로드가 채팅에서 만든 곡 목록 파일.
+  async function openPlaylist() {
+    try {
+      const r = await api.openPlaylistSpec({ presetName: presetName || null });
+      if (!r) return;
+      if (r.mode) setMode(r.mode);
+      setDto(r.dto); if (r.queue) setQueue(r.queue);
+      setFtitle(r.dto ? (r.dto.fileTitle || '') : '');
+      setStatus(`플리 로드 · ${r.dto && r.dto.tracks ? r.dto.tracks.length : 0}곡`);
+    } catch (e) { logline('플리 열기 오류: ' + e.message); }
+  }
+  // 플리 음악 생성 — num=null 전체, 숫자=그 곡만 재생성.
+  async function runMakePlaylist(num) {
+    try {
+      setStatus(num ? `${num}번 곡 생성 중…` : '음악 전체 생성 중…');
+      const d = await api.makePlaylist({ num: num || null });
+      if (d) setDto(d);
+      setStatus('음악 생성 완료');
+    } catch (e) { logline('음악 생성 오류: ' + e.message); }
+  }
+}
+
+// ── 플리(ACE-Step 음악) 화면 ──────────────────────────────
+const PL_STATUS = { idle: '대기', generating: '생성중…', done: '완료', fail: '실패' };
+function PlaylistView({ dto, onMakeOne, onPreview }) {
+  if (!dto || dto.kind !== 'playlist' || !dto.tracks.length) {
+    return (
+      <div className="plempty">
+        <h2>🎵 플리 — AI 음악(ACE-Step)</h2>
+        <p>상단 <b>「🎵 플리 스펙 열기」</b>로 곡 목록(.md)을 불러오세요.</p>
+        <p className="meta">스펙은 <b>클로드가 이 채팅에서</b> 채널 컨셉에 맞춰 자동으로 만들어 줍니다. 생성은 로컬 ComfyUI(ACE-Step) API로 자동 실행되어 출력폴더에 저장됩니다.</p>
+      </div>
+    );
+  }
+  return (
+    <div className="plwrap">
+      <div className="plhead">
+        <h2>🎵 {dto.fileTitle}</h2>
+        {dto.concept ? <span className="meta">{dto.concept}</span> : null}
+        <span className="meta">· {dto.tracks.length}곡</span>
+      </div>
+      <div className="pltracks">
+        {dto.tracks.map((t) => (
+          <div key={t.num} className={'pltrack s-' + t.status}>
+            <div className="plnum">{String(t.num).padStart(2, '0')}</div>
+            <div className="plbody">
+              <div className="pltitle">{t.title}
+                <span className="pllen">{t.durationSec || 180}s</span>
+                <span className={'plstatus s-' + t.status}>{PL_STATUS[t.status] || t.status}</span>
+              </div>
+              <div className="pltags" title={t.tags}>{t.tags || <span className="meta">스타일 태그 없음</span>}</div>
+              {t.lyrics
+                ? <div className="pllyrics">🎤 {t.lyrics.slice(0, 90)}{t.lyrics.length > 90 ? '…' : ''}</div>
+                : <div className="pllyrics meta">연주곡 (보컬 없음)</div>}
+              {t.error ? <div className="plerr">✗ {t.error}</div> : null}
+              {t.audioPath ? <audio controls preload="none" src={media(t.audioPath)} className="plaudio" /> : null}
+            </div>
+            <div className="plactions">
+              <button className="ghost" title="이 곡만 (재)생성" onClick={() => onMakeOne(t.num)}>{t.status === 'done' ? '↻ 다시' : '▶ 생성'}</button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 // ── 카드 목록 (편별 그룹/컷) ──────────────────────────────

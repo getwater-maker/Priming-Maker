@@ -68,6 +68,8 @@ contextBridge.exposeInMainWorld('api', {
   readAudio: (p) => ipcRenderer.invoke('read-audio', p),
   setAspect: (value) => ipcRenderer.invoke('set-aspect', value),
   setMode: (args) => ipcRenderer.invoke('set-mode', args),
+  openPlaylistSpec: (args) => ipcRenderer.invoke('open-playlist-spec', args),
+  makePlaylist: (args) => ipcRenderer.invoke('make-playlist', args),
   getScriptText: () => ipcRenderer.invoke('get-script-text'),
   applyScriptText: (args) => ipcRenderer.invoke('apply-script-text', args),
   makeAll: (args) => ipcRenderer.invoke('make-all', args),

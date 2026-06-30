@@ -38,6 +38,15 @@ const DEFAULTS = {
   videoDurationNodeId: '',
   videoMaxSec: 0,         // 영상 최대 길이(초) — 0 = 캡 없음(그룹 TTS 길이 그대로). >0 이면 그 값으로 상한.
   matchVideoToAudio: true, // 영상 길이를 그룹 TTS 재생시간에 맞춤 (LTX, 초 단위)
+  // ── ACE-Step 음악(t2a) 설정 — '플리' 모드 전용. audioWorkflowPath 필수 ──────────────────
+  // 음악 전용 서버 — 값이 있으면 이미지/영상의 클라우드 설정과 무관하게 음악은 '항상 로컬'(이 주소)로 생성.
+  //   예: 이미지·영상은 comfy.org 클라우드, 음악만 로컬 RTX3060(http://127.0.0.1:8188). 빈값=위 공통 서버 사용.
+  audioBaseUrl: '',
+  audioWorkflowPath: '',   // ACE-Step API 포맷 워크플로 JSON 경로 (ComfyUI '저장(API 포맷)')
+  audioTagsNodeId: '',     // 스타일 태그 노드 id (빈값=TextEncodeAceStepAudio 의 tags / 첫 텍스트 노드 자동탐지)
+  audioLyricsNodeId: '',   // 가사 노드 id (빈값=tags 와 같은 노드의 lyrics, 또는 자동탐지). 인스트루멘탈이면 빈 문자열 주입
+  audioDurationNodeId: '', // 길이(초) 노드 id (빈값=EmptyAceStepLatentAudio 의 seconds 자동탐지)
+  audioTimeoutSec: 600,    // 곡 1개 최대 대기(초)
 };
 
 function load() {

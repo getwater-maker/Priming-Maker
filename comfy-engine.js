@@ -56,6 +56,12 @@ class ComfyEngine {
     this.videoHeightNodeId = cfg.videoHeightNodeId || '';
     this.videoDurationNodeId = cfg.videoDurationNodeId || ''; // i2v 길이(초) 노드
     this.videoMaxSec = Number(cfg.videoMaxSec) > 0 ? Number(cfg.videoMaxSec) : 0; // 0 = 캡 없음(그룹 TTS 길이 그대로)
+    // 오디오(t2a) — ACE-Step 음악. '플리' 모드 전용. audioWorkflowPath 필수.
+    this.audioWorkflowPath = cfg.audioWorkflowPath || '';
+    this.audioTagsNodeId = cfg.audioTagsNodeId || '';
+    this.audioLyricsNodeId = cfg.audioLyricsNodeId || '';
+    this.audioDurationNodeId = cfg.audioDurationNodeId || '';
+    this.audioTimeoutSec = Number(cfg.audioTimeoutSec) > 0 ? Number(cfg.audioTimeoutSec) : 600;
     this.clientId = 'priming_' + Math.random().toString(36).slice(2, 10);
     this.log = logger;
   }
@@ -81,19 +87,21 @@ class ComfyEngine {
     } catch { return false; }
   }
 
-  // 출력 객체(노드맵)에서 비디오/이미지 파일 1개 추출 — 로컬/클라우드 공용.
-  _scanMedia(outputs, isVid) {
+  // 출력 객체(노드맵)에서 비디오/이미지/오디오 파일 1개 추출 — 로컬/클라우드 공용.
+  //   kind: 'audio' = 오디오(mp3/flac/wav/...) / truthy = 비디오 / falsy = 이미지 (기존 boolean 호환)
+  _scanMedia(outputs, kind) {
     outputs = outputs || {};
+    const match = (x) => {
+      if (!x) return false;
+      if (kind === 'audio') return /\.(mp3|flac|wav|ogg|opus|m4a)$/i.test(x.filename || '') || /audio|flac|mp3|wav/i.test(x.format || '');
+      if (kind) return /\.(mp4|webm|mov|mkv)$/i.test(x.filename || '') || /video|mp4|webm/i.test(x.format || '');
+      return /\.(png|jpe?g|webp)$/i.test(x.filename || '');
+    };
     for (const nodeId of Object.keys(outputs)) {
       const o = outputs[nodeId] || {};
       for (const key of Object.keys(o)) {
         const arr = o[key];
-        if (Array.isArray(arr)) {
-          const m = arr.find((x) => x && (isVid
-            ? (/\.(mp4|webm|mov|mkv)$/i.test(x.filename || '') || /video|mp4|webm/i.test(x.format || ''))
-            : /\.(png|jpe?g|webp)$/i.test(x.filename || '')));
-          if (m) return m;
-        }
+        if (Array.isArray(arr)) { const m = arr.find(match); if (m) return m; }
       }
     }
     return null;
@@ -111,7 +119,8 @@ class ComfyEngine {
   }
 
   // 클라우드 폴링 — /api/job/{id}/status 로 상태 확인 → completed 시 /api/jobs/{id} 에서 outputs.
-  async _waitCloud(promptId, abortSignal, timeoutSec, isVid) {
+  async _waitCloud(promptId, abortSignal, timeoutSec, kind) {
+    const kindLabel = kind === 'audio' ? '오디오' : kind ? '비디오' : '이미지';
     const deadline = Date.now() + timeoutSec * 1000;
     while (Date.now() < deadline) {
       if (abortSignal && abortSignal()) throw new Error('중단됨');
@@ -131,9 +140,9 @@ class ComfyEngine {
         const r2 = await fetch(this._url(`/jobs/${promptId}`), { headers: this._headers() });
         if (!r2.ok) throw new Error(`작업 상세 조회 실패 (${r2.status})`);
         const j = await r2.json();
-        const media = this._scanMedia(this._extractOutputs(j), isVid);
+        const media = this._scanMedia(this._extractOutputs(j), kind);
         if (media) return media;
-        throw new Error(`출력에서 ${isVid ? '비디오' : '이미지'}를 찾지 못했습니다 — 응답: ${JSON.stringify(j).slice(0, 300)}`);
+        throw new Error(`출력에서 ${kindLabel}를 찾지 못했습니다 — 응답: ${JSON.stringify(j).slice(0, 300)}`);
       }
     }
     throw new Error(`타임아웃 (${timeoutSec}초) — 클라우드 생성이 끝나지 않음`);
@@ -386,6 +395,93 @@ class ComfyEngine {
       const img = await this._waitImage(promptId, abortSignal);
       const out = await this._downloadImage(img, outputPath);
       return { success: true, imagePath: out };
+    } catch (e) {
+      return { success: false, error: e.message };
+    }
+  }
+
+  // ── ACE-Step 음악(t2a) — '플리' 모드 ───────────────────────────────────
+  // 길이(초) 주입 — EmptyAceStepLatentAudio 의 seconds 우선, 없으면 title 자동탐지.
+  _setAudioDuration(graph, durSec) {
+    const sec = Math.max(1, Math.round(Number(durSec) || 0));
+    const FIELDS = ['seconds', 'value', 'length', 'duration'];
+    const setOn = (n) => { if (!n || !n.inputs) return false; for (const f of FIELDS) { if (f in n.inputs && typeof n.inputs[f] !== 'object') { n.inputs[f] = sec; return true; } } return false; };
+    if (this.audioDurationNodeId && graph[this.audioDurationNodeId] && setOn(graph[this.audioDurationNodeId])) return sec;
+    for (const id of Object.keys(graph)) { const n = graph[id]; if (n.inputs && 'seconds' in n.inputs && typeof n.inputs.seconds !== 'object') { n.inputs.seconds = sec; return sec; } }
+    for (const id of Object.keys(graph)) { const n = graph[id]; if (!n.inputs) continue; const t = ((n._meta && n._meta.title) || '').toLowerCase(); if (/duration|length|seconds|길이/.test(t) && setOn(n)) return sec; }
+    return sec;
+  }
+  // ACE-Step 워크플로 로드 + tags(스타일)/lyrics(가사)/길이/seed 주입.
+  _buildAudioWorkflow(tags, lyrics, durSec) {
+    let wf = JSON.parse(fs.readFileSync(this.audioWorkflowPath, 'utf8'));
+    if (wf.nodes && !wf['1'] && typeof wf.nodes === 'object') throw new Error('UI 포맷 워크플로입니다. "저장(API 포맷)"으로 저장하세요.');
+    const graph = JSON.parse(JSON.stringify(wf));
+    const setText = (id, keys, val) => { const inp = id && graph[id] && graph[id].inputs; if (!inp) return false; for (const k of keys) { if (k in inp && typeof inp[k] !== 'object') { inp[k] = String(val); return true; } } return false; };
+    let tagsDone = this.audioTagsNodeId ? setText(this.audioTagsNodeId, ['tags', 'text'], tags) : false;
+    let lyricsDone = this.audioLyricsNodeId ? setText(this.audioLyricsNodeId, ['lyrics', 'text'], lyrics || '') : false;
+    // 자동탐지 — 'tags' 입력을 가진 노드(TextEncodeAceStepAudio)에 tags·lyrics 주입.
+    if (!tagsDone || !lyricsDone) {
+      for (const id of Object.keys(graph)) {
+        const inp = graph[id].inputs || {};
+        if (!tagsDone && 'tags' in inp && typeof inp.tags !== 'object') { inp.tags = String(tags); tagsDone = true; }
+        if (!lyricsDone && 'lyrics' in inp && typeof inp.lyrics !== 'object') { inp.lyrics = String(lyrics || ''); lyricsDone = true; }
+        if (tagsDone && lyricsDone) break;
+      }
+    }
+    // tags 노드 못 찾으면 CLIPTextEncode 첫 텍스트 노드에 태그 주입(폴백)
+    if (!tagsDone) {
+      const pId = Object.keys(graph).find((id) => graph[id].class_type === 'CLIPTextEncode' && 'text' in (graph[id].inputs || {}));
+      if (pId) { graph[pId].inputs.text = String(tags); tagsDone = true; }
+    }
+    if (durSec) this._setAudioDuration(graph, durSec);
+    for (const id of Object.keys(graph)) { const inp = graph[id].inputs || {}; const rnd = Math.floor(Math.random() * 1e15); if (typeof inp.seed === 'number') inp.seed = rnd; if (typeof inp.noise_seed === 'number') inp.noise_seed = rnd; }
+    if (!tagsDone) throw new Error('스타일(tags) 노드를 찾지 못했습니다 — ⚙ Comfy 에서 태그 노드 ID를 지정하세요.');
+    return graph;
+  }
+  async _waitAudio(promptId, abortSignal) {
+    if (this.cloud) return this._waitCloud(promptId, abortSignal, this.audioTimeoutSec, 'audio');
+    const deadline = Date.now() + this.audioTimeoutSec * 1000;
+    while (Date.now() < deadline) {
+      if (abortSignal && abortSignal()) { try { await fetch(this._url('/interrupt'), { method: 'POST', headers: this._headers() }); } catch {} throw new Error('중단됨'); }
+      await new Promise((res) => setTimeout(res, 1500));
+      let hist;
+      try { const r = await fetch(this._url(`/history/${promptId}`)); if (!r.ok) continue; hist = await r.json(); } catch { continue; }
+      const entry = hist && hist[promptId];
+      if (!entry) continue;
+      if (entry.status && entry.status.status_str === 'error') throw new Error('ComfyUI 실행 오류');
+      const outputs = entry.outputs || {};
+      const au = this._scanMedia(outputs, 'audio');
+      if (au) return au;
+      if (Object.keys(outputs).length) throw new Error('출력에 오디오가 없습니다 — SaveAudio(MP3/FLAC) 출력 노드를 확인하세요.');
+    }
+    throw new Error(`타임아웃 (${this.audioTimeoutSec}초)`);
+  }
+  // 오디오 다운로드 — ComfyUI 출력 확장자(mp3/flac 등)를 보존해 저장. 실제 저장 경로 반환.
+  async _downloadAudio(au, outputPath) {
+    const q = new URLSearchParams({ filename: au.filename, subfolder: au.subfolder || '', type: au.type || 'output' });
+    const r = await fetch(this._url('/view') + '?' + q.toString(), { headers: this._headers() });
+    if (!r.ok) throw new Error(`/view 다운로드 실패 (${r.status})`);
+    const srcExt = (path.extname(au.filename || '') || '.mp3').toLowerCase();
+    const finalPath = outputPath.replace(/\.[^.]+$/, '') + srcExt;
+    fs.writeFileSync(finalPath, Buffer.from(await r.arrayBuffer()));
+    return finalPath;
+  }
+  /**
+   * 스타일(tags) + 가사(lyrics) → 음악 1곡(ACE-Step). 성공 시 { success:true, audioPath }.
+   */
+  async textToAudio({ tags, lyrics, durationSec, outputPath, abortSignal }) {
+    try {
+      if (!(await this.health())) return { success: false, error: `ComfyUI 연결 실패 (${this.baseUrl})` };
+      if (!this.audioWorkflowPath || !fs.existsSync(this.audioWorkflowPath)) {
+        return { success: false, error: 'ACE-Step 워크플로(API JSON)가 지정되지 않았습니다 — ⚙ Comfy 에서 지정하세요.' };
+      }
+      const graph = this._buildAudioWorkflow(tags, lyrics, durationSec);
+      this.log(`[Comfy] ACE-Step 큐 등록${durationSec ? ` (${Math.round(durationSec)}초)` : ''}…`);
+      const promptId = await this._queue(graph);
+      const au = await this._waitAudio(promptId, abortSignal);
+      const out = await this._downloadAudio(au, outputPath);
+      this.log(`[Comfy] 음악 완료 → ${path.basename(out)}`);
+      return { success: true, audioPath: out };
     } catch (e) {
       return { success: false, error: e.message };
     }

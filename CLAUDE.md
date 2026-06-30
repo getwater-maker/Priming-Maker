@@ -7,6 +7,20 @@
 **편별 Vrew 4.0.1 .vrew 파일**을 자동 생성하는 Electron 앱. PrimingFlow(D:\PrimingFlow)의 엔진을
 복사·재활용한 독립 클론.
 
+## 🎵 '플리' 모드 — ACE-Step 음악 생성 (2026-06-30)
+- 모드 토글이 **롱폼/쇼츠/🎵플리** 3-way. 라벨에서 "16:9·9:16" 표기 제거. 플리는 ACE-Step(ComfyUI) 음악 전용.
+- **흐름**: 클로드가 채팅에서 **플리 스펙(.md)** 생성 → 앱 「🎵 플리 스펙 열기」로 로드 → ⚡ 음악 전체 생성 →
+  곡마다 **로컬 ComfyUI ACE-Step API**(comfy-engine `textToAudio`) → `<출력폴더>/플리/<스펙명>/NN_제목.mp3`. TTS·자막·.vrew 없음.
+- 스펙 형식: `core/parsers/playlist-parser.js`(`## NN · 제목` + tags/스타일 · lyrics/가사 · length/길이). 예시: `docs/플리-스펙-예시.md`.
+  연주곡 = 가사 빈값/`(instrumental)`/`(연주곡)`. `instrumental` 태그는 tags 에 포함.
+- ComfyUI: `comfy-config` 에 `audioWorkflowPath`·audioTagsNodeId·audioLyricsNodeId·audioDurationNodeId·audioTimeoutSec 추가.
+  comfy-engine `_buildAudioWorkflow`(tags→TextEncodeAceStepAudio.tags, lyrics, seconds 자동탐지) + `_waitAudio` + `_downloadAudio`(출력 확장자 보존).
+  ⚙ Comfy 모달에 "🎵 음악(ACE-Step)" 섹션. **이미지(Krea2)·영상(LTX)와 같은 REST 패턴** — 워크플로 JSON 1개만 "저장(API 포맷)"으로 지정.
+- main.js: `S.modes.playlist` 큐 추가, `normMode`(3-way), `currentDTO`/`playlistDTO`, IPC `open-playlist-spec`·`make-playlist`,
+  워크스페이스 직렬화/복원 3-way. 플리는 .smproj 스냅샷 스킵(워크스페이스+스펙.md 가 진실). App.jsx `PlaylistView` + `isPl` 분기.
+- ⏳ **실측 필요**: ACE-Step "API 포맷" 워크플로 JSON 이 있어야 실제 생성됨(없으면 graceful 에러). 노드 자동탐지 구조는 실제 워크플로로 1회 검증 필요.
+  미설정/실패는 이미지·영상과 동일하게 {success:false} 로 안전 처리. 음악 품질 검증(ACE-Step 1곡) 후 워크플로 export 가 선행.
+
 ## 🐞 쇼츠 9:16 .vrew = 화면비 가로로 표시 + 내보내기 실패 — 실제 원인 2가지 (2026-06-24)
 > ⚠️ 이전의 "videoRatio 역수" 진단은 **오진**이었음. videoRatio 는 화면비와 무관한 상수(정상 .vrew 는
 >   16:9·9:16 모두 **0.5625**). 사용자 정답본(make1.vrew = 프로그램 .vrew 를 9:16 으로 직접 수정) 정밀 비교로 확정.
