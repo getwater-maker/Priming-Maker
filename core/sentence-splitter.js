@@ -224,7 +224,9 @@ function splitHybrid(text) {
   // 블록: { mode, isIntro, sectionTitle, lines, imagePrompt, videoPrompt }
   const blocks = [];
   let introRegion = false;  // H1/H2 '도입' 영역 여부 — H3+ 는 이 값을 상속
-  const newBlock = (o) => ({ mode: 'md', isIntro: false, sectionTitle: null, lines: [], imagePrompt: null, videoPrompt: null, ...o });
+  let h2Idx = 0;            // H1/H2 마다 증가 — 'h2' 분할의 섹션 키 (H3+ 는 상위 H2 유지)
+  let h2Title = '';         // 가장 최근 H1/H2 제목 — h2 그룹 라벨용
+  const newBlock = (o) => ({ mode: 'md', isIntro: false, sectionTitle: null, h2Key: h2Idx, h2Title, lines: [], imagePrompt: null, videoPrompt: null, ...o });
   let cur = newBlock({});
   const flush = () => {
     if (cur.lines.length > 0 || cur.mode === 'bracket') blocks.push(cur);
@@ -244,8 +246,8 @@ function splitHybrid(text) {
       cur = newBlock({ mode: 'bracket', sectionTitle: bracketM[1].trim() });
     } else if (headerM) {
       flush();
-      // H1/H2 가 도입 영역을 토글, H3+ 는 상위 영역(도입부) 유지 → '## 도입부' 아래 '### …' 들도 도입부.
-      if (headerM[1].length <= 2) introRegion = /도입/.test(headerM[2]);
+      // H1/H2 가 도입 영역 토글 + h2 섹션 키·제목 갱신, H3+ 는 상위 H2 값을 상속.
+      if (headerM[1].length <= 2) { introRegion = /도입/.test(headerM[2]); h2Idx++; h2Title = headerM[2].trim(); }
       // 마크다운 헤더(섹션명)는 sectionTitle 로 보존 → 그룹 배지에 섹션 내용 표시.
       cur = newBlock({ mode: 'md', isIntro: introRegion, sectionTitle: headerM[2].trim() });
     } else {
@@ -266,6 +268,8 @@ function splitHybrid(text) {
         mode: blk.mode,
         isIntro: blk.isIntro,
         sectionTitle: blk.sectionTitle,
+        h2Key: blk.h2Key,       // 상위 H2 섹션 키 (h2 분할용)
+        h2Title: blk.h2Title,   // 상위 H2 제목 (h2 그룹 라벨)
         // 섹션 프롬프트는 첫 문장에만 부착(그룹 대표). 그룹화 단계가 그룹별로 흡수.
         imagePrompt: i === 0 ? blk.imagePrompt : null,
         videoPrompt: i === 0 ? blk.videoPrompt : null,

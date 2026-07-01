@@ -2281,12 +2281,13 @@ ipcMain.handle('set-aspect', (_e, value) => {
 ipcMain.handle('resplit', (_e, args = {}) => {
   if (!S.parsed || !S.scriptPath) throw new Error('대본을 먼저 여세요.');
   if (currentMode() !== 'longform') return P.toDTO(S.parsed);
-  const splitMode = args.splitMode === 'sentence' ? 'sentence' : 'h3';
+  const splitMode = (args.splitMode === 'sentence' || args.splitMode === 'h2') ? args.splitMode : 'h3';
   const th = { introSentenceSize: args.intro, mainSentenceSize: args.main, shortLen: args.short, longLen: args.long, splitMode };
   S.parsed = P.parseScript(S.scriptPath, 'longform', th);
   storeActive();
   const g = S.parsed.projects[0] ? S.parsed.projects[0].groups.length : 0;
-  log(`🔁 롱폼 재분할(${splitMode === 'h3' ? 'H3 섹션' : '문장'}): 도입부 ${args.intro} · 본론 ${args.main} · 짧은 ${args.short} · 긴 ${args.long} → 그룹 ${g}개`);
+  const smLabel = splitMode === 'h3' ? 'H3 섹션' : splitMode === 'h2' ? 'H2 섹션' : '문장';
+  log(`🔁 롱폼 재분할(${smLabel}): 도입부 ${args.intro} · 본론 ${args.main} · 짧은 ${args.short} · 긴 ${args.long} → 그룹 ${g}개`);
   return P.toDTO(S.parsed);
 });
 

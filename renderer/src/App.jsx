@@ -189,7 +189,7 @@ export default function App() {
       setStyleId(st || p.styleId || 'chibi');
       setAiNotice(mode === 'longform'); // AI 고지 기본값: 롱폼 ON · 쇼츠 OFF (사용자가 토글로 변경)
       const sl = p.split || { introSentenceSize: p.introSentenceSize, mainSentenceSize: p.mainSentenceSize, shortLen: p.shortLen, longLen: p.longLen };
-      setSplitOpts({ intro: sl.introSentenceSize || 3, main: sl.mainSentenceSize || 10, short: sl.shortLen || 10, long: sl.longLen || 20, mode: sl.splitMode === 'sentence' ? 'sentence' : 'h3' });
+      setSplitOpts({ intro: sl.introSentenceSize || 3, main: sl.mainSentenceSize || 10, short: sl.shortLen || 10, long: sl.longLen || 20, mode: sl.splitMode === 'sentence' ? 'sentence' : (sl.splitMode === 'h2' ? 'h2' : 'h3') });
     }).catch(() => {});
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -711,7 +711,7 @@ export default function App() {
       speedShort: p.speedShort != null ? p.speedShort : (sh.defaultTtsSpeed != null ? sh.defaultTtsSpeed : 1.25),
       styleLong: p.styleLong || p.styleId || 'chibi', styleShort: p.styleShort || p.styleId || 'chibi',
       outLong: p.outLong || p.outputFolder || '', outShort: p.outShort || p.outputFolder || '',
-      split: { intro: sl.introSentenceSize || 3, main: sl.mainSentenceSize || 10, short: sl.shortLen || 10, long: sl.longLen || 20, mode: sl.splitMode === 'sentence' ? 'sentence' : 'h3' },
+      split: { intro: sl.introSentenceSize || 3, main: sl.mainSentenceSize || 10, short: sl.shortLen || 10, long: sl.longLen || 20, mode: sl.splitMode === 'sentence' ? 'sentence' : (sl.splitMode === 'h2' ? 'h2' : 'h3') },
       _raw: p,
     });
     setChOpen(true);
@@ -741,7 +741,7 @@ export default function App() {
       styleLong: ch.styleLong, styleShort: ch.styleShort,
       outLong: (ch.outLong || '').trim(), outShort: (ch.outShort || '').trim(),
       // 분할옵션(롱폼)
-      split: { introSentenceSize: numOr(ch.split.intro, 3), mainSentenceSize: numOr(ch.split.main, 10), shortLen: numOr(ch.split.short, 10), longLen: numOr(ch.split.long, 20), splitMode: ch.split.mode === 'h3' ? 'h3' : 'sentence' },
+      split: { introSentenceSize: numOr(ch.split.intro, 3), mainSentenceSize: numOr(ch.split.main, 10), shortLen: numOr(ch.split.short, 10), longLen: numOr(ch.split.long, 20), splitMode: ch.split.mode === 'h2' ? 'h2' : (ch.split.mode === 'sentence' ? 'sentence' : 'h3') },
       aiNotice: { ...((ch._raw && ch._raw.aiNotice) || {}), enabled: !!ch.aiNotice },
     };
     if (ch.seed !== '' && ch.seed != null) patch.seed = parseInt(ch.seed, 10);
@@ -772,8 +772,8 @@ export default function App() {
         {withSplit && (
           <>
             <div className="crow" style={{ borderTop: '1px solid var(--line)', paddingTop: 6, marginTop: 6 }}><span className="l" style={{ color: 'var(--hook)' }}>✂ 분할</span><span className="meta">대본 분할 기준</span></div>
-            <div className="crow"><span className="l">방식</span><select value={ch.split.mode === 'sentence' ? 'sentence' : 'h3'} onChange={(e) => setSplitField('mode', e.target.value)}><option value="h3">H3 섹션 단위</option><option value="sentence">문장 단위</option></select>
-              <span className="meta">{ch.split.mode === 'sentence' ? '도입부/본론을 문장수로' : 'H3 1개=그룹 1개'}</span></div>
+            <div className="crow"><span className="l">방식</span><select value={ch.split.mode === 'sentence' ? 'sentence' : (ch.split.mode === 'h2' ? 'h2' : 'h3')} onChange={(e) => setSplitField('mode', e.target.value)}><option value="h3">H3 섹션 단위</option><option value="h2">H2 섹션 단위</option><option value="sentence">문장 단위</option></select>
+              <span className="meta">{ch.split.mode === 'sentence' ? '도입부/본론을 문장수로' : ch.split.mode === 'h2' ? 'H2 1개=그룹 1개 (H3 모두 묶음)' : 'H3 1개=그룹 1개'}</span></div>
             {ch.split.mode === 'sentence' && (
               <div className="crow"><span className="l">도입부</span><input className="n" type="number" value={ch.split.intro} onChange={(e) => setSplitField('intro', e.target.value)} />
                 <span className="l">본론</span><input className="n" type="number" value={ch.split.main} onChange={(e) => setSplitField('main', e.target.value)} /></div>
@@ -919,14 +919,14 @@ export default function App() {
   const splitBar = isLf ? (
     <span className="splitbar" title="값 변경 시 자동 재분할 (TTS/이미지 초기화됨)">
       <span className="lab">✂ 분할</span>
-      <select title="분할 방식 — H3 섹션 단위 / 문장 단위" value={splitOpts.mode} onChange={(e) => changeSplit('mode', e.target.value)}><option value="h3">H3</option><option value="sentence">문장</option></select>
-      {splitOpts.mode !== 'h3' && (<>
+      <select title="분할 방식 — H3 섹션 / H2 섹션(그 아래 H3 모두 묶음) / 문장 단위" value={splitOpts.mode} onChange={(e) => changeSplit('mode', e.target.value)}><option value="h3">H3</option><option value="h2">H2</option><option value="sentence">문장</option></select>
+      {splitOpts.mode === 'sentence' && (<>
         도입부 <input type="number" value={splitOpts.intro} onChange={(e) => changeSplit('intro', e.target.value)} />
         본론 <input type="number" value={splitOpts.main} onChange={(e) => changeSplit('main', e.target.value)} />
       </>)}
       짧은 <input type="number" value={splitOpts.short} onChange={(e) => changeSplit('short', e.target.value)} />
       긴 <input type="number" value={splitOpts.long} onChange={(e) => changeSplit('long', e.target.value)} />
-      {splitOpts.mode !== 'h3' && <button className="ghost introvid" disabled={!loaded} title="도입부 문장만 TTS 후 10초 기준으로 도입부 그룹 재배치" onClick={runIntroVideo}>🎬 도입부 TTS+10초 재배치</button>}
+      {splitOpts.mode === 'sentence' && <button className="ghost introvid" disabled={!loaded} title="도입부 문장만 TTS 후 10초 기준으로 도입부 그룹 재배치" onClick={runIntroVideo}>🎬 도입부 TTS+10초 재배치</button>}
     </span>
   ) : null;
 

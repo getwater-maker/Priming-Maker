@@ -33,9 +33,8 @@ function _thresholds(over = {}) {
     vrewMaxChars: num(over.longLen, 20),
     introSentenceSize: num(over.introSentenceSize, 2),
     mainSentenceSize: num(over.mainSentenceSize, g.groupSize || 3),
-    // 분할방식 — 'h3'(H3 섹션 1개=그룹 1개, 기본) / 'sentence'(문장수 그룹화).
-    //   h3: 도입부·본문 모두 섹션 단위. sentence: 도입부 introSentenceSize·본문 mainSentenceSize.
-    splitMode: over.splitMode === 'sentence' ? 'sentence' : 'h3',
+    // 분할방식 — 'h3'(기본, H3 섹션 1개=그룹) / 'h2'(H2 섹션=그룹, 그 아래 H3 모두 포함) / 'sentence'(문장수).
+    splitMode: (over.splitMode === 'sentence' || over.splitMode === 'h2') ? over.splitMode : 'h3',
     // 도입부 글자수 캡 해제 — 도입부 문장수(introSentenceSize)가 그룹을 결정하도록.
     //   (시간 기준 묶음은 '도입부 TTS+10초 재배치' 가 별도 담당)
     introMaxChars: 100000,

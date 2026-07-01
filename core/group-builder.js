@@ -357,9 +357,9 @@ function buildGroupsHybrid(items, thresholds) {
   const vrewMaxChars = thresholds.vrewMaxChars || longLen;
   const disableLongSplit = !!thresholds.disableLongSplit;
   const introMaxChars = thresholds.introMaxChars || INTRO_MAX_CHARS_DEFAULT;
-  // 본문 분할방식 — 'h3': H3(섹션) 1개=그룹 1개 / 'sentence'(기본): 문장수로 그룹화.
-  //   도입부는 두 방식 공통으로 문장 단위 그룹화(introSentenceSize). 섹션 경계는 sectionChanged 가 처리.
-  const splitMode = thresholds.splitMode === 'h3' ? 'h3' : 'sentence';
+  // 본문 분할방식 — 'h3'(기본): H3 섹션 1개=그룹 1개 / 'h2': H2 섹션(그 아래 H3 모두 포함) 1개=그룹 1개 / 'sentence': 문장수로 그룹화.
+  //   섹션 경계는 sectionChanged 가 처리(h3=H3제목 변화 / h2=상위 H2 변화).
+  const splitMode = (thresholds.splitMode === 'h3' || thresholds.splitMode === 'h2') ? thresholds.splitMode : 'sentence';
 
   const sid = makeSentenceIder();
   const sentences = items.map((item, i) => {
@@ -368,6 +368,8 @@ function buildGroupsHybrid(items, thresholds) {
     s.isLong = s.charCount > longLen;
     s.isIntro = !!item.isIntro;
     s.sectionTitle = item.sectionTitle || null;
+    s._h2Key = item.h2Key;              // 상위 H2 섹션 키 (h2 분할)
+    s._h2Title = item.h2Title || null;  // 상위 H2 제목 (h2 그룹 라벨)
     s.mode = item.mode;
     s._imagePrompt = item.imagePrompt || null;   // 대본 내 프롬프트(섹션 첫 문장에만) — 그룹이 흡수
     s._videoPrompt = item.videoPrompt || null;
@@ -382,6 +384,7 @@ function buildGroupsHybrid(items, thresholds) {
   let currentIntroChars = 0;       // md-intro 그룹 누적 의미문자 수
   let currentMode = null;          // 'md-intro' | 'md-main' | 'bracket'
   let currentSectionTitle = null;
+  let currentH2Key = null;         // 현재 그룹의 상위 H2 섹션 키 (h2 분할)
 
   const targetModeOf = (s) => {
     if (s.mode === 'bracket') return 'bracket';
@@ -393,12 +396,13 @@ function buildGroupsHybrid(items, thresholds) {
     currentGroup = new Group({ num: gNum, sentenceIds: [] });
     currentGroup.isIntro = !!s.isIntro;
     currentGroup.isBracket = s.mode === 'bracket';
-    currentGroup.title = s.sectionTitle || null;
+    currentGroup.title = (splitMode === 'h2' && s._h2Title) ? s._h2Title : (s.sectionTitle || null);
     groups.push(currentGroup);
     currentCount = 0;
     currentIntroChars = 0;
     currentMode = targetModeOf(s);
     currentSectionTitle = s.sectionTitle || null;
+    currentH2Key = s._h2Key;
   };
 
   // 섹션 프롬프트(첫 문장)를 그룹에 흡수 — 그룹 첫 보유 프롬프트 우선.
@@ -409,9 +413,12 @@ function buildGroupsHybrid(items, thresholds) {
 
   for (const s of sentences) {
     const tm = targetModeOf(s);
-    const sectionChanged = (s.sectionTitle !== currentSectionTitle);
-    // 섹션 경계로 그룹을 끊는 건 h3·대괄호 모드뿐. 문장 모드는 섹션(H3)을 무시하고 문장수로만 묶음.
-    const breakOnSection = sectionChanged && (splitMode === 'h3' || s.mode === 'bracket');
+    // 섹션 변화 판정 — h2 모드는 상위 H2 키로, 그 외(h3·문장)는 H3 제목으로. 대괄호는 항상 제목 기준.
+    const sectionChanged = (s.mode !== 'bracket' && splitMode === 'h2')
+      ? (s._h2Key !== currentH2Key)
+      : (s.sectionTitle !== currentSectionTitle);
+    // 섹션 경계로 그룹을 끊는 건 h3·h2·대괄호 모드. 문장 모드는 섹션을 무시하고 문장수로만 묶음.
+    const breakOnSection = sectionChanged && (splitMode === 'h3' || splitMode === 'h2' || s.mode === 'bracket');
 
     if (!currentGroup || currentMode !== tm || breakOnSection) {
       startNewGroup(s);
@@ -424,8 +431,8 @@ function buildGroupsHybrid(items, thresholds) {
       // 대괄호: 같은 섹션의 모든 문장을 흡수, 사이즈 무시
       currentGroup.sentenceIds.push(s.id);
       s.groupId = currentGroup.id;
-    } else if (splitMode === 'h3') {
-      // h3 모드: 도입부·본문 모두 같은 H3 섹션의 모든 문장을 한 그룹에 (사이즈 무시).
+    } else if (splitMode === 'h3' || splitMode === 'h2') {
+      // h3/h2 모드: 같은 섹션(H3 / 상위 H2)의 모든 문장을 한 그룹에 (사이즈 무시).
       //   섹션이 바뀌면 위의 sectionChanged 가 이미 새 그룹을 시작했음.
       currentGroup.sentenceIds.push(s.id);
       s.groupId = currentGroup.id;
