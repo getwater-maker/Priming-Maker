@@ -1055,7 +1055,9 @@ export default function App() {
         <main>
           {isPl ? (
             <PlaylistView dto={dto} onMakeOne={(num) => runMakePlaylist(num)}
-              onPreview={(src) => setPreview({ kind: 'audio', src })} />
+              onPreview={(src) => setPreview({ kind: 'audio', src })}
+              onPreviewMedia={(kind, src) => setPreview({ kind, src })}
+              onAttachBg={attachPlBg} onClearBg={clearPlBg} />
           ) : (<>
           {queue && queue[mode] && queue[mode].items.length > 0 && (
             <div className="qstrip">
@@ -1443,11 +1445,18 @@ export default function App() {
       setStatus('배경+.vrew 완료');
     } catch (e) { logline('배경/​.vrew 오류: ' + e.message); }
   }
+  // 플리 배경 이미지/영상 첨부·삭제 (전 곡 공통 배경).
+  async function attachPlBg() {
+    try { const d = await api.playlistAttachBg(); if (d) setDto(d); setStatus('배경 첨부'); } catch (e) { logline('배경 첨부 오류: ' + e.message); }
+  }
+  async function clearPlBg() {
+    try { const d = await api.playlistClearBg(); if (d) setDto(d); setStatus('배경 삭제'); } catch (e) { logline('배경 삭제 오류: ' + e.message); }
+  }
 }
 
 // ── 플리(ACE-Step 음악) 화면 ──────────────────────────────
 const PL_STATUS = { idle: '대기', generating: '생성중…', done: '완료', fail: '실패' };
-function PlaylistView({ dto, onMakeOne, onPreview }) {
+function PlaylistView({ dto, onMakeOne, onPreview, onPreviewMedia, onAttachBg, onClearBg }) {
   if (!dto || dto.kind !== 'playlist' || !dto.tracks.length) {
     return (
       <div className="plempty">
@@ -1464,7 +1473,16 @@ function PlaylistView({ dto, onMakeOne, onPreview }) {
         {dto.concept ? <span className="meta">{dto.concept}</span> : null}
         <span className="meta">· {dto.tracks.length}곡</span>
       </div>
-      <div className="pltracks">
+      <div className="plmain" style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
+        <div className="plbg" style={{ flex: '0 0 auto', width: 230, position: 'sticky', top: 0 }}>
+          <div className="lab" style={{ fontWeight: 600, marginBottom: 6 }}>🎬 배경 (전 곡 공통)</div>
+          <Thumb c={{ videoPath: dto.bgVideoPath, imagePath: dto.bgImagePath }} isLf={true}
+            onAttach={onAttachBg} onClear={onClearBg} onPreview={onPreviewMedia || onPreview} />
+          <div className="meta" style={{ marginTop: 6, fontSize: 12, lineHeight: 1.45 }}>
+            클릭해 이미지/영상 첨부(＋) · 삭제(✕).<br />첨부하면 그걸 배경으로, 비우면 컨셉으로 자동 생성합니다.
+          </div>
+        </div>
+        <div className="pltracks" style={{ flex: 1 }}>
         {dto.tracks.map((t) => (
           <div key={t.num} className={'pltrack s-' + t.status}>
             <div className="plnum">{String(t.num).padStart(2, '0')}</div>
@@ -1485,6 +1503,7 @@ function PlaylistView({ dto, onMakeOne, onPreview }) {
             </div>
           </div>
         ))}
+        </div>
       </div>
     </div>
   );
