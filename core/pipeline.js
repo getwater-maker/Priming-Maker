@@ -278,6 +278,7 @@ async function buildProjectVrew(project, vrewPath, preset, logger, captionMaxCha
     if (preset.captionStyle) opts.captionStyle = preset.captionStyle;
     if (preset.aiNotice && preset.aiNotice.enabled) opts.aiNotice = preset.aiNotice;
     if (preset.disableLongSplit != null) opts.disableLongSplit = preset.disableLongSplit;
+    if (preset.bgm && preset.bgm.enabled && preset.bgm.audioPath) opts.bgm = preset.bgm; // 배경음(BGM) 트랙
   }
   // 제목(훅) 상단 고정 — 편별 titleLine1/2 + 줄별 스타일
   const l1 = project.titleLine1 != null ? project.titleLine1 : (project.hookCaption || '');

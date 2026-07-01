@@ -1,5 +1,5 @@
 {
-  "version": "0.1.49",
+  "version": "0.1.50",
   "deps": "3a5115dcd9e379dc8abaabe10ad1041adcaf5828",
   "files": {
     "AGENTS.md": "1a0fd73c104ff40f5cce110a3ffac07a7aa77205",
@@ -23,12 +23,12 @@
     "core/long-sentence-splitter/algo-splitter.js": "223ffcc4ddd7e8de6f93e9c4733389a88e44372b",
     "core/lora-collect.js": "800cac049d6f8596a0aa95b448d6e4d47f766346",
     "core/media-cache.js": "8872f0c9bce66054bf8e6c54dd934af1b5aada71",
-    "core/media-utils.js": "9c0107c81259ca8f57cc66f1eb0d4407ef36b35e",
+    "core/media-utils.js": "7bf5b41f3a6e47448ce1485874504f1678417c36",
     "core/mode-profiles.js": "b792d0d998e5b582a7d590329a53925a19752e03",
     "core/ollama-config.js": "73d42a2f2c3e45df9b351c68e90f438066161f9a",
     "core/parsers/longform-parser.js": "b90ec46285c4fa325222321d0d906b7084eceecb",
     "core/parsers/playlist-parser.js": "33b137a661094beaa47a03258fda524478f2ec0d",
-    "core/pipeline.js": "38dcd9907eb8ab691135e6aed16a9153b75faaf1",
+    "core/pipeline.js": "3af395fb8bc3d0890b71178bb8613515b2a49e5c",
     "core/playlist-video.js": "778de9f558cd66934fd944f3eb32611fabfc1828",
     "core/project-model.js": "7c31feb413dbae38b8f683f1a56975ac36b0cf13",
     "core/prompt-io.js": "cb429515d67ef5ebf8f254e4fc8d92279b95b81c",
@@ -47,13 +47,13 @@
     "image/image-manager.js": "d0813dac4ce63498592b8037d5ccd81f3e59ea81",
     "image/providers/gemini-image-provider.js": "cf341221315558eeb1676b4279270976684389d2",
     "light-updater.js": "c9be26807112942a9cf4a88dfcd14a1004634762",
-    "main.js": "5f6396226e6f84df4e4f17dfea4c758cae097506",
+    "main.js": "d162a4b379ef2f4f26c11d4f0f1368a8fb273875",
     "package-lock.json": "2b2cb85d9cd416d71e5bc6ba63b49bbec1302108",
-    "package.json": "7f6ccacd184d711815568a79c1a5cfaea7d9f4a1",
+    "package.json": "30a1630743f55c0b254212aae591d158ad175a1f",
     "preload.js": "24e48b779beb2229a3270ca5e5d5b5cc40bbd92f",
     "renderer/dist/assets/index-6rrkoj3Y.css": "4cfcc1b4b080a7b9882b3e21a173e8d8fd7ee078",
-    "renderer/dist/assets/index-CQ386tP6.js": "a1cfb94f4739a2ec485a83c5cb22fe74a58eff16",
-    "renderer/dist/index.html": "918b059aa679e3b3ac39708bfebd2f7ff1dd0414",
+    "renderer/dist/assets/index-DA8TciJV.js": "092358bbdbc962479b1b0aee0dec7b715a479eee",
+    "renderer/dist/index.html": "cce1863f699fc67611d74af885f7afd9d061b598",
     "renderer/index.html": "11a8eca1c5cc6c227f210236f7b09853e35ad73b",
     "tts/asr-client.js": "4f548bdd8e5e7f41ab4b7090e4ee86c1695a77d0",
     "tts/gemini-usage-store.js": "8d0948c2b8a0116d5465f3b6ee2be410bd9be68d",
@@ -74,7 +74,7 @@
     "vrew/dummy/shape-square.vbin": "7915d4dcdcd7572c4a988ef773ea5bd0a927dc8e",
     "vrew/dummy/uc-0010-simple-textbox.bin": "24d897751b391f868b8bcfb5159a0da4f2abc9b7",
     "vrew/dummy/uc-0010-simple-textbox.meta.json": "ba3a41513c2bb7efff3802d219c754ce9b181e43",
-    "vrew/vrew-builder.js": "4eb7d8f9f18de0357c1705430cb85dbb582f1683",
+    "vrew/vrew-builder.js": "476a362fa484992860199312e74fc70222171c1c",
     "vrew-template.json": "7df033330328143fbc9211ca92eb2063c6cace65"
   }
 }

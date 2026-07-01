@@ -708,6 +708,47 @@ function validateOutput(pj, sentenceCount, imageGroupCount) {
   return { errs, warns };
 }
 
+// ── 배경음(BGM) 트랙 — 영상 전체 길이에 걸쳐 나레이션 아래 낮은 볼륨으로 재생 ──
+//   ⏳ 실측 검증 필요: Vrew 가 독립 오디오 트랙에 기대하는 정확한 JSON 미확정.
+//   확인된 패턴(videoAudio 트랙 :917-921 · TTS AVMedia 등록 :1034-1042 · AI고지 startDelay 절대배치)으로 구성.
+//   Vrew 에서 BGM 이 안 뜨면, BGM 을 수동으로 넣은 .vrew 샘플을 받아 files/tracks/assets 필드를 확정한다.
+//   bgm = { audioPath, volume(0..1), loop, startDelayMs(=0) }
+async function addBgmTrack(pj, bgm, totalDurationSec, mediaZip, log) {
+  if (!bgm || !bgm.audioPath || !fs.existsSync(bgm.audioPath)) return null;
+  let fileDur = totalDurationSec;
+  try { const info = await require('../core/media-utils').getMediaInfo(bgm.audioPath); if (info.durationSec) fileDur = info.durationSec; } catch {}
+  const mid = uid();
+  const ext = (path.extname(bgm.audioPath) || '.mp3').replace(/^\./, '').toLowerCase();
+  const fn = `${mid}.${ext}`;
+  const bytes = fs.statSync(bgm.audioPath).size;
+  pj.files.push({
+    version: 1, mediaId: mid, sourceOrigin: 'USER',
+    fileSize: bytes, name: fn, type: 'AVMedia',
+    videoAudioMetaInfo: {
+      duration: fileDur,
+      audioInfo: { sampleRate: 44100, codec: ext === 'mp3' ? 'mp3' : ext, channelCount: 2 },
+    },
+    sourceFileType: 'ASSET_AUDIO', fileLocation: 'IN_MEMORY',
+  });
+  mediaZip.push({ src: bgm.audioPath, name: fn });
+
+  const tid = sid();
+  const aid = uid();
+  const vol = (typeof bgm.volume === 'number' && bgm.volume >= 0) ? bgm.volume : 0.15;
+  pj.props.tracks[tid] = {
+    trackId: tid, mediaId: mid,
+    volume: vol, sourceIn: 0, sourceOut: totalDurationSec,
+    loop: bgm.loop !== false, playbackRate: 1, type: 'videoAudio',
+    assetEffectInfo: { type: 'none', startDelay: bgm.startDelayMs || 0 },
+  };
+  pj.props.assets[aid] = { trackIds: [tid], role: 'sub' };
+  // 절대시간(startDelay 0) + loop → clip[0] 에만 링크해도 전체 타임라인 재생(AI고지와 동일 메커니즘).
+  const c0 = pj.transcript.clips[0];
+  if (c0) { if (!Array.isArray(c0.assetIds)) c0.assetIds = []; if (!c0.assetIds.includes(aid)) c0.assetIds.push(aid); }
+  log(`[Vrew] BGM 트랙 추가: vol=${vol} loop=${bgm.loop !== false} dur=${totalDurationSec.toFixed(0)}s (⏳ Vrew 실측 검증 필요)`);
+  return { mid, tid, aid };
+}
+
 async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
   const log = typeof opts.logger === 'function' ? opts.logger : () => {};
 
@@ -1210,6 +1251,16 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
       addAiNoticeTrack(pj, opts.aiNotice, clipDurations, log, _frameRatio);
     } catch (e) {
       log(`[Vrew] AI 고지 자막 추가 실패: ${e.message}`);
+    }
+  }
+
+  // ---------- 2.55. 배경음(BGM) 트랙 — 전체 길이, 나레이션 아래 낮은 볼륨 ----------
+  if (opts.bgm && opts.bgm.enabled && opts.bgm.audioPath) {
+    try {
+      const _bgmTotal = clipDurations.reduce((a, d) => a + (d || 0), 0);
+      await addBgmTrack(pj, opts.bgm, _bgmTotal, mediaZip, log);
+    } catch (e) {
+      log(`[Vrew] BGM 트랙 추가 실패: ${e.message}`);
     }
   }
 

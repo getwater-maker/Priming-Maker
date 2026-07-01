@@ -29,6 +29,22 @@
   면 영상 트랙 사용(line 844, 비율 무관). 영상 실패 시 이미지 배경으로 폴백. playlist-parser 에 bgPrompt 파싱 추가.
   ⏳ **실측 필요**: Vrew 에서 .vrew 정상 로드(배경 영상 트랙·곡별 길이 매칭)·LTX 480p 배경 화질(필요 시 업스케일 추가).
 
+## 🎵 롱폼/쇼츠 BGM(ACE-Step 배경음) 자동 삽입 (2026-07-01, v0.1.50)
+- 작업바 「🎵 BGM」 체크 + 무드칸(빈값=대본 자동). ⚡만들기 시 **3.5단계**(비디오 뒤·.vrew 앞, main.js runMakeAllCore)에서
+  편별 총길이(=ttsDurationSec 합) 계산 → `deriveBgmMood`(대본 무드 → ACE-Step 태그: **moodOverride 우선 → Ollama → Gemini →
+  기본값** `calm, cinematic, ambient, soft piano, slow tempo, warm, instrumental`) → `comfy-engine.textToAudio`(≤180s 생성)
+  → `media-utils.loopAudioTo`(총길이로 재인코딩 루프) → `pr._bgmPath`.
+- **음악만 로컬 서버**: `audioBaseUrl` 있으면 그 주소로(cloud:false), 이미지/영상은 클라우드 그대로 (플리 패턴 재사용).
+- .vrew 삽입: 4단계 ep 에 `bgm:{enabled,audioPath,volume(기본0.15),loop}` 부착 → `pipeline.buildProjectVrew` 가 `opts.bgm` 전달
+  → **`vrew-builder.addBgmTrack`**: AVMedia(sourceOrigin USER, sourceFileType ASSET_AUDIO) 등록 + `videoAudio` 타입 트랙
+  (volume 0.15, loop, sourceOut=총길이, assetEffectInfo.startDelay 0) + asset(role sub) → **clip[0] 에만 링크**(AI고지 절대배치와 동일).
+- UI(App.jsx): bgmOn/bgmMood 상태 + capbar 컨트롤 + make args `bgm`. 💾 재export 경로는 미포함(⚡만들기 전용). 롱폼·쇼츠 공통.
+- ⏳ **실측 검증 필요(중요)**: Vrew 가 **독립 오디오 BGM 트랙**에 기대하는 정확한 JSON 미확정 — `videoAudio` 는 원래 영상에 묶인
+  타입이라 best-effort. Vrew 에서 BGM 이 안 들리면 **BGM 수동 삽입한 .vrew 샘플을 받아 files/tracks/assets 필드 확정**
+  (자막·제목·도형 잡던 "사용자 .vrew 분석" 방식). 계획서: `~/.claude/plans/ace-step-prancy-planet.md`.
+- 🔜 **SFX(효과음)**: 이번 범위 제외. ACE-Step 은 음악 전용이라 효과음 불가 → 추후 로컬 SFX 라이브러리 + 대본 마커([효과음: …])
+  + `addSfxTrack`(startDelay 타임스탬프)로 별도 구현 예정.
+
 ## 🐞 쇼츠 9:16 .vrew = 화면비 가로로 표시 + 내보내기 실패 — 실제 원인 2가지 (2026-06-24)
 > ⚠️ 이전의 "videoRatio 역수" 진단은 **오진**이었음. videoRatio 는 화면비와 무관한 상수(정상 .vrew 는
 >   16:9·9:16 모두 **0.5625**). 사용자 정답본(make1.vrew = 프로그램 .vrew 를 9:16 으로 직접 수정) 정밀 비교로 확정.

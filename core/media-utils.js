@@ -203,6 +203,28 @@ async function segmentAudio(inPath, outDir, segmentSec, ext) {
   return files;
 }
 
+/**
+ * 오디오(mp3)를 targetSec 이상 길이로 반복 — BGM 을 영상 전체 길이에 맞춤.
+ * 이미 충분히 길면 원본 그대로 반환. 스트림 복사는 mp3 경계 글리치가 있어 재인코딩(libmp3lame).
+ * (core/playlist-video.js loopBoomerangTo 의 오디오 버전)
+ * @param {string} srcMp3
+ * @param {number} targetSec
+ * @param {(m:string)=>void} [log]
+ * @returns {Promise<string>} 루프된 파일 경로(또는 원본)
+ */
+async function loopAudioTo(srcMp3, targetSec, log = () => {}) {
+  if (!srcMp3 || !fs.existsSync(srcMp3)) return srcMp3;
+  const info = await getMediaInfo(srcMp3);
+  if (!info.durationSec || info.durationSec >= targetSec - 0.5) return srcMp3; // 이미 충분
+  const out = srcMp3.replace(/\.[^.]+$/i, '') + '_loop.mp3';
+  try {
+    await _runFfmpeg(['-y', '-stream_loop', '-1', '-i', srcMp3, '-t', String(Math.ceil(targetSec)),
+      '-c:a', 'libmp3lame', '-b:a', '192k', out]);
+    if (fs.existsSync(out)) { log(`🔁 BGM 루프 ${info.durationSec.toFixed(0)}s → ${Math.ceil(targetSec)}s`); return out; }
+  } catch (e) { log(`⚠ BGM 루프 실패(${e.message}) — 원본 사용`); }
+  return srcMp3;
+}
+
 module.exports = {
   getFfmpegPath,
   tmpFile,
@@ -211,4 +233,5 @@ module.exports = {
   extractAudioMp3,
   convertToRefWav,
   segmentAudio,
+  loopAudioTo,
 };

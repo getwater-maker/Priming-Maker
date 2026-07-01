@@ -1046,6 +1046,40 @@ async function autoFillPrompts(projects, logger) {
   } catch (e) { logger('프롬프트 자동 생성 실패: ' + e.message + ' (나레이션으로 진행)'); }
 }
 
+// 대본 → ACE-Step BGM 무드 태그. moodOverride(채널 수동값) 우선 → Ollama → Gemini → 기본값.
+const BGM_DEFAULT_MOOD = 'calm, cinematic, ambient, soft piano, slow tempo, warm, instrumental';
+async function deriveBgmMood(project, moodOverride, logger) {
+  if (moodOverride && String(moodOverride).trim()) return String(moodOverride).trim();
+  const PromptIO = require('./core/prompt-io');
+  const sample = [project.title || project.fileTitle || '', ...project.sentences.slice(0, 8).map((s) => s.text || '')].join(' ').slice(0, 800);
+  const req = [
+    '다음 영상 대본의 분위기에 어울리는 "배경음악 스타일"을 ACE-Step 태그로 만들어줘.',
+    '규칙: 쉼표로 구분된 영어 태그 한 줄만 출력(설명·따옴표·줄바꿈 금지). 반드시 instrumental 포함, 보컬 없음.',
+    '예: calm, cinematic, ambient piano, slow tempo, warm, instrumental',
+    '대본: ' + sample,
+  ].join('\n');
+  const sanitize = (t) => String(t || '').replace(/[\r\n]+/g, ' ').replace(/^\s*tags?\s*[:：]/i, '').replace(/^["'`\s]+|["'`\s]+$/g, '').trim();
+  const ensureInst = (t) => (/instrumental/i.test(t) ? t : `${t}, instrumental`);
+  // 1순위 Ollama
+  try {
+    const oc = require('./core/ollama-config').load();
+    const r = await ollamaTags(oc.baseUrl);
+    if (r.ok) {
+      const t = sanitize(await PromptIO.callLlmTextApi('ollama', '', req, { baseUrl: oc.baseUrl, model: oc.model }));
+      if (t) return ensureInst(t);
+    }
+  } catch (e) { logger('  BGM 무드 Ollama 실패: ' + e.message); }
+  // 2순위 Gemini
+  try {
+    let key = ''; try { key = (require('./tts/secret-store').get('gemini') || {}).key || ''; } catch {}
+    if (key.trim()) {
+      const t = sanitize(await PromptIO.callLlmTextApi('gemini', key, req));
+      if (t) return ensureInst(t);
+    }
+  } catch (e) { logger('  BGM 무드 Gemini 실패: ' + e.message); }
+  return BGM_DEFAULT_MOOD;
+}
+
 ipcMain.handle('image-build', async (_e, args = {}) => {
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
   const { shortsNum = null, engine = 'genspark', styleId = null } = args;
@@ -1565,7 +1599,7 @@ ipcMain.handle('load-project', async () => {
 //   make-all(단건)·run-batch(순차 큐)가 공용. opts.openVrew/openFolder 로 자동열기 제어(큐 실행 시 끔).
 async function runMakeAllCore(opts = {}) {
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
-  const { shortsNum = null, engine = 'genspark', presetName = null, speed = null, captionStyle = null, captionMaxChars = 7, styleId = null, fromNum = null, toNum = null, dry = false, videoEngine = 'grok', flowVideoModel = 'Veo 3.1 - Lite', flowCount = 'x1', clipMaxSec = null, aiNotice = false, openVrew = true, openFolder = true } = opts;
+  const { shortsNum = null, engine = 'genspark', presetName = null, speed = null, captionStyle = null, captionMaxChars = 7, styleId = null, fromNum = null, toNum = null, dry = false, videoEngine = 'grok', flowVideoModel = 'Veo 3.1 - Lite', flowCount = 'x1', clipMaxSec = null, aiNotice = false, bgm = null, openVrew = true, openFolder = true } = opts;
   const stylePrompt = styleId ? (require('./core/style-store').getPrompt(styleId) || '') : '';
   let preset = P.getPreset(presetName);
   // TTS 는 정속(1.0) — speed 값은 Vrew 배속(playbackRate)으로만 사용
@@ -1735,6 +1769,38 @@ async function runMakeAllCore(opts = {}) {
     }
   }
 
+  // ── 3.5단계: 배경음(BGM, ACE-Step) — 대본 무드 자동/수동 → 전체 길이 루프. (dry·중단·미설정이면 생략) ──
+  const bgmOn = !dry && bgm && bgm.enabled;
+  if (bgmOn && !S.abort) {
+    log('🎵 3.5단계 — 배경음(BGM) 생성…');
+    try {
+      const cfg = require('./core/comfy-config').load();
+      const acfg = (cfg.audioBaseUrl && cfg.audioBaseUrl.trim())
+        ? { ...cfg, cloud: false, apiKey: '', baseUrl: cfg.audioBaseUrl.trim() } // 음악만 로컬 서버 (플리 패턴)
+        : cfg;
+      const { ComfyEngine } = require('./comfy-engine');
+      const eng = new ComfyEngine(acfg, log);
+      if (!(await eng.health())) { log(`⚠ 음악 서버 연결 실패 (${acfg.baseUrl}) — BGM 없이 진행`); }
+      else {
+        const MU = require('./core/media-utils');
+        for (const pr of projects) {
+          if (S.abort) break;
+          const totalSec = pr.sentences.reduce((a, s) => a + (s.ttsDurationSec || 0), 0);
+          if (!totalSec) continue;
+          const tags = await deriveBgmMood(pr, bgm.moodOverride, log);
+          const dirs = shortsDirs(S.outRoot, pr.shortsNum);
+          const raw = path.join(dirs.media, `bgm_${vrewBaseName(pr)}.mp3`);
+          log(`  ▶ ${prLabel(pr)} BGM (${Math.round(totalSec)}초 분량, 무드: ${tags.slice(0, 50)})`);
+          const r = await eng.textToAudio({ tags, lyrics: '', durationSec: Math.min(Math.ceil(totalSec), 180), outputPath: raw, abortSignal: () => S.abort });
+          if (!r.success) { log(`  ⚠ BGM 생성 실패: ${r.error} — 이 편은 BGM 없이`); continue; }
+          pr._bgmPath = await MU.loopAudioTo(r.audioPath, totalSec, log);
+          log(`  ✓ ${prLabel(pr)} BGM`);
+          pushDtoUpdate();
+        }
+      }
+    } catch (e) { log(`⚠ BGM 단계 오류: ${e.message} — BGM 없이 진행`); }
+  }
+
   // ── 4단계: .vrew — 전 쇼츠. (중단 시엔 .vrew 생성·이후 작업 모두 생략 — 사용자가 멈췄으면 뒤 작업 안 함) ──
   if (!S.abort) {
     log('📦 4단계 — .vrew 일괄 생성…');
@@ -1749,6 +1815,7 @@ async function runMakeAllCore(opts = {}) {
       let ep = preset;
       if (ep && captionStyle) ep = { ...ep, captionStyle: { ...(ep.captionStyle || {}), ...captionStyle } };
       ep = resolveAiNotice(ep, aiNotice); // 롱폼=항상 / 쇼츠=사용자 선택
+      if (bgmOn && pr._bgmPath) ep = { ...ep, bgm: { enabled: true, audioPath: pr._bgmPath, volume: (bgm.volume != null ? bgm.volume : 0.15), loop: true } };
       const dirs = shortsDirs(S.outRoot, pr.shortsNum);
       const baseName = vrewBaseName(pr);
       const vrewPath = path.join(S.outRoot, `${baseName}.vrew`);

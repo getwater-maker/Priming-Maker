@@ -70,6 +70,8 @@ export default function App() {
   const [capChars, setCapChars] = useState(7);
   const [ttsSpeed, setTtsSpeed] = useState('1.15');
   const [aiNotice, setAiNotice] = useState(false); // 쇼츠 AI 고지: 기본 OFF (롱폼은 항상 표시·필수)
+  const [bgmOn, setBgmOn] = useState(false);       // 배경음(BGM, ACE-Step) 삽입
+  const [bgmMood, setBgmMood] = useState('');      // BGM 무드 태그(빈값=대본 자동분석)
   const [modeProfiles, setModeProfiles] = useState(null); // mode-profiles.js (음성배속 등 모드 기본값 출처)
   // 롱폼 분할옵션(도입부/본론/짧은/긴) — 프리셋에서 초기화, capbar 패널에서 조절 시 재분할.
   const [splitOpts, setSplitOpts] = useState({ intro: 3, main: 10, short: 10, long: 20, mode: 'h3' });
@@ -264,7 +266,7 @@ export default function App() {
   // ── 액션 핸들러 ──────────────────────────────────────────
   // 대본별 생성 설정 묶음(채널·스타일·배속·엔진·영상범위) — 큐 항목마다 개별 저장.
   function currentSettings() {
-    return { presetName, styleId, ttsSpeed, imgEngine, videoEngine, vidFrom, vidTo, flowVideoModel, flowCount, aiNotice };
+    return { presetName, styleId, ttsSpeed, imgEngine, videoEngine, vidFrom, vidTo, flowVideoModel, flowCount, aiNotice, bgmOn, bgmMood };
   }
   function applySettings(s) {
     if (!s) return;
@@ -278,6 +280,8 @@ export default function App() {
     if (s.flowVideoModel != null) setFlowVideoModel(s.flowVideoModel);
     if (s.flowCount != null) setFlowCount(s.flowCount);
     if (s.aiNotice != null) setAiNotice(!!s.aiNotice);
+    if (s.bgmOn != null) setBgmOn(!!s.bgmOn);
+    if (s.bgmMood != null) setBgmMood(s.bgmMood || '');
   }
   async function openScript() {
     const r = await api.openScript({ presetName: presetName || null, mode });
@@ -347,6 +351,7 @@ export default function App() {
       fromNum: parseInt(vidFrom, 10) || 1, toNum: parseInt(vidTo, 10) || 1,
       dry: false, videoEngine, clipMaxSec: _clipMaxSec(), flowVideoModel, flowCount,
       aiNotice, // 양쪽 모드 사용자 선택 (기본값 롱폼 ON / 쇼츠 OFF 는 토글이 보유)
+      bgm: { enabled: bgmOn, moodOverride: bgmMood || null }, // 배경음(ACE-Step)
     };
     if (!ensurePromptsFilled(shortsNum, { image: 'all', video: videoEngine === 'none' ? 'none' : 'range' })) return; // 만들기=전체 이미지 + 범위 i2v ('없음'은 i2v 불요)
     setStatus('⚡ 전체 제작중… (TTS+이미지→영상→.vrew)');
@@ -908,7 +913,7 @@ export default function App() {
     const t = setTimeout(() => { api.setQueueSettings(currentSettings()).catch(() => {}); }, 300);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [presetName, styleId, ttsSpeed, imgEngine, videoEngine, vidFrom, vidTo, flowVideoModel, flowCount, aiNotice]);
+  }, [presetName, styleId, ttsSpeed, imgEngine, videoEngine, vidFrom, vidTo, flowVideoModel, flowCount, aiNotice, bgmOn, bgmMood]);
 
   async function copyLog() {
     try { await navigator.clipboard.writeText(logText || ''); setStatus('로그 복사됨'); }
@@ -1043,6 +1048,8 @@ export default function App() {
         {splitBar}
         {!isLf && <button className="ghost" title="TTS 후 캡 미만 그룹들을 한 그룹으로 합치기" onClick={mergeGroups}>🔗 합치기</button>}
         <label className="chk" title="AI 고지 자막 — 체크 시 .vrew 에 삽입. 기본값: 롱폼 표시 · 쇼츠 미표시 (언제든 변경 가능)" style={{ display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" style={{ width: 'auto' }} checked={aiNotice} onChange={(e) => setAiNotice(e.target.checked)} />AI 고지</label>
+        <label className="chk" title="배경음(BGM, ACE-Step) — 체크 시 ⚡만들기에서 대본 분위기에 맞는 음악을 생성해 나레이션 아래 낮은 볼륨으로 .vrew 에 삽입" style={{ display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" style={{ width: 'auto' }} checked={bgmOn} onChange={(e) => setBgmOn(e.target.checked)} />🎵 BGM</label>
+        {bgmOn && <input type="text" value={bgmMood} onChange={(e) => setBgmMood(e.target.value)} placeholder="무드(빈값=대본 자동)" title="ACE-Step 스타일 태그. 비우면 대본 분석으로 자동 생성. 예: calm, cinematic, ambient piano, instrumental" style={{ width: 180 }} />}
         <span className="hdiv" />
         <span className="worktimes" title="진행률(완료/전체) · 괄호=마지막 작업 소요시간">
           ⏱ TTS {prog.ttsD}/{prog.ttsT} ({fmtSec(timings.tts)}) · 이미지 {prog.imgD}/{prog.imgT} ({fmtSec(timings.image)}) · 영상 {prog.vidD}/{prog.vidT} ({fmtSec(timings.video)}) · <b>합계 {fmtSec(timings.tts + timings.image + timings.video)}</b>
