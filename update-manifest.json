@@ -1,5 +1,5 @@
 {
-  "version": "0.1.50",
+  "version": "0.1.51",
   "deps": "3a5115dcd9e379dc8abaabe10ad1041adcaf5828",
   "files": {
     "AGENTS.md": "1a0fd73c104ff40f5cce110a3ffac07a7aa77205",
@@ -9,7 +9,7 @@
     "auto-updater.js": "7f0d3a183a25f3c9150002dc3c45d89257358384",
     "bootstrap.js": "6cbd41b3842151ac184808cec1280d547b649600",
     "build-shorts.js": "9dfbb4dfee70ffb9105148b9744081e2bb287957",
-    "CLAUDE.md": "612648540f507546fcb386d7537d71e3026feb4e",
+    "CLAUDE.md": "63cf04e2e87737802194e396f1050f613504e784",
     "comfy-engine.js": "2c7667f2466138434acb5672d26cb4ae4bbd5761",
     "core/accounts.js": "e36e07bbbf9eec4d56b584c3add8a1077fbe0cec",
     "core/caption-splitter.js": "68b72deb61586c430cc446c2334399d37cebb9fd",
@@ -33,7 +33,7 @@
     "core/project-model.js": "7c31feb413dbae38b8f683f1a56975ac36b0cf13",
     "core/prompt-io.js": "cb429515d67ef5ebf8f254e4fc8d92279b95b81c",
     "core/sentence-splitter.js": "b9d1b29983edd59530322499d12303e61978bba1",
-    "core/style-store.js": "82f12595d13ee07f8f39c4cbb29125031e477e7f",
+    "core/style-store.js": "46111d82fef9021ccc8d7d34ee82f6b0cf1febab",
     "core/tts-cache.js": "8654afda97826e0d73cc3f49a53ef171e06bcb4e",
     "core/upscaler.js": "f8abfaf3bf55d3de9345c55699149ec859b4deaa",
     "docs/대본-작성-가이드.md": "7b86d94a23532f1aa8ee83835a08e1c399870289",
@@ -49,7 +49,7 @@
     "light-updater.js": "c9be26807112942a9cf4a88dfcd14a1004634762",
     "main.js": "d162a4b379ef2f4f26c11d4f0f1368a8fb273875",
     "package-lock.json": "2b2cb85d9cd416d71e5bc6ba63b49bbec1302108",
-    "package.json": "30a1630743f55c0b254212aae591d158ad175a1f",
+    "package.json": "e48c76754762be0e9414ee3df280e5e4070836f2",
     "preload.js": "24e48b779beb2229a3270ca5e5d5b5cc40bbd92f",
     "renderer/dist/assets/index-6rrkoj3Y.css": "4cfcc1b4b080a7b9882b3e21a173e8d8fd7ee078",
     "renderer/dist/assets/index-DA8TciJV.js": "092358bbdbc962479b1b0aee0dec7b715a479eee",

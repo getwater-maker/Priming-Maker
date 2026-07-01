@@ -20,6 +20,7 @@ const ORDER_PATH = path.join(STORE_DIR, 'style-order.json');
 const BUILT_IN_STYLES = [
   { id: 'k-webtoon',         name: '한국 웹툰',           prompt: 'beautiful Korean webtoon style, manhwa art, soft shading, detailed characters, emotional expressions, Korean comic illustration, clean lineart, pastel colors' },
   { id: 'webtoon-illust',    name: '웹툰 일러스트',       prompt: 'webtoon illustration style, digital painting, semi-realistic, vivid colors, detailed background, Korean manhwa inspired, clean composition' },
+  { id: 'dramatic-webtoon',  name: '극적웹툰',            prompt: 'Dramatic Korean webtoon/manhwa illustration, semi-realistic, bold clean confident ink linework, rich cel-style shading, dramatic cinematic lighting (warm key light, deep shadows), high contrast, muted palette with a bold red-and-gold focal point, highly readable, consistent with the reference image, realistic adult body proportions and mature detailed faces — NOT chibi, NOT super-deformed, NOT big-head, NOT small-body, NOT cute, NOT kawaii, NOT pastel, NOT 3D Pixar, NOT photorealistic. 16:9, no text, no watermark.' },
   { id: 'cinematic',         name: '시네마틱 (영화풍)',   prompt: 'cinematic film still, dramatic lighting, movie scene' },
   { id: 'photorealistic',    name: '포토리얼 (실사)',     prompt: 'photorealistic photography, high detail, natural lighting, 8K' },
   { id: 'illustration',      name: '일러스트',            prompt: 'digital illustration, clean lines, warm colors, detailed' },
