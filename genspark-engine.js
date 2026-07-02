@@ -279,7 +279,9 @@ class GensparkEngine {
   async _applySettings(verbose = true) {
     const cfg = GensparkStore.load();
     // 적용 결과(팝오버 안에서 바로 확인) — 끝에 반환해서 호출부가 재오픈 없이 검증에 사용.
-    let _sizeOk = false, _sizeSel = '', _ratioOk = false, _ratioSel = '';
+    // 크기(이미지 크기) 옵션은 새 Genspark UI(2026-07)에서 제거됨 — 이제 설정 팝오버엔 '종횡비'만.
+    //   → _sizeOk 기본 true(크기 요구 없음). 만약 옛 UI라 크기 옵션이 있으면 아래 3단계에서 검증해 덮어씀.
+    let _sizeOk = true, _sizeSel = '', _ratioOk = false, _ratioSel = '';
     await this._dismissAnyDialog();
 
     // 1. 모델 확인 (Nano Banana 2 가 기본 선택 — 검증만, 아니면 경고)
@@ -299,7 +301,8 @@ class GensparkEngine {
       let opened = false;
       for (let attempt = 0; attempt < 2 && !opened; attempt++) {
         await settingBtn.click({ timeout: 5000 }).catch(() => {});
-        opened = await this.page.waitForSelector(GENSPARK_SELECTORS.sizeOption, { timeout: 3500, state: 'visible' })
+        // 팝오버 열림 감지 = '종횡비' 옵션 등장(새 UI엔 크기 옵션이 없으므로 ratioOption 기준).
+        opened = await this.page.waitForSelector(GENSPARK_SELECTORS.ratioOption, { timeout: 3500, state: 'visible' })
           .then(() => true).catch(() => false);
       }
       await this.page.waitForTimeout(400);  // 옵션 위치 안정화
@@ -308,7 +311,7 @@ class GensparkEngine {
       this.log(`[Genspark] ⚠️ 설정 버튼 클릭 실패: ${e.message}`);
     }
 
-    // 3. 이미지 크기 선택 (cfg.imageSize = '2K') — 검증 후 안 맞으면 1회 재클릭
+    // 3. 이미지 크기 선택 — 새 UI(2026-07)엔 크기 옵션이 없음(종횡비만). 옵션이 있으면(옛 UI) 선택·검증, 없으면 스킵.
     try {
       const sizeLoc = this.page.locator(GENSPARK_SELECTORS.sizeOption, { hasText: cfg.imageSize });
       if (await sizeLoc.count()) {
@@ -326,7 +329,9 @@ class GensparkEngine {
           this.log(`[Genspark] 이미지 크기: ${cfg.imageSize} 선택 (현재 선택=${sel || '?'})`);
         }
       } else {
-        this.log(`[Genspark] ⚠️ 크기 옵션 '${cfg.imageSize}' 못 찾음 — 기본값 유지`);
+        // 새 UI: 크기 옵션 없음 → 스킵(요구 없음, _sizeOk 기본 true 유지).
+        _sizeSel = '(크기옵션없음)';
+        if (verbose) this.log('[Genspark] 이미지 크기 옵션 없음 — 새 UI(종횡비만), 스킵');
       }
     } catch (e) {
       this.log(`[Genspark] ⚠️ 크기 선택 실패: ${e.message}`);
