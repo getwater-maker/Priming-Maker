@@ -1,7 +1,7 @@
 {
   "name": "priming",
   "productName": "Priming",
-  "version": "0.1.55",
+  "version": "0.1.56",
   "description": "롱폼(16:9)·쇼츠(9:16) 통합 영상 제작 — 대본(.md) → TTS → 이미지/영상 → Vrew(.vrew) 자동 제작 (PrimingFlow + Shots-maker 통합)",
   "main": "bootstrap.js",
   "author": "getwater",

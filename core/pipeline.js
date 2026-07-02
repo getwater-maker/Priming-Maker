@@ -118,8 +118,9 @@ function toDTO(parseResult) {
             imagePrompt: g.imagePrompt || '',
             videoPrompt: g.videoPrompt || '',
             motionNote: g.motionNote || '',
-            imagePath: g.imagePath || null,
-            videoPath: g.videoPath || null,
+            // 실제 파일이 있을 때만 경로 노출 — 없으면 null → UI 가 깨진 썸네일 대신 '＋'(첨부) 표시.
+            imagePath: (g.imagePath && fs.existsSync(g.imagePath)) ? g.imagePath : null,
+            videoPath: (g.videoPath && fs.existsSync(g.videoPath)) ? g.videoPath : null,
             imageStatus: g.imageStatus || null, // 'generating' | 'done' | 'fail'
             videoStatus: g.videoStatus || null, // 'generating' | 'done' | 'fail'
           };

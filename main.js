@@ -1221,7 +1221,10 @@ ipcMain.handle('video-build', async (_e, args = {}) => {
 ipcMain.handle('attach-asset', async (_e, args = {}) => {
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
   const { shortsNum, groupNum } = args;
+  let defaultPath; // vrew 미디어(자산) 출력 폴더가 바로 뜨도록 — 대본 폴더 대신.
+  try { const d = shortsDirs(S.outRoot, shortsNum); if (d && d.media) { fs.mkdirSync(d.media, { recursive: true }); defaultPath = d.media; } } catch {}
   const r = await dialog.showOpenDialog(win, {
+    defaultPath,
     properties: ['openFile'],
     filters: [{ name: '이미지/비디오', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'mp4', 'mov', 'webm', 'm4v'] }],
   });
@@ -1322,7 +1325,10 @@ ipcMain.handle('pick-dir', async () => {
 ipcMain.handle('bulk-attach', async (_e, args = {}) => {
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
   const { shortsNum } = args;
+  let defaultPath; // vrew 미디어(자산) 출력 폴더가 바로 뜨도록 — 대본 폴더 대신.
+  try { const d = shortsDirs(S.outRoot, shortsNum); if (d && d.media) { fs.mkdirSync(d.media, { recursive: true }); defaultPath = d.media; } } catch {}
   const r = await dialog.showOpenDialog(win, {
+    defaultPath,
     properties: ['openFile', 'multiSelections'],
     filters: [{ name: '이미지/영상', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'mp4', 'mov', 'webm', 'm4v'] }],
   });
