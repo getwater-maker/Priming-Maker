@@ -40,9 +40,18 @@ function countToday(c, id) {
   return (e && e.date === _today()) ? (e.n || 0) : 0;
 }
 
+// 차단/일시한도로 '쿨다운' 중인지 — cooldownUntil(ms) 이 미래면 잠시 쉬는 중.
+function _cooling(c, id) {
+  const e = c.counts && c.counts[id];
+  return !!(e && e.date === _today() && e.cooldownUntil && Date.now() < e.cooldownUntil);
+}
+// 사용 가능 = 오늘 한도 미도달 + 쿨다운 아님.
+function _available(c, id) {
+  return countToday(c, id) < c.dailyCap && !_cooling(c, id);
+}
 function list() {
   const c = load();
-  return { dailyCap: c.dailyCap, accounts: _accounts(c).map((a) => ({ ...a, used: countToday(c, a.id) })) };
+  return { dailyCap: c.dailyCap, accounts: _accounts(c).map((a) => ({ ...a, used: countToday(c, a.id), available: _available(c, a.id), cooling: _cooling(c, a.id) })) };
 }
 function add(label) {
   const c = load();
@@ -74,27 +83,41 @@ function setCap(n) {
 function markUsed(id, k = 1) {
   const c = load();
   const e = c.counts && c.counts[id];
-  const n = ((e && e.date === _today()) ? (e.n || 0) : 0) + (parseInt(k, 10) || 0);
+  const sameDay = e && e.date === _today();
+  const n = (sameDay ? (e.n || 0) : 0) + (parseInt(k, 10) || 0);
   c.counts = c.counts || {};
-  c.counts[id] = { date: _today(), n };
+  c.counts[id] = { date: _today(), n, ...(sameDay && e.cooldownUntil ? { cooldownUntil: e.cooldownUntil } : {}) };
   save(c);
   return n;
 }
-// 오늘 한도가 안 찬 첫 계정 반환. 전부 소진이면 null.
+// 오늘 사용 가능한 첫 계정 반환(한도 미도달 + 쿨다운 아님). 전부 불가면 null.
 function pickActive() {
   const c = load();
   for (const a of _accounts(c)) {
-    if (countToday(c, a.id) < c.dailyCap) return a;
+    if (_available(c, a.id)) return a;
   }
   return null;
 }
-// 계정을 오늘 '쉬게' — 차단(비정상활동)/한도 도달 시 카운트를 한도까지 채워 pickActive 가 오늘은 건너뛰게 한다.
-function rest(id) {
+// 차단(비정상활동)/일시 한도 → 짧은 '쿨다운'(기본 30분). 하루 캡을 채우지 않으므로
+//   0장 생성한 계정을 하루 종일 '소진'으로 태우지 않는다(오늘 카운트 n 은 그대로 유지).
+function cooldown(id, minutes = 30) {
   const c = load();
   c.counts = c.counts || {};
-  c.counts[id] = { date: _today(), n: Math.max(countToday(c, id), c.dailyCap) };
+  const cur = (c.counts[id] && c.counts[id].date === _today()) ? c.counts[id] : { date: _today(), n: 0 };
+  cur.date = _today();
+  cur.cooldownUntil = Date.now() + Math.max(1, parseInt(minutes, 10) || 30) * 60000;
+  c.counts[id] = cur;
   save(c);
-  return c.counts[id].n;
+  return cur.cooldownUntil;
+}
+// 오늘 카운트·쿨다운 초기화 — id 지정 시 그 계정만, 없으면 전체. (잘못 소진된 계정 복구용)
+function resetToday(id) {
+  const c = load();
+  c.counts = c.counts || {};
+  if (id) delete c.counts[id];
+  else c.counts = {};
+  save(c);
+  return list();
 }
 
-module.exports = { load, save, list, add, remove, rename, setCap, markUsed, pickActive, rest, FILE };
+module.exports = { load, save, list, add, remove, rename, setCap, markUsed, pickActive, cooldown, resetToday, FILE };

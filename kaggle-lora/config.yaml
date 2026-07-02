@@ -1,0 +1,62 @@
+---
+# ai-toolkit (ostris) — FLUX.1 Krea [dev] 스타일 LoRA 학습 설정
+# Kaggle T4(16GB) / P100(16GB) 저VRAM 기준. 노트북이 이 파일을 /kaggle/working 에 복사해서 실행함.
+job: extension
+config:
+  name: joseon_krea_lora
+  process:
+    - type: sd_trainer
+      training_folder: /kaggle/working/output
+      device: cuda:0
+      trigger_word: joseon          # 캡션이 전부 'joseon, ...' 로 시작 → 트리거 통일
+      network:
+        type: lora
+        linear: 16                  # rank(dim). 스타일 LoRA는 16이면 충분(가볍고 빠름). 32로 올리면 디테일↑·용량↑
+        linear_alpha: 16
+      save:
+        dtype: float16
+        save_every: 500             # 500스텝마다 세이브(9시간 세션 중 끊겨도 재개 가능)
+        max_step_saves_to_keep: 4
+      datasets:
+        - folder_path: /kaggle/working/dataset
+          caption_ext: txt
+          caption_dropout_rate: 0.05
+          shuffle_tokens: false
+          cache_latents_to_disk: true
+          resolution: [768]         # 1376x768/768x1376 → 버킷 자동. T4에선 768 권장(1024는 OOM/느림 위험)
+      train:
+        batch_size: 1
+        steps: 2500                 # 스타일 LoRA 적정선. T4 기준 대략 3~5시간(9h 세션 내)
+        gradient_accumulation_steps: 1
+        train_unet: true
+        train_text_encoder: false   # FLUX는 텍스트인코더 학습 비권장
+        gradient_checkpointing: true
+        noise_scheduler: flowmatch
+        optimizer: adamw8bit
+        lr: 1e-4
+        skip_first_sample: true
+        disable_sampling: false
+        dtype: bf16                 # ⚠ T4에서 bf16 에러 나면 README의 "T4 대응" 참고
+        ema_config:
+          use_ema: false
+      model:
+        name_or_path: black-forest-labs/FLUX.1-Krea-dev
+        is_flux: true
+        quantize: true              # 16GB에 맞추는 핵심(quanto int8 양자화)
+        low_vram: true
+      sample:
+        sampler: flowmatch
+        sample_every: 500           # 500스텝마다 샘플 2장(진행 확인용, 시간 아끼려면 값↑)
+        width: 768
+        height: 768
+        prompts:
+          - "joseon, 16th-century Joseon Korea, a weary thin peasant in worn hanbok by a mud-walled thatched house at dusk, cold blue twilight"
+          - "joseon, ancient Baekje Korea, a hillside lined with earthen royal tombs, muted cold tones"
+        neg: ""
+        seed: 42
+        walk_seed: true
+        guidance_scale: 4
+        sample_steps: 20
+meta:
+  name: joseon_krea_lora
+  version: '1.0'

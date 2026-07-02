@@ -9,3 +9,6 @@ lora-dataset/
 Thumbs.db
 # 사용자 로컬 ComfyUI 워크플로(각자 지정) — 배포 제외
 Ace Step/
+# Kaggle LoRA 학습 데이터셋(대용량 zip 등) — GitHub 100MB 초과, 배포 제외
+kaggle-lora/*.zip
+kaggle-lora/joseon-krea-dataset.zip

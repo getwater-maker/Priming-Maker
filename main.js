@@ -664,7 +664,7 @@ async function runFlowImages(project, imagesDir, logger, styleId, onlyNums) {
   const cap = FlowAccounts.load().dailyCap;
   const acctTotal = FlowAccounts.list().accounts.length;
   const tried = new Set(); // 이번 호출에서 이미 시도한 계정 (Flow 계정 순환용)
-  const nextAcc = () => { const info = FlowAccounts.list(); return info.accounts.find((a) => a.used < info.dailyCap && !tried.has(a.id)) || null; };
+  const nextAcc = () => { const info = FlowAccounts.list(); return info.accounts.find((a) => a.available && !tried.has(a.id)) || null; };
   let loopGuard = 0;
 
   // ── Flow 계정 내 순환 ── 남은 그룹이 있고 활성 계정이 있는 한, 계정을 바꿔가며 채운다.
@@ -724,8 +724,8 @@ async function runFlowImages(project, imagesDir, logger, styleId, onlyNums) {
     // 한도(rateExhausted)·차단(비정상활동) → 이 계정 오늘 쉬게(rest) 하고 다음 계정으로.
     //   0장(생성 실패, 예: Flow UI 셀렉터 문제)은 계정 탓이 아닐 수 있어 하루 캡(rest)은 안 하고 이번 호출만 건너뜀.
     if (res && res.rateExhausted) {
-      FlowAccounts.rest(acc.id);
-      logger(`⚠ Flow 계정 "${acc.label}" 한도/차단 — 오늘 이 계정은 쉬고 다음 계정으로 순환`);
+      FlowAccounts.cooldown(acc.id, 30); // 하루 캡 대신 30분 쿨다운 — 0장이어도 계정을 하루 종일 태우지 않음
+      logger(`⚠ Flow 계정 "${acc.label}" 한도/차단 — 30분 쿨다운 후 재사용, 지금은 다음 계정으로 순환`);
     } else if (made === 0) {
       logger(`⚠ Flow 계정 "${acc.label}" 생성 0장 — 다음 계정으로 (Flow UI 문제일 수 있음, 계정 한도는 유지)`);
     }
