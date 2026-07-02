@@ -671,8 +671,8 @@ async function runFlowImages(project, imagesDir, logger, styleId, onlyNums) {
   //   한 계정이 한도(45)·차단(비정상활동)·0장이면 그 계정을 오늘 쉬게(rest) 하고 다음 계정으로.
   //   (사용자 요청: Genspark 한도 후 Flow 로 넘어오면 Flow 계정 1→2→3→4 도 순환해야 함)
   while (!S.abort) {
-    const targets = project.groups.filter((g) => (!onlyNums || onlyNums.includes(g.num)) && !(g.imagePath && fs.existsSync(g.imagePath)));
-    if (!targets.length) { if (loopGuard === 0) logger('[Flow] 생성할 그룹 없음 (이미 채워짐)'); break; }
+    const targets = project.groups.filter((g) => (!onlyNums || onlyNums.includes(g.num)) && !hasVisual(g));
+    if (!targets.length) { if (loopGuard === 0) logger('[Flow] 생성할 그룹 없음 (이미 이미지/영상 있음)'); break; }
     const acc = nextAcc();
     if (!acc) { logger('⚠ 모든 Flow 계정 시도/소진 — 남은 이미지는 순환의 다음 엔진으로'); break; }
     tried.add(acc.id);
@@ -740,7 +740,7 @@ async function runRotatingImages(project, imagesDir, logger, styleId, startEngin
   const order = Rot.activeOrder(startEngine);
   if (!order.length) { logger('⚠ 순환 엔진이 비어있음 — ⚙ 순환 설정 확인'); return; }
   const stylePrompt = styleId ? (require('./core/style-store').getPrompt(styleId) || '') : '';
-  const need = () => project.groups.filter((g) => g.imagePrompt && g.imagePrompt.trim() && !(g.imagePath && fs.existsSync(g.imagePath)) && (!onlyNums || onlyNums.includes(g.num)));
+  const need = () => project.groups.filter((g) => g.imagePrompt && g.imagePrompt.trim() && !hasVisual(g) && (!onlyNums || onlyNums.includes(g.num)));
   logger(`🔄 이미지 순환: ${order.join(' → ')}`);
   for (const engineId of order) {
     if (S.abort) { logger('⏹ 중단됨'); break; }
@@ -812,7 +812,7 @@ async function runComfyImages(project, imagesDir, logger, styleId, onlyNums) {
     if (S.abort) { logger('⏹ 중단됨'); break; }
     if (onlyNums && !onlyNums.includes(g.num)) continue;     // 범위 지정 시 그 그룹만
     if (!g.imagePrompt || !g.imagePrompt.trim()) continue; // 프롬프트 없으면 건너뜀(autoFillPrompts 가 먼저 채움)
-    if (g.imagePath && fs.existsSync(g.imagePath)) continue; // 이미 있음(캐시 프리필/이전 생성)
+    if (hasVisual(g)) continue; // 이미 이미지/영상 있음(첨부·캐시·이전 생성) → 건너뜀
     total++;
     const out = path.join(imagesDir, `${String(g.num).padStart(2, '0')}.png`);
     logger(`🖼 ComfyUI(${comfyLabel}) G${g.num} 생성…`);
@@ -920,7 +920,7 @@ function prefillImageCache(project, mediaDir, styleId, engine) {
   let n = 0;
   for (const g of project.groups) {
     if (!g.imagePrompt || !g.imagePrompt.trim()) continue;
-    if (g.imagePath && fs.existsSync(g.imagePath)) continue;
+    if (hasVisual(g)) continue; // 이미지/영상 이미 있으면 캐시 프리필도 건너뜀
     const hit = MC.get(MC.imageKey(g.imagePrompt, styleId || '', project.aspect || '9:16', engine));
     if (!hit) continue;
     try { fs.mkdirSync(mediaDir, { recursive: true }); const out = path.join(mediaDir, `${String(g.num).padStart(2, '0')}.${hit.ext}`); fs.copyFileSync(hit.file, out); g.imagePath = out; g.imageStatus = 'done'; n++; } catch {}
@@ -936,9 +936,14 @@ function cacheGeneratedImages(project, styleId, engine) {
     MC.put(MC.imageKey(g.imagePrompt, styleId || '', project.aspect || '9:16', engine), g.imagePath, path.extname(g.imagePath).slice(1));
   }
 }
-// 이미지 생성이 필요한(프롬프트 있고 아직 이미지 없는) 그룹 수.
+// 그룹에 이미지 '또는' 비디오가 이미 있으면 비주얼 완성 — 이미지 생성 건너뛰기 판정.
+//   (일괄첨부로 영상만 넣은 그룹에 이미지를 또 만들던 문제 방지)
+function hasVisual(g) {
+  return !!((g.imagePath && fs.existsSync(g.imagePath)) || (g.videoPath && fs.existsSync(g.videoPath)));
+}
+// 이미지 생성이 필요한(프롬프트 있고 아직 이미지·영상 둘 다 없는) 그룹 수.
 function imagesNeeded(project) {
-  return project.groups.filter((g) => g.imagePrompt && g.imagePrompt.trim() && !(g.imagePath && fs.existsSync(g.imagePath))).length;
+  return project.groups.filter((g) => g.imagePrompt && g.imagePrompt.trim() && !hasVisual(g)).length;
 }
 
 // 생성된 영상을 1080p 로 업스케일 (Real-ESRGAN 애니 모델, 없으면 ffmpeg 폴백). videoPath 교체.
@@ -1199,7 +1204,7 @@ ipcMain.handle('video-build', async (_e, args = {}) => {
     const onlyNums = rangeNums(pr, fromNum, toNum); // N~N 범위 그룹 (랜덤 폐지)
     const rangeLbl = ` · G${onlyNums[0]}~${onlyNums[onlyNums.length - 1]}`;
     // 영상은 이미지가 있어야 함 — 범위 그룹 중 이미지 없는 게 있으면 먼저 생성(비어있는 것만 채움).
-    const needImg = pr.groups.filter((g) => onlyNums.includes(g.num) && g.imagePrompt && g.imagePrompt.trim() && !(g.imagePath && fs.existsSync(g.imagePath)));
+    const needImg = pr.groups.filter((g) => onlyNums.includes(g.num) && g.imagePrompt && g.imagePrompt.trim() && !hasVisual(g));
     if (needImg.length && !S.abort) {
       log(`🖼 영상 전 — 이미지 없는 ${needImg.length}개 그룹 먼저 생성 (그룹 ${needImg.map((g) => g.num).join(',')})`);
       try {
