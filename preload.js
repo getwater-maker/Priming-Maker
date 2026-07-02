@@ -66,6 +66,7 @@ contextBridge.exposeInMainWorld('api', {
   runBatch: (args) => ipcRenderer.invoke('run-batch', args),
   setTitle: (args) => ipcRenderer.invoke('set-title', args),
   readAudio: (p) => ipcRenderer.invoke('read-audio', p),
+  previewSupertonic: (args) => ipcRenderer.invoke('preview-supertonic', args),
   setAspect: (value) => ipcRenderer.invoke('set-aspect', value),
   setMode: (args) => ipcRenderer.invoke('set-mode', args),
   openPlaylistSpec: (args) => ipcRenderer.invoke('open-playlist-spec', args),

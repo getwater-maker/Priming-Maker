@@ -727,6 +727,16 @@ export default function App() {
     try { const url = await api.readAudio(p); if (url) { const a = new Audio(url); a.play().catch(() => {}); } }
     catch (e) { logline('미리듣기 실패: ' + e.message); }
   }
+  // Supertonic 음성 미리듣기 — 백엔드로 짧은 샘플을 즉석 합성해 재생.
+  async function previewSupertonicVoice() {
+    const v = /^[MF][1-5]$/.test(ch && ch.voice) ? ch.voice : 'M1';
+    try {
+      setStatus(`Supertonic ${v} 미리듣기 합성 중…`);
+      const r = await api.previewSupertonic({ voice: v, language: (ch && ch.language) || 'ko' });
+      if (r && r.dataUrl) { new Audio(r.dataUrl).play().catch(() => {}); setStatus(''); }
+      else { logline('미리듣기 실패: ' + ((r && r.error) || '알 수 없음')); setStatus('미리듣기 실패'); }
+    } catch (e) { logline('미리듣기 오류: ' + e.message); setStatus('미리듣기 실패'); }
+  }
   async function saveChannel() {
     if (!ch) return;
     const numOr = (v, d) => (v !== '' && v != null && !isNaN(Number(v)) ? Number(v) : d);
@@ -1152,6 +1162,7 @@ export default function App() {
                 <select style={{ flex: '0 0 220px', padding: 6 }} value={/^[MF][1-5]$/.test(ch.voice) ? ch.voice : 'M1'} onChange={(e) => setCh({ ...ch, voice: e.target.value })}>
                   {['M1', 'M2', 'M3', 'M4', 'M5', 'F1', 'F2', 'F3', 'F4', 'F5'].map((v) => <option key={v} value={v}>{(/^M/.test(v) ? '♂ 남성 ' : '♀ 여성 ') + v} (Supertonic-3)</option>)}
                 </select>
+                <button className="ghost" style={{ flex: '0 0 auto' }} title="이 목소리 미리듣기 (짧은 샘플 합성)" onClick={previewSupertonicVoice}>▶</button>
                 <span className="mini">언어</span><select value={ch.language} onChange={(e) => setCh({ ...ch, language: e.target.value })}><option value="ko">한국어</option><option value="en">English</option></select>
                 <span className="mini">문장무음</span><input className="nbox" type="number" step="0.1" style={{ width: 66 }} value={ch.silenceSec} onChange={(e) => setCh({ ...ch, silenceSec: e.target.value })} /><span className="meta">초 · CPU 로컬</span></div>
             ) : (

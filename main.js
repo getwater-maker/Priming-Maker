@@ -2451,6 +2451,24 @@ ipcMain.handle('read-audio', (_e, p) => {
   } catch { return null; }
 });
 
+// Supertonic 음성 미리듣기 — 사전 정의 음성은 파일이 없으므로 백엔드로 짧은 샘플을 즉석 합성해 반환.
+ipcMain.handle('preview-supertonic', async (_e, args = {}) => {
+  try {
+    const { getProvider } = require('./tts/tts-config');
+    const cfg = getProvider('supertonic') || {};
+    const baseUrl = (cfg.baseUrl || 'http://127.0.0.1:9882').replace(/\/$/, '');
+    const { SupertonicProvider } = require('./tts/providers/supertonic-provider');
+    const p = new SupertonicProvider({ baseUrl, timeout: 30000 });
+    if (!(await p.init())) return { error: `Supertonic 백엔드 미기동 (${baseUrl})` };
+    const lang = (args.language === 'en') ? 'en' : 'ko';
+    const sample = lang === 'en'
+      ? 'Hello. This is a preview of this voice.'
+      : '안녕하세요. 이 목소리로 영상을 만들어 드립니다.';
+    const r = await p.synthesize(sample, { voice: args.voice || 'M1', language: lang, speed: 1.0, silenceDuration: 0.2 });
+    return { dataUrl: `data:audio/wav;base64,${Buffer.from(r.mp3Buffer).toString('base64')}` };
+  } catch (e) { return { error: e.message }; }
+});
+
 ipcMain.handle('open-folder', async () => {
   if (!S.outRoot) return;
   fs.mkdirSync(S.outRoot, { recursive: true });
