@@ -540,6 +540,13 @@ class GensparkEngine {
           const t = (el.textContent || '').trim();
           if (t && t.length < 200 && RE.test(t)) return t;
         }
+        // 폴백: 배너 클래스가 위 목록과 안 맞아도, '강한' 제한 문구(예 "AI Image 5시간 제한에 도달했습니다.
+        //   ...재설정됩니다")는 본문 직접 텍스트에서 잡는다. 강문구라 오탐 위험 낮음.
+        const STRONG = /(\d+\s*시간\s*제한|제한에\s*도달|재설정됩니다|한도에?\s*도달|limit\s*reached|usage\s*limit|rate.?limit)/i;
+        for (const el of Array.from(document.querySelectorAll('div,span,p,section,li'))) {
+          const own = Array.from(el.childNodes).filter(n => n.nodeType === 3).map(n => n.textContent).join('').trim();
+          if (own && own.length < 200 && STRONG.test(own)) return own;
+        }
         return null;
       });
     } catch (_) { return null; }
@@ -624,12 +631,14 @@ class GensparkEngine {
           newSrcs = (await this._resultSrcsInOrder()).filter(s => !beforeSrcs.has(s));
           if (newSrcs.length >= N) { this.log(`[Genspark] ${newSrcs.length}장 감지 (${elapsed}초)`); break; }
         }
-        // 진전이 없으면(이미지 0장) 사용 한도/제한 메시지 감지 → 조기 중단(4분 낭비 방지)
-        if (newSrcs.length === 0 && elapsed >= 30) {
+        // 사용 한도/제한 메시지 감지 → 조기 중단(순환의 다음 엔진으로).
+        //   0장뿐 아니라 부분완료(예 3/6)에서 5시간 제한이 걸린 경우도 잡아야 하므로 newSrcs.length < N 이면 검사.
+        //   (이전엔 ===0 만 검사 → 3/6 에서 제한 걸리면 타임아웃까지 4~5분 헛대기)
+        if (newSrcs.length < N && elapsed >= 20) {
           const msg = await this._detectLimitMessage();
           if (msg) {
             limitMsg = msg;
-            this.log(`[Genspark] ⚠️ 사용 한도/제한 메시지 감지: "${msg}"`);
+            this.log(`[Genspark] ⚠️ 사용 한도/제한 메시지 감지: "${msg}" — 남은 ${N - newSrcs.length}장 중단, 다음 엔진으로`);
             break;
           }
         }
