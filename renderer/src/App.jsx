@@ -733,6 +733,7 @@ export default function App() {
     const capToStyle = (c) => ({ size: String(c.size), align: c.align, yAlign: c.yAlign, yOffset: yOffsetOf(c) });
     const patch = {
       engine: ch.engine || 'omnivoice',
+      voice: ch.voice || '',                              // Supertonic 사전정의 음성(M1~F5) 등 — 저장
       voiceCloneRefAudio: (ch.voiceCloneRefAudio || '').trim(),
       voiceCloneRefText: (ch.voiceCloneRefText || '').trim(),
       scriptFolder: (ch.scriptFolder || '').trim(),       // 대본폴더 공유
@@ -1141,23 +1142,37 @@ export default function App() {
             <div className="frow"><label>엔진</label>
               <span className="engtoggle">
                 {[['omnivoice', 'OmniVoice'], ['gemini', 'Gemini'], ['supertonic', 'Supertonic']].map(([v, t]) => (
-                  <button key={v} className={ch.engine === v ? 'active' : ''} onClick={() => setCh({ ...ch, engine: v })}>{t}</button>
+                  <button key={v} className={ch.engine === v ? 'active' : ''} onClick={() => setCh({ ...ch, engine: v, ...(v === 'supertonic' && !/^[MF][1-5]$/.test(ch.voice) ? { voice: 'M1' } : {}) })}>{t}</button>
                 ))}
               </span>
             </div>
-            <div className="frow"><label>목소리</label><input readOnly title="참조음성 파일명" value={(ch.voiceCloneRefAudio || '').split(/[\\/]/).pop() || ch.voice} style={{ flex: '0 0 170px' }} />
-              <span className="mini">언어</span><select value={ch.language} onChange={(e) => setCh({ ...ch, language: e.target.value })}><option value="ko">한국어</option><option value="en">English</option></select>
-              <span className="mini">시드</span><input className="nbox" type="number" style={{ width: 90, flex: '0 0 auto' }} value={ch.seed} onChange={(e) => setCh({ ...ch, seed: e.target.value })} /></div>
-            <div className="frow"><label>참조음성</label>
-              <select style={{ flex: 1, padding: 6 }} value={ch.voiceCloneRefAudio} onChange={(e) => setCh({ ...ch, voiceCloneRefAudio: e.target.value })}>
-                {chRefList.every((r) => r.path !== ch.voiceCloneRefAudio) && ch.voiceCloneRefAudio ? <option value={ch.voiceCloneRefAudio}>{(ch.voiceCloneRefAudio || '').split(/[\\/]/).pop()}</option> : null}
-                {chRefList.map((r) => <option key={r.path} value={r.path}>{r.name}</option>)}
-              </select>
-              <button className="ghost" style={{ flex: '0 0 auto' }} title="미리듣기" onClick={() => playRef(ch.voiceCloneRefAudio)}>▶</button>
-              <button className="ghost" style={{ flex: '0 0 auto' }} title="참조음성 폴더 열기 (같은 이름의 .txt 가 참조텍스트로 쓰입니다)" onClick={() => api.openRefFolder(ch.voiceCloneRefAudio || '')}>찾기</button></div>
+            {ch.engine === 'supertonic' ? (
+              /* Supertonic — 사전 정의 음성만 선택(참조음성·복제·시드·Clone강도 미적용) */
+              <div className="frow"><label>목소리</label>
+                <select style={{ flex: '0 0 220px', padding: 6 }} value={/^[MF][1-5]$/.test(ch.voice) ? ch.voice : 'M1'} onChange={(e) => setCh({ ...ch, voice: e.target.value })}>
+                  {['M1', 'M2', 'M3', 'M4', 'M5', 'F1', 'F2', 'F3', 'F4', 'F5'].map((v) => <option key={v} value={v}>{(/^M/.test(v) ? '♂ 남성 ' : '♀ 여성 ') + v} (Supertonic-3)</option>)}
+                </select>
+                <span className="mini">언어</span><select value={ch.language} onChange={(e) => setCh({ ...ch, language: e.target.value })}><option value="ko">한국어</option><option value="en">English</option></select>
+                <span className="mini">문장무음</span><input className="nbox" type="number" step="0.1" style={{ width: 66 }} value={ch.silenceSec} onChange={(e) => setCh({ ...ch, silenceSec: e.target.value })} /><span className="meta">초 · CPU 로컬</span></div>
+            ) : (
+              <>
+                <div className="frow"><label>목소리</label><input readOnly title="참조음성 파일명" value={(ch.voiceCloneRefAudio || '').split(/[\\/]/).pop() || ch.voice} style={{ flex: '0 0 170px' }} />
+                  <span className="mini">언어</span><select value={ch.language} onChange={(e) => setCh({ ...ch, language: e.target.value })}><option value="ko">한국어</option><option value="en">English</option></select>
+                  <span className="mini">시드</span><input className="nbox" type="number" style={{ width: 90, flex: '0 0 auto' }} value={ch.seed} onChange={(e) => setCh({ ...ch, seed: e.target.value })} /></div>
+                <div className="frow"><label>참조음성</label>
+                  <select style={{ flex: 1, padding: 6 }} value={ch.voiceCloneRefAudio} onChange={(e) => setCh({ ...ch, voiceCloneRefAudio: e.target.value })}>
+                    {chRefList.every((r) => r.path !== ch.voiceCloneRefAudio) && ch.voiceCloneRefAudio ? <option value={ch.voiceCloneRefAudio}>{(ch.voiceCloneRefAudio || '').split(/[\\/]/).pop()}</option> : null}
+                    {chRefList.map((r) => <option key={r.path} value={r.path}>{r.name}</option>)}
+                  </select>
+                  <button className="ghost" style={{ flex: '0 0 auto' }} title="미리듣기" onClick={() => playRef(ch.voiceCloneRefAudio)}>▶</button>
+                  <button className="ghost" style={{ flex: '0 0 auto' }} title="참조음성 폴더 열기 (같은 이름의 .txt 가 참조텍스트로 쓰입니다)" onClick={() => api.openRefFolder(ch.voiceCloneRefAudio || '')}>찾기</button></div>
+              </>
+            )}
             <div className="frow"><label>사전설정</label><textarea rows="2" placeholder="예: 30대 한국 남성, 회색 양복, 따뜻한 조명 (모든 이미지 공통)" value={ch.presetPrompt} onChange={(e) => setCh({ ...ch, presetPrompt: e.target.value })} /></div>
-            <div className="frow"><label>Clone강도</label><input className="nbox" type="number" step="0.1" value={ch.cfgValue} onChange={(e) => setCh({ ...ch, cfgValue: e.target.value })} />
-              <span className="mini">문장무음</span><input className="nbox" type="number" step="0.1" value={ch.silenceSec} onChange={(e) => setCh({ ...ch, silenceSec: e.target.value })} /><span className="meta">초</span></div>
+            {ch.engine !== 'supertonic' && (
+              <div className="frow"><label>Clone강도</label><input className="nbox" type="number" step="0.1" value={ch.cfgValue} onChange={(e) => setCh({ ...ch, cfgValue: e.target.value })} />
+                <span className="mini">문장무음</span><input className="nbox" type="number" step="0.1" value={ch.silenceSec} onChange={(e) => setCh({ ...ch, silenceSec: e.target.value })} /><span className="meta">초</span></div>
+            )}
 
             <div className="subhead">📝 본문 자막 (롱폼 / 쇼츠)</div>
             <div className="twocol">{capColumn('capLong', '롱폼 16:9', true)}{capColumn('capShort', '쇼츠 9:16', false)}</div>
