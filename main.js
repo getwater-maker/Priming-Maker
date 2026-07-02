@@ -659,59 +659,78 @@ async function closeFlowEng() {
 
 async function runFlowImages(project, imagesDir, logger, styleId, onlyNums) {
   fs.mkdirSync(imagesDir, { recursive: true });
-  // 대상 = (onlyNums 있으면 그 그룹만) + 아직 이미지 없는 그룹. 순환에서 '남은 것만' 이어 만들 때 사용.
-  const targets = project.groups.filter((g) => (!onlyNums || onlyNums.includes(g.num)) && !(g.imagePath && fs.existsSync(g.imagePath)));
-  if (!targets.length) { logger('[Flow] 생성할 그룹 없음 (이미 채워짐)'); return; }
-  const workDir = path.join(os.tmpdir(), `sm_flow_${project.shortsNum}_${Date.now().toString(36)}`);
-  fs.mkdirSync(workDir, { recursive: true });
-  // 멀티계정 순환 — 오늘 한도 안 찬 첫 계정 선택. 전부 소진이면 중단(throw → 상위 순환이 다음 엔진으로).
   const FlowAccounts = require('./core/flow-accounts');
-  const acc = FlowAccounts.pickActive();
-  if (!acc) throw new Error('모든 Flow 계정의 오늘 한도가 찼습니다 — ⚙Flow 계정에서 한도를 늘리거나 계정을 추가하세요.');
-  const cap = FlowAccounts.load().dailyCap;
-  const used = FlowAccounts.list().accounts.find((a) => a.id === acc.id);
-  logger(`🔑 Flow 계정: ${acc.label} (오늘 ${used ? used.used : 0}/${cap}) · 대상 ${targets.length}장`);
-  const profileDir = flowProfileDir(acc.id);
-  const eng = getFlowEng(profileDir);
   const stylePrompt = styleId ? (require('./core/style-store').getPrompt(styleId) || '') : '';
-  // 대상 그룹만 제출. 나레이션(프롬프트 없을 때 Flow 가 번역) + 커스텀 프롬프트(있으면 공통 빌더로 동일 프롬프트).
-  const paragraphs = targets.map((g) => project.getSentencesOfGroup(g).map((s) => s.text).join(' ').trim() || `cut${g.num}`);
-  const customPrompts = targets.map((g) => (g.imagePrompt && g.imagePrompt.trim()) ? P.buildImagePrompt(stylePrompt, g.imagePrompt) : null);
-  const imgDir = path.join(workDir, 'images');
-  // 대상(targets) 순서로 매핑 — Flow 출력은 제출 순서(01,02…) = targets 순서. 이미 채워진 그룹은 건드리지 않음.
-  const mapOnce = (final) => {
-    let files = [];
-    try { files = fs.readdirSync(imgDir).filter((f) => /\.(png|jpe?g|webp)$/i.test(f)).sort(); } catch { return 0; }
-    let n = 0;
-    targets.forEach((g, i) => {
-      if (g.imagePath && g.imagePath.startsWith(imagesDir) && fs.existsSync(g.imagePath)) return;
-      let f = files.find((x) => x.startsWith(String(i + 1).padStart(2, '0')));
-      if (!f && final) f = files[i];
-      if (!f) return;
-      const ext = path.extname(f).toLowerCase().replace('.jpeg', '.jpg');
-      const dest = path.join(imagesDir, `${String(g.num).padStart(2, '0')}${ext}`);
-      try { fs.copyFileSync(path.join(imgDir, f), dest); g.imagePath = dest; g.imageStatus = 'done'; n++; if (final && logger) logger(`[Flow] G${g.num} 이미지 첨부`); }
-      catch (e) { if (logger) logger(`이미지 복사 실패 G${g.num}: ${e.message}`); }
-    });
-    return n;
-  };
-  const poll = setInterval(() => { if (mapOnce(false) > 0) pushDtoUpdate(); }, 2500);
-  try {
-    await eng.run({
-      paragraphs, customPrompts, mediaType: 'image',
-      ratio: project.aspect || '9:16', outputDir: workDir, style: styleId || 'cinematic',
-      withSubtitle: false, vrewOnly: false, skipVrew: true,
-      antiDetect: { enabled: true, preset: '기본' }, profileId: acc.id,
-    });
-  } finally {
-    clearInterval(poll);
+  const cap = FlowAccounts.load().dailyCap;
+  const acctTotal = FlowAccounts.list().accounts.length;
+  const tried = new Set(); // 이번 호출에서 이미 시도한 계정 (Flow 계정 순환용)
+  const nextAcc = () => { const info = FlowAccounts.list(); return info.accounts.find((a) => a.used < info.dailyCap && !tried.has(a.id)) || null; };
+  let loopGuard = 0;
+
+  // ── Flow 계정 내 순환 ── 남은 그룹이 있고 활성 계정이 있는 한, 계정을 바꿔가며 채운다.
+  //   한 계정이 한도(45)·차단(비정상활동)·0장이면 그 계정을 오늘 쉬게(rest) 하고 다음 계정으로.
+  //   (사용자 요청: Genspark 한도 후 Flow 로 넘어오면 Flow 계정 1→2→3→4 도 순환해야 함)
+  while (!S.abort) {
+    const targets = project.groups.filter((g) => (!onlyNums || onlyNums.includes(g.num)) && !(g.imagePath && fs.existsSync(g.imagePath)));
+    if (!targets.length) { if (loopGuard === 0) logger('[Flow] 생성할 그룹 없음 (이미 채워짐)'); break; }
+    const acc = nextAcc();
+    if (!acc) { logger('⚠ 모든 Flow 계정 시도/소진 — 남은 이미지는 순환의 다음 엔진으로'); break; }
+    tried.add(acc.id);
+    if (++loopGuard > acctTotal + 2) { logger('⚠ Flow 계정 순환 안전장치 작동 — 중단'); break; }
+    logger(`🔑 Flow 계정: ${acc.label} (오늘 ${acc.used}/${cap}) · 대상 ${targets.length}장`);
+
+    const workDir = path.join(os.tmpdir(), `sm_flow_${project.shortsNum}_${acc.id}_${Date.now().toString(36)}`);
+    const imgDir = path.join(workDir, 'images');
+    fs.mkdirSync(imgDir, { recursive: true });
+    const eng = getFlowEng(flowProfileDir(acc.id));
+    const paragraphs = targets.map((g) => project.getSentencesOfGroup(g).map((s) => s.text).join(' ').trim() || `cut${g.num}`);
+    const customPrompts = targets.map((g) => (g.imagePrompt && g.imagePrompt.trim()) ? P.buildImagePrompt(stylePrompt, g.imagePrompt) : null);
+    // 대상(targets) 순서로 매핑 — Flow 출력은 제출 순서(01,02…) = targets 순서. 이미 채워진 그룹은 건드리지 않음.
+    const mapOnce = (final) => {
+      let files = [];
+      try { files = fs.readdirSync(imgDir).filter((f) => /\.(png|jpe?g|webp)$/i.test(f)).sort(); } catch { return 0; }
+      let n = 0;
+      targets.forEach((g, i) => {
+        if (g.imagePath && g.imagePath.startsWith(imagesDir) && fs.existsSync(g.imagePath)) return;
+        let f = files.find((x) => x.startsWith(String(i + 1).padStart(2, '0')));
+        if (!f && final) f = files[i];
+        if (!f) return;
+        const ext = path.extname(f).toLowerCase().replace('.jpeg', '.jpg');
+        const dest = path.join(imagesDir, `${String(g.num).padStart(2, '0')}${ext}`);
+        try { fs.copyFileSync(path.join(imgDir, f), dest); g.imagePath = dest; g.imageStatus = 'done'; n++; if (final && logger) logger(`[Flow] G${g.num} 이미지 첨부`); }
+        catch (e) { if (logger) logger(`이미지 복사 실패 G${g.num}: ${e.message}`); }
+      });
+      return n;
+    };
+    const poll = setInterval(() => { if (mapOnce(false) > 0) pushDtoUpdate(); }, 2500);
+    let res = null;
+    try {
+      res = await eng.run({
+        paragraphs, customPrompts, mediaType: 'image',
+        ratio: project.aspect || '9:16', outputDir: workDir, style: styleId || 'cinematic',
+        withSubtitle: false, vrewOnly: false, skipVrew: true,
+        antiDetect: { enabled: true, preset: '기본' }, profileId: acc.id,
+      });
+    } catch (e) { logger(`[Flow] ${acc.label} 실행 오류: ${e.message}`); }
+    finally { clearInterval(poll); }
+
+    const made = mapOnce(true);
+    FlowAccounts.markUsed(acc.id, made); // ✅ 실제 성공분만 카운트 (기존: 대상 전체 → 과다 카운트 버그)
+    logger(`[Flow] ${acc.label} 이미지 매핑 ${made}/${targets.length}`);
+    pushDtoUpdate();
+    try { fs.rmSync(workDir, { recursive: true, force: true }); } catch {}
+    if (S.abort) break;
+
+    // 한도(rateExhausted)·차단(비정상활동) → 이 계정 오늘 쉬게(rest) 하고 다음 계정으로.
+    //   0장(생성 실패, 예: Flow UI 셀렉터 문제)은 계정 탓이 아닐 수 있어 하루 캡(rest)은 안 하고 이번 호출만 건너뜀.
+    if (res && res.rateExhausted) {
+      FlowAccounts.rest(acc.id);
+      logger(`⚠ Flow 계정 "${acc.label}" 한도/차단 — 오늘 이 계정은 쉬고 다음 계정으로 순환`);
+    } else if (made === 0) {
+      logger(`⚠ Flow 계정 "${acc.label}" 생성 0장 — 다음 계정으로 (Flow UI 문제일 수 있음, 계정 한도는 유지)`);
+    }
+    // 남은 그룹 있으면 while 재진입 → nextAcc 가 tried 제외한 다음 계정 선택
   }
-  const total = mapOnce(true);
-  logger(`[Flow] 이미지 매핑 완료 ${total}/${targets.length}`);
-  const usedNow = FlowAccounts.markUsed(acc.id, targets.length);
-  if (usedNow >= cap) logger(`⚠ Flow 계정 "${acc.label}" 오늘 한도(${cap}) 도달 → 다음 실행은 다른 계정 사용`);
-  pushDtoUpdate();
-  try { fs.rmSync(workDir, { recursive: true, force: true }); } catch {}
 }
 
 // ── 이미지 순환(rotation) ── 순서대로 엔진을 돌며 '남은(미생성) 그룹'만 생성. 한 엔진이 한도면 다음 엔진으로 이어감.

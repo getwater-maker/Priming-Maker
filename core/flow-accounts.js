@@ -88,5 +88,13 @@ function pickActive() {
   }
   return null;
 }
+// 계정을 오늘 '쉬게' — 차단(비정상활동)/한도 도달 시 카운트를 한도까지 채워 pickActive 가 오늘은 건너뛰게 한다.
+function rest(id) {
+  const c = load();
+  c.counts = c.counts || {};
+  c.counts[id] = { date: _today(), n: Math.max(countToday(c, id), c.dailyCap) };
+  save(c);
+  return c.counts[id].n;
+}
 
-module.exports = { load, save, list, add, remove, rename, setCap, markUsed, pickActive, FILE };
+module.exports = { load, save, list, add, remove, rename, setCap, markUsed, pickActive, rest, FILE };
