@@ -737,9 +737,12 @@ async function addBgmTrack(pj, bgm, totalDurationSec, mediaZip, log) {
   const vol = (typeof bgm.volume === 'number' && bgm.volume >= 0) ? bgm.volume : 0.15;
   pj.props.tracks[tid] = {
     trackId: tid, mediaId: mid,
-    volume: vol, sourceIn: 0, sourceOut: totalDurationSec,
+    // sourceIn/Out = 소스 파일 내 구간 — 파일 길이를 넘으면 안 됨(루프가 짧게 만들어졌을 때 방어)
+    volume: vol, sourceIn: 0, sourceOut: Math.min(totalDurationSec, fileDur),
     loop: bgm.loop !== false, playbackRate: 1, type: 'videoAudio',
-    assetEffectInfo: { type: 'none', startDelay: bgm.startDelayMs || 0 },
+    // 🔴 assetEffectInfo 는 넣지 않는다 — type:'none' 이라도 트랙에 있으면 Vrew 내보내기가
+    //    실패했던 전례(제목 web 트랙 :585). 시작 지연이 필요할 때만 검증된 fade-in 패턴 사용.
+    ...(bgm.startDelayMs > 0 ? { assetEffectInfo: { type: 'fade-in', duration: 1, startDelay: bgm.startDelayMs } } : {}),
   };
   pj.props.assets[aid] = { trackIds: [tid], role: 'sub' };
   // 절대시간(startDelay 0) + loop → clip[0] 에만 링크해도 전체 타임라인 재생(AI고지와 동일 메커니즘).

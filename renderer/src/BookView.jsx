@@ -40,7 +40,8 @@ const LAYOUT_DEFAULTS = {
   letterSpacingPt: -0.4, indentPt: 15, paragraphSpacingPt: 10,
   marginsMm: { top: 20, bottom: 15, inner: 20, outer: 17 },
   chapterStart: 'recto',
-  headerEven: 'title', headerOdd: 'chapter', headerLine: true, pageNum: 'outer',
+  headerEven: 'title', headerOdd: 'chapter', headerEvenAlign: 'left', headerOddAlign: 'right',
+  headerLine: true, pageNum: 'outer',
   h2SizePt: 10.5, h2Gothic: true, h2Weight: 700, h2Align: 'left', h2Prefix: '❖',
   h2MarginTopPt: 25, h2MarginBottomPt: 10,
   colophonFields: null, coverOverlay: false, coverBarcode: true, coverTextColor: '#111111',
@@ -114,6 +115,15 @@ html,body{margin:0;padding:0;background:#8a8177}
 </style></head><body><div id="vp"></div></body></html>`);
     fdoc.close();
     fdoc.addEventListener('click', (e) => onPreviewClickRef.current(e));
+    // 마우스 휠 = 펼침면 넘기기 (스로틀 250ms — 트랙패드 관성 스크롤 과속 방지)
+    let lastWheel = 0;
+    fdoc.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      const now = Date.now();
+      if (now - lastWheel < 250 || Math.abs(e.deltaY) < 4) return;
+      lastWheel = now;
+      try { viewerRef.current && viewerRef.current.navigateToPage(e.deltaY > 0 ? Navigation.NEXT : Navigation.PREVIOUS); } catch (_) {}
+    }, { passive: false });
     const vp = fdoc.getElementById('vp');
     const viewer = new CoreViewer({ viewportElement: vp, window: iframe.contentWindow }, {
       renderAllPages: true, pageViewMode: PageViewMode.SPREAD, fitToScreen: true, autoResize: true,
@@ -423,16 +433,34 @@ html,body{margin:0;padding:0;background:#8a8177}
         <details>
           <summary>머리글 · 쪽번호</summary>
           <div className="bkform">
-            <label>짝수쪽(왼쪽) 머리글
-              <select value={layout.headerEven} onChange={(e) => L('headerEven', e.target.value)}>
-                <option value="title">책 제목 (관행)</option><option value="chapter">장 제목</option><option value="none">표시 안 함</option>
-              </select>
-            </label>
-            <label>홀수쪽(오른쪽) 머리글
-              <select value={layout.headerOdd} onChange={(e) => L('headerOdd', e.target.value)}>
-                <option value="chapter">장 제목 (관행)</option><option value="title">책 제목</option><option value="none">표시 안 함</option>
-              </select>
-            </label>
+            <div className="bkrow">
+              <label>짝수쪽 머리글
+                <select value={layout.headerEven} onChange={(e) => L('headerEven', e.target.value)}>
+                  <option value="title">책 제목 (관행)</option><option value="subtitle">책 부제</option>
+                  <option value="chapter">장 제목</option><option value="section">소제목(절)</option>
+                  <option value="none">표시 안 함</option>
+                </select>
+              </label>
+              <label>정렬
+                <select value={layout.headerEvenAlign} onChange={(e) => L('headerEvenAlign', e.target.value)}>
+                  <option value="left">왼쪽(바깥) — 관행</option><option value="center">가운데</option><option value="right">오른쪽</option>
+                </select>
+              </label>
+            </div>
+            <div className="bkrow">
+              <label>홀수쪽 머리글
+                <select value={layout.headerOdd} onChange={(e) => L('headerOdd', e.target.value)}>
+                  <option value="chapter">장 제목 (관행)</option><option value="section">소제목(절)</option>
+                  <option value="title">책 제목</option><option value="subtitle">책 부제</option>
+                  <option value="none">표시 안 함</option>
+                </select>
+              </label>
+              <label>정렬
+                <select value={layout.headerOddAlign} onChange={(e) => L('headerOddAlign', e.target.value)}>
+                  <option value="right">오른쪽(바깥) — 관행</option><option value="center">가운데</option><option value="left">왼쪽</option>
+                </select>
+              </label>
+            </div>
             <label className="chk"><input type="checkbox" checked={layout.headerLine} onChange={(e) => L('headerLine', e.target.checked)} /> 머리글 아래 구분선</label>
             <label>쪽번호
               <select value={layout.pageNum} onChange={(e) => L('pageNum', e.target.value)}>

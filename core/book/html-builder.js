@@ -198,15 +198,28 @@ const GOTHIC_STACK = FONT_STACKS['kopub-dotum'];
 // ── 동적 CSS(@page) ──
 function pageCss(o) {
   const m = o.marginsMm;
-  // 머리글 — 구 앱 스타일: 고딕 9pt 회색(#595959) (+선택 시 아래 구분선)
-  const rh = `font-family: ${GOTHIC_STACK}; font-size: 9pt; color: #595959;`
-    + (o.headerLine ? ' border-bottom: 0.4pt solid #dddddd; margin-bottom: 3pt;' : '');
+  // 머리글 — 구 앱 스타일: 고딕 9pt 회색(#595959)
+  const rh = `font-family: ${GOTHIC_STACK}; font-size: 9pt; color: #595959;`;
   const fo = `font-family: ${GOTHIC_STACK}; font-size: 9pt; font-weight: 700; color: #000;`;
-  // 머리글 내용 선택 — 없음/책제목/장제목(first-except: 장 시작 페이지에선 생략)
+  // 머리글 내용 — 책제목/부제/장제목(first-except: 장 시작 페이지 생략)/소제목(절)
   const rhContent = (kind) => kind === 'title' ? 'string(book-title)'
-    : kind === 'chapter' ? 'string(chapter-title, first-except)' : 'none';
-  const headerEvenBox = o.headerEven !== 'none' ? `@top-center { content: ${rhContent(o.headerEven)}; ${rh} }` : '';
-  const headerOddBox = o.headerOdd !== 'none' ? `@top-center { content: ${rhContent(o.headerOdd)}; ${rh} }` : '';
+    : kind === 'subtitle' ? 'string(book-subtitle)'
+    : kind === 'chapter' ? 'string(chapter-title, first-except)'
+    : kind === 'section' ? 'string(sec-title)' : 'none';
+  // 정렬 — vivliostyle 마진 박스는 폭이 내용 기준(@top-left/right 는 세로 쌓임, @top-center 는
+  //   width:100% 무시하고 가운데 배치 — 실측). 판면 폭을 mm 로 명시해 text-align 이 작동하게 한다.
+  const bodyW = o.trimW - m.inner - m.outer; // 판면(글상자) 폭
+  const headerBoxes = (kind, align) => {
+    const line = o.headerLine ? ' border-bottom: 0.4pt solid #dddddd; margin-bottom: 3pt;' : '';
+    if (kind === 'none' && !o.headerLine) return '';
+    const content = kind === 'none' ? '""' : rhContent(kind);
+    // 단일 @top-center 박스(판면 폭 명시) + text-align — 모든 정렬 공통.
+    //   ⚠ @top-left 와 @top-center 를 함께 쓰면 두 박스가 공간을 나눠 가져 왼쪽 글이
+    //   중앙으로 밀리는 충돌(실측) → 박스는 하나만 쓴다.
+    return `@top-center { content: ${content}; width: ${bodyW}mm; text-align: ${align}; ${rh}${line} }`;
+  };
+  const headerEvenBox = headerBoxes(o.headerEven, o.headerEvenAlign);
+  const headerOddBox = headerBoxes(o.headerOdd, o.headerOddAlign);
   // 쪽번호 위치 — 바깥 하단 / 하단 가운데 / 숨김
   const numEven = o.pageNum === 'outer' ? `@bottom-left { content: counter(page); ${fo} }`
     : o.pageNum === 'center' ? `@bottom-center { content: counter(page); ${fo} }` : '';
@@ -230,12 +243,14 @@ function pageCss(o) {
   ${numOdd}
 }
 /* 디스플레이 페이지(표제지·부표제지·판권) + 앞부속: 러닝헤드·폴리오 없음 */
-@page display { @top-center { content: none; } @bottom-left { content: none; } @bottom-center { content: none; } @bottom-right { content: none; } }
-@page front { @top-center { content: none; } @bottom-left { content: none; } @bottom-center { content: none; } @bottom-right { content: none; } }
+@page display { @top-left { content: none; } @top-center { content: none; } @top-right { content: none; } @bottom-left { content: none; } @bottom-center { content: none; } @bottom-right { content: none; } }
+@page front { @top-left { content: none; } @top-center { content: none; } @top-right { content: none; } @bottom-left { content: none; } @bottom-center { content: none; } @bottom-right { content: none; } }
 /* recto 강제로 생긴 백면 */
-@page :blank { @top-center { content: none; } @bottom-left { content: none; } @bottom-center { content: none; } @bottom-right { content: none; } }
+@page :blank { @top-left { content: none; } @top-center { content: none; } @top-right { content: none; } @bottom-left { content: none; } @bottom-center { content: none; } @bottom-right { content: none; } }
 h2.chapter-title { string-set: chapter-title content(); }
+section.chapter h3 { string-set: sec-title content(); }
 .book-title-anchor { string-set: book-title content(); display: none; }
+.book-subtitle-anchor { string-set: book-subtitle content(); display: none; }
 
 /* ── 본문 타이포(옵션) — 테마 기본을 덮어씀 ── */
 body {
@@ -290,8 +305,11 @@ function buildBookHtml(book, opts = {}) {
     chapterStart: opts.chapterStart === 'page' ? 'page' : 'recto',
     footnoteMode: (meta.footnoteMode === '미주' || opts.footnoteMode === 'endnote') ? 'endnote' : 'footnote',
     // ── 머리글/쪽번호 노출 선택 ──
-    headerEven: pick(opts.headerEven, ['title', 'chapter', 'none'], 'title'),   // 짝수쪽(왼쪽)
-    headerOdd: pick(opts.headerOdd, ['chapter', 'title', 'none'], 'chapter'),   // 홀수쪽(오른쪽)
+    //   내용: 책제목/부제/장제목/소제목(절)/없음 · 정렬: 왼쪽/가운데/오른쪽 (기본=바깥쪽 정렬 관행)
+    headerEven: pick(opts.headerEven, ['title', 'subtitle', 'chapter', 'section', 'none'], 'title'),   // 짝수쪽(왼쪽)
+    headerOdd: pick(opts.headerOdd, ['title', 'subtitle', 'chapter', 'section', 'none'], 'chapter'),   // 홀수쪽(오른쪽)
+    headerEvenAlign: pick(opts.headerEvenAlign, ['left', 'center', 'right'], 'left'),   // 짝수쪽 바깥=왼쪽
+    headerOddAlign: pick(opts.headerOddAlign, ['left', 'center', 'right'], 'right'),    // 홀수쪽 바깥=오른쪽
     headerLine: opts.headerLine !== false,                                       // 머리글 아래 구분선
     pageNum: pick(opts.pageNum, ['outer', 'center', 'none'], 'outer'),
     // ── 소제목(원고의 ## = 절) 스타일 — 구 앱: 고딕 800, ❖ 접두, 위25pt/아래10pt ──
@@ -324,6 +342,7 @@ function buildBookHtml(book, opts = {}) {
 
   const bodyParts = [];
   bodyParts.push(`<span class="book-title-anchor">${esc(meta.title || book.fileTitle || '')}</span>`);
+  bodyParts.push(`<span class="book-subtitle-anchor">${esc(meta.subtitle || meta.title || book.fileTitle || '')}</span>`);
 
   // 앞부속 — 반표제지(기본 on) → 속표지 → (앞판권) → 예약섹션들(목차는 자동 생성)
   if (truthyDefault(meta.halfTitle, true)) bodyParts.push(halfTitleHtml(meta));

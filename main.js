@@ -644,8 +644,13 @@ ipcMain.handle('export-vrew', async (_e, args = {}) => {
     const dirs = shortsDirs(S.outRoot, pr.shortsNum);
     const baseName = vrewBaseName(pr);
     const vrewPath = path.join(S.outRoot, `${baseName}.vrew`);
+    // ⚡만들기에서 생성한 BGM 이 있으면 재export(.vrew)에도 포함 — 없으면 그대로.
+    let ep = preset;
+    if (pr._bgmPath && fs.existsSync(pr._bgmPath)) {
+      ep = { ...ep, bgm: { enabled: true, audioPath: pr._bgmPath, volume: (pr._bgmVolume != null ? pr._bgmVolume : 0.15), loop: true } };
+    }
     try {
-      const res = await P.buildProjectVrew(pr, vrewPath, preset, log, captionMaxChars); // 배속은 음성에 이미 반영
+      const res = await P.buildProjectVrew(pr, vrewPath, ep, log, captionMaxChars); // 배속은 음성에 이미 반영
       P.writeSrt(pr, path.join(dirs.subtitles, `${baseName}.srt`), captionMaxChars);
       outs.push({ shortsNum: pr.shortsNum, vrewPath, clipCount: res.clipCount, imageCount: res.imageCount });
       log(`✓ ${baseName}.vrew (clip ${res.clipCount}, image ${res.imageCount})`);
@@ -1510,6 +1515,7 @@ function buildSnapshot() {
       t2Size: pr.t2Size, t2Color: pr.t2Color, t2Align: pr.t2Align,
       bgEnabled: pr.bgEnabled, bgFill: pr.bgFill, bgFillOp: pr.bgFillOp, bgStroke: pr.bgStroke,
       bgStrokeOp: pr.bgStrokeOp, bgStrokeW: pr.bgStrokeW, bgRound: pr.bgRound, bgDashed: pr.bgDashed,
+      bgmPath: pr._bgmPath || null, bgmVolume: pr._bgmVolume != null ? pr._bgmVolume : null, // BGM 재사용(재시작 후 💾 재export)
       groups: pr.groups.map((g) => ({
         num: g.num, phase: g.phase, mode: g.mode, isI2V: g.isI2V, isIntro: g.isIntro,
         imagePrompt: g.imagePrompt, videoPrompt: g.videoPrompt, motionNote: g.motionNote,
@@ -1652,6 +1658,7 @@ function projectsFromSnapshot(snap) {
       t1Size: ps.t1Size, t1Color: ps.t1Color, t1Align: ps.t1Align, t2Size: ps.t2Size, t2Color: ps.t2Color, t2Align: ps.t2Align,
       bgEnabled: ps.bgEnabled, bgFill: ps.bgFill, bgFillOp: ps.bgFillOp, bgStroke: ps.bgStroke,
       bgStrokeOp: ps.bgStrokeOp, bgStrokeW: ps.bgStrokeW, bgRound: ps.bgRound, bgDashed: ps.bgDashed });
+    if (ps.bgmPath && fs.existsSync(ps.bgmPath)) { proj._bgmPath = ps.bgmPath; proj._bgmVolume = ps.bgmVolume; }
     return proj;
   });
 }
@@ -1912,6 +1919,7 @@ async function runMakeAllCore(opts = {}) {
           const r = await eng.textToAudio({ tags, lyrics: '', durationSec: Math.min(Math.ceil(totalSec), 180), outputPath: raw, abortSignal: () => S.abort });
           if (!r.success) { log(`  ⚠ BGM 생성 실패: ${r.error} — 이 편은 BGM 없이`); continue; }
           pr._bgmPath = await MU.loopAudioTo(r.audioPath, totalSec, log);
+          pr._bgmVolume = (bgm.volume != null ? bgm.volume : 0.15); // 💾 재export 에서 재사용
           log(`  ✓ ${prLabel(pr)} BGM`);
           pushDtoUpdate();
         }
@@ -2363,7 +2371,15 @@ ipcMain.handle('make-playlist', async (_e, args = {}) => {
     const outPath = path.join(outRoot, base + '.mp3');
     log(`  ▶ ${t.num}. ${t.title} (${t.durationSec || 180}초)`);
     const r = await eng.textToAudio({ tags: t.tags, lyrics: t.lyrics, durationSec: t.durationSec || 180, outputPath: outPath, abortSignal: () => S.abort });
-    if (r.success) { t.status = 'done'; t.audioPath = r.audioPath; done++; log(`  ✓ ${path.basename(r.audioPath)}`); }
+    if (r.success) {
+      t.status = 'done'; t.audioPath = r.audioPath; done++;
+      // 곡 길이를 실측으로 보정 — ACE-Step 출력이 스펙과 다르면(무음 트림 등) 배경 루프·자막 길이가 어긋남
+      try {
+        const info = await require('./core/media-utils').getMediaInfo(r.audioPath);
+        if (info.durationSec > 1) t.durationSec = Math.round(info.durationSec * 10) / 10;
+      } catch {}
+      log(`  ✓ ${path.basename(r.audioPath)} (${t.durationSec}초)`);
+    }
     else { t.status = 'fail'; t.error = r.error; fail++; log(`  ✗ 실패: ${r.error}`); }
     pushDtoUpdate();
   }
@@ -2402,6 +2418,15 @@ ipcMain.handle('make-playlist-video', async () => {
   if (!S.parsed || S.parsed.kind !== 'playlist') { log('열린 플리가 없습니다 — 스펙을 먼저 여세요.'); return currentDTO(); }
   const tracks = (S.parsed.tracks || []).filter((t) => t.audioPath && fs.existsSync(t.audioPath));
   if (!tracks.length) { log('⚠ 먼저 ⚡ 음악을 생성하세요 (mp3 없는 곡은 영상에서 제외).'); return currentDTO(); }
+  // 곡 길이 실측 보정 — 복원된 세션은 스펙값(예: 180초)만 남아 실제 mp3 와 다를 수 있음(배경 루프 길이 정합)
+  for (const t of tracks) {
+    try {
+      const info = await require('./core/media-utils').getMediaInfo(t.audioPath);
+      if (info.durationSec > 1 && Math.abs(info.durationSec - (t.durationSec || 0)) > 1) {
+        t.durationSec = Math.round(info.durationSec * 10) / 10;
+      }
+    } catch {}
+  }
   S.abort = false;
   const cfg = require('./core/comfy-config').load();
   const { ComfyEngine } = require('./comfy-engine');
@@ -2537,7 +2562,9 @@ function bookLayoutOpts(args = {}) {
     // 여백·장
     marginsMm: l.marginsMm, chapterStart: l.chapterStart, footnoteMode: l.footnoteMode,
     // 머리글/쪽번호
-    headerEven: l.headerEven, headerOdd: l.headerOdd, headerLine: l.headerLine, pageNum: l.pageNum,
+    headerEven: l.headerEven, headerOdd: l.headerOdd,
+    headerEvenAlign: l.headerEvenAlign, headerOddAlign: l.headerOddAlign,
+    headerLine: l.headerLine, pageNum: l.pageNum,
     // 소제목
     h2SizePt: l.h2SizePt, h2Gothic: l.h2Gothic, h2Weight: l.h2Weight, h2Align: l.h2Align,
     h2Prefix: l.h2Prefix, h2MarginTopPt: l.h2MarginTopPt, h2MarginBottomPt: l.h2MarginBottomPt,

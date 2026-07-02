@@ -7,6 +7,22 @@
 **편별 Vrew 4.0.1 .vrew 파일**을 자동 생성하는 Electron 앱. PrimingFlow(D:\PrimingFlow)의 엔진을
 복사·재활용한 독립 클론.
 
+## 📖 머리글 정렬·내용 확장 + 휠 넘기기 / 🎵 BGM·플리 코드 점검 (2026-07-03, v0.1.66)
+- **머리글**: 내용 5종(책제목/책부제/장제목/소제목(절)/없음) × 정렬 3종(왼쪽/가운데/오른쪽) —
+  짝/홀 각각 선택. 기본 = 짝수쪽 책제목 왼쪽 / 홀수쪽 장제목 오른쪽(바깥 정렬 관행).
+  부제=`.book-subtitle-anchor` string-set, 절=`section.chapter h3` string-set(sec-title).
+  ⚠ **vivliostyle 마진박스 실측**: `@top-left` 단독=글자 세로 쌓임 / `@top-left`+`@top-center`
+  병용=공간 분할로 왼쪽 글이 중앙에 밀림 → **`@top-center` 단일 박스 + width(판면폭 mm 명시) +
+  text-align** 이 정답(좌표 실측: 짝수쪽 x0=판면 왼쪽 끝, 홀수쪽 x1=판면 오른쪽 끝 정확).
+- **미리보기 휠 넘기기**: iframe doc 'wheel' 리스너(250ms 스로틀) → navigateToPage NEXT/PREV.
+- **🎵 BGM 점검 4건 수정**: ① addBgmTrack 의 `assetEffectInfo:{type:'none'}` 제거(제목 web 트랙에서
+  Vrew 내보내기 실패시켰던 패턴 — startDelay>0 일 때만 검증된 fade-in) ② sourceOut 을
+  min(총길이, 파일실측길이)로(소스 범위 초과 방어) ③ **💾 재export 에도 BGM 포함**(pr._bgmPath 재사용,
+  스냅샷 bgmPath/bgmVolume 저장·복원 — 재시작 후에도 유지) ④ 플리 곡 길이를 mp3 실측으로 보정
+  (make-playlist 생성 직후 + make-playlist-video 입구 — 스펙 180초 ≠ 실제 출력이면 배경 루프·자막 어긋남).
+  textToAudio·makeBoomerang/loopBoomerangTo·loopAudioTo 는 이상 없음(리뷰 완료).
+  BGM 트랙이 Vrew 에서 실제로 들리는지는 여전히 실측 필요(안 들리면 수동 .vrew 샘플로 필드 확정).
+
 ## 📖 출판 조판 8종 개선 — 사용자 리뷰 반영 (2026-07-03, v0.1.65)
 > 삼국지 미리보기 검토 피드백 8건 반영. 조판 기본값 = **구 Book Publishing 앱 사용자 설정 그대로**
 > (defaults.ts 실측: KoPub바탕 Light 10pt/1.65/자간-0.4pt/들여15pt/문단간격10pt/여백 20·15·20·17).
