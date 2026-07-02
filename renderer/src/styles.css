@@ -276,4 +276,37 @@ h1 .ver{font-size:11px;font-weight:600;color:#a89878;margin-left:6px;vertical-al
 .pllyrics.meta{color:#9a8f80}
 .plerr{font-size:12px;color:var(--danger);margin-top:4px}
 .plaudio{margin-top:8px;width:100%;max-width:420px;height:34px}
+
+/* ── 출판(book) 모드 — 3-pane: 구조 / 페이지 미리보기 / 설정 ── */
+.bkwrap{display:flex;gap:12px;align-items:stretch;padding:6px 2px 20px;height:calc(100vh - 130px);min-height:480px}
+.bkpanel{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px;overflow-y:auto}
+.bkleft{flex:0 0 235px}
+.bkright{flex:0 0 315px}
+.bkcenter{flex:1;min-width:0;display:flex;flex-direction:column;background:var(--card);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.bktitle{font-size:15px;font-weight:800;color:var(--strong);margin-bottom:10px}
+.bkzone{font-size:12px;font-weight:700;color:var(--accent-d);border-bottom:1px solid var(--line);margin:12px 0 6px;padding-bottom:3px}
+.bkpanel label.chk{display:flex;align-items:center;gap:6px;font-size:13px;padding:2px 0;cursor:pointer}
+.bkpanel label.chk input{width:auto}
+.bkchapters{max-height:34vh;overflow-y:auto}
+.bkpart{font-size:12.5px;font-weight:800;color:var(--strong);margin:6px 0 2px}
+.bkch{font-size:12.5px;color:var(--base);padding:2px 0 2px 10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bkbar{display:flex;align-items:center;gap:6px;padding:7px 10px;border-bottom:1px solid var(--line);background:#faf6ee}
+.bkbar .grow{flex:1}
+.bkpage{font-size:13px;font-weight:700;color:var(--strong);min-width:86px;text-align:center}
+.bkviewport{flex:1;overflow:auto;background:#8a8177;position:relative}
+.bkviewport [data-vivliostyle-viewer-viewport]{background:#8a8177 !important}
+.bkviewport [data-src-line]:hover{outline:2px solid rgba(212,165,116,.75);outline-offset:1px;cursor:pointer}
+.bkedit{border-top:2px solid var(--accent);background:#fdf9f1;padding:10px 12px}
+.bkedit textarea{width:100%;box-sizing:border-box;margin:6px 0;font-size:13.5px;line-height:1.6;font-family:inherit}
+.bkform{display:flex;flex-direction:column;gap:7px;padding:8px 2px}
+.bkform label{display:flex;flex-direction:column;gap:3px;font-size:12.5px;color:var(--base)}
+.bkform label.chk{flex-direction:row;align-items:center}
+.bkform input[type=text],.bkform input[type=number],.bkform select{width:100%;box-sizing:border-box}
+.bkright details{border:1px solid var(--line);border-radius:8px;padding:7px 10px;margin-bottom:8px;background:#fdfaf4}
+.bkright summary{font-size:13px;font-weight:700;color:var(--strong);cursor:pointer}
+.bkwarn{font-size:12px;color:#b0483a;background:#fbeae6;border:1px solid #ecc9c2;border-radius:7px;padding:6px 9px;margin:6px 0}
+.bkcoverspec{line-height:1.75;background:#f6efe3;border-radius:7px;padding:8px 10px}
+.bkactions{display:flex;gap:8px;margin-top:10px}
+.bkactions button:first-child{flex:1;font-weight:700}
+.bkstatus{margin-top:10px;font-size:13px;color:var(--base);border-top:1px solid var(--line);padding-top:8px}
 .plactions{display:flex;flex-direction:column;gap:6px;flex-shrink:0}

@@ -42,7 +42,10 @@ function _thresholds(over = {}) {
 }
 
 function parseLongform(text, fallbackTitle, thresholds = {}) {
-  const raw = String(text == null ? '' : text).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  let raw = String(text == null ? '' : text).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  // 출판(POD) 예약 섹션(## [헌사]·[서문]·[판권] 등)은 책 전용 — 영상 대본에서 통째로 제외.
+  //   (롱폼과 출판이 한 원고(.md)를 공유: 일반 ## 장 = 영상+책 본문, ## [예약] = 책만)
+  try { raw = require('./book-parser').stripBookSections(raw); } catch (_) {}
 
   // 파일 제목 — 첫 H1(# …) 또는 폴백(파일명)
   const h1 = raw.match(H1_RE);

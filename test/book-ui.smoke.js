@@ -1,0 +1,93 @@
+'use strict';
+// node test/book-ui.smoke.js — Electron 앱을 Playwright 로 구동해 출판 모드 E2E 스모크.
+//   흐름: 부팅 → 원고 로드(open-book-path) → 📖 출판 탭 → BookView → vivliostyle 미리보기 페이지 수.
+const path = require('path');
+const fs = require('fs');
+const { _electron: electron } = require('playwright');
+
+const ROOT = path.join(__dirname, '..');
+const SAMPLE = path.join(ROOT, 'output', '_book-smoke', 'sample-book.md');
+
+const para = '조선의 밤은 길고 깊었다. 등불 하나에 의지해 역사를 기록하던 사람들이 있었다. '.repeat(5);
+fs.mkdirSync(path.dirname(SAMPLE), { recursive: true });
+fs.writeFileSync(SAMPLE, `# UI스모크 책
+> 저자: 홍길동
+> 출판사: 프라이밍북스
+> 발행인: 김대표
+> 발행일: 2026-08-01
+> ISBN: 979-11-0000-000-0
+> 정가: 10,000원
+> 판형: 46판
+
+## [서문]
+서문이다.
+
+## [목차]
+
+## 1장. 하나
+${para}
+
+## 2장. 둘
+${para}
+
+## [판권]
+`, 'utf8');
+
+(async () => {
+  const app = await electron.launch({ args: [ROOT], env: { ...process.env, PM_UI_SMOKE: '1' } });
+  try {
+    const win = await app.firstWindow();
+    win.on('console', (m) => { if (m.type() === 'error') console.log('[renderer:error]', m.text()); });
+    await win.waitForSelector('h1', { timeout: 20000 });
+    console.log('· 부팅 OK:', await win.locator('h1').first().innerText());
+
+    // 원고를 main 에 직접 로드(파일 대화상자 우회) 후 출판 탭 클릭
+    const r = await win.evaluate((p) => window.api.openBookPath({ scriptPath: p }), SAMPLE);
+    if (!r || !r.dto || r.dto.kind !== 'book') throw new Error('openBookPath 실패: ' + JSON.stringify(r && r.mode));
+    console.log('· 원고 로드 OK — 장', r.dto.parts.reduce((n, p) => n + p.chapters.length, 0), '개');
+
+    await win.click('.modetoggle button:has-text("📖 출판")');
+    await win.waitForSelector('.bkwrap', { timeout: 10000 });
+    console.log('· BookView 렌더 OK');
+
+    // vivliostyle 조판 완료 대기 — .bkpage 에 "N / M쪽"
+    await win.waitForFunction(() => {
+      const el = document.querySelector('.bkpage');
+      return el && /\/\s*\d+쪽/.test(el.textContent);
+    }, null, { timeout: 60000 });
+    const pageTxt = await win.locator('.bkpage').innerText();
+    console.log('· 미리보기 조판 OK —', pageTxt.trim());
+
+    // 미리보기 안에 실제 페이지 DOM + 소스매핑 존재?
+    const nSrc = await win.evaluate(() => document.querySelectorAll('.bkviewport [data-src-line]').length);
+    console.log('· 소스매핑 블록:', nSrc, '개');
+    if (nSrc < 1) throw new Error('data-src-line 블록 없음 — 클릭-편집 불가');
+
+    // 클릭-편집 왕복 — 본문 문단 클릭 → 편집창 → 저장 → 원본 .md 반영 확인
+    await win.evaluate(() => {
+      const els = document.querySelectorAll('.bkviewport p[data-src-line]');
+      for (const el of els) { if (el.textContent.includes('조선의 밤')) { el.click(); return; } }
+      throw new Error('본문 문단을 못 찾음');
+    });
+    await win.waitForSelector('.bkedit textarea', { timeout: 5000 });
+    await win.fill('.bkedit textarea', '오타를 고친 새 문장이다.');
+    await win.click('.bkedit button:has-text("저장")');
+    await win.waitForFunction(() => !document.querySelector('.bkedit'), null, { timeout: 10000 });
+    await new Promise((r) => setTimeout(r, 800)); // 파일 쓰기 여유
+    const saved = fs.readFileSync(SAMPLE, 'utf8');
+    if (!saved.includes('오타를 고친 새 문장이다.')) throw new Error('편집이 원본 .md 에 저장되지 않음');
+    console.log('· 클릭-편집 → 원본 .md 저장 OK');
+
+    // 재조판 완료 대기(편집 반영)
+    await win.waitForFunction(() => {
+      const el = document.querySelector('.bkpage');
+      return el && /\/\s*\d+쪽/.test(el.textContent);
+    }, null, { timeout: 60000 });
+
+    // 스크린샷
+    await win.screenshot({ path: path.join(ROOT, 'output', '_book-smoke', 'ui-bookview.png') });
+    console.log('✅ book-ui.smoke — 전체 통과 (스크린샷: output/_book-smoke/ui-bookview.png)');
+  } finally {
+    await app.close().catch(() => {});
+  }
+})().catch((e) => { console.error('❌', e.message); process.exit(1); });

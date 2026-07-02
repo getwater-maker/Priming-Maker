@@ -55,11 +55,22 @@ const MODE_PROFILES = {
     presetKind: 'channel',
     vrewPrefix: '플리',
   },
+  // 출판(book) — POD 출판용 PDF 생성 전용. 롱폼과 원고(.md) 공유. TTS·이미지·.vrew 없음.
+  book: {
+    label: '출판',
+    defaultAspect: '16:9',
+    aspectOptions: ['16:9'],
+    parser: 'book',                                // core/parsers/book-parser
+    grouping: { strategy: 'none' },
+    presetKind: 'channel',
+    vrewPrefix: '출판',
+  },
 };
 
 function normalizeMode(mode) {
   if (mode === 'longform') return 'longform';
   if (mode === 'playlist') return 'playlist';
+  if (mode === 'book') return 'book';
   return 'shorts';
 }
 

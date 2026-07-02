@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import api from './lib/ipc.js';
 import { splitLines, mLen } from './lib/captions.js';
+import BookView from './BookView.jsx';
 
 const media = (p) => 'media://' + encodeURIComponent(p);
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -40,9 +41,10 @@ const QSTATUS = { idle: '대기', running: '진행중', done: '완료', failed: 
 const ENGINE_META = { genspark: { name: 'Genspark (Nano Banana 2)' }, flow: { name: 'Google Flow' }, comfy: { name: 'ComfyUI (Krea2 Turbo)' } };
 
 export default function App() {
-  const [mode, setMode] = useState('longform'); // 'longform'(주 사용) | 'shorts' | 'playlist'(플리)
+  const [mode, setMode] = useState('longform'); // 'longform'(주 사용) | 'shorts' | 'playlist'(플리) | 'book'(출판)
   const isLf = mode === 'longform';
   const isPl = mode === 'playlist';
+  const isBk = mode === 'book';
   const [dto, setDto] = useState(null);
   const [queue, setQueue] = useState(null); // 현재 모드 작업 큐(적재 대본 목록) — main 의 queueDTO
   const [presets, setPresets] = useState([]);
@@ -116,7 +118,7 @@ export default function App() {
   const [grokAcc, setGrokAcc] = useState(null);          // Grok 멀티계정
 
   const logRef = useRef(null);
-  const loaded = !!(dto && dto.projects && dto.projects.length);
+  const loaded = !!(dto && ((dto.projects && dto.projects.length) || dto.kind === 'book'));
 
   const capCharsN = Math.max(2, parseInt(capChars, 10) || 7);
   // 자막 한 줄 글자수 — 쇼츠는 클립글자수, 롱폼은 분할옵션의 '긴 n자'(longLen) 기준.
@@ -134,7 +136,7 @@ export default function App() {
     }
     return { ttsD, ttsT, imgD, imgT, vidD, vidT };
   })();
-  const _clipMaxSec = () => (videoEngine === 'flow' ? 8.0 : videoEngine === 'comfy' ? 8.0 : 10.0); // Grok=10초 캡(그룹 TTS≤6→6초·>6→10초 자동)
+  const _clipMaxSec = () => ((videoEngine === 'flow' || videoEngine === 'comfy' || videoEngine === 'wan') ? 8.0 : 10.0); // Grok=10초 캡(그룹 TTS≤6→6초·>6→10초 자동)
   const capOverride = useCallback(() => {
     const baseY = parseFloat(capPos) || 0;
     const fine = parseFloat(capFine) || 0;
@@ -545,6 +547,7 @@ export default function App() {
     catch (e) { logline('테스트 오류: ' + e.message); setStatus('테스트 오류'); }
   }
   async function pickWorkflow() { const f = await api.pickFile({ filters: [{ name: 'ComfyUI 워크플로(API json)', extensions: ['json'] }] }); if (f) setComfy((c) => ({ ...c, workflowPath: f })); }
+  async function pickWanWorkflow() { const f = await api.pickFile({ filters: [{ name: 'ComfyUI 워크플로(API json)', extensions: ['json'] }] }); if (f) setComfy((c) => ({ ...c, wanWorkflowPath: f })); }
   async function pickAudioWorkflow() { const f = await api.pickFile({ filters: [{ name: 'ComfyUI 워크플로(API json)', extensions: ['json'] }] }); if (f) setComfy((c) => ({ ...c, audioWorkflowPath: f })); }
   async function pickImageWorkflow() { const f = await api.pickFile({ filters: [{ name: 'ComfyUI 워크플로(API json)', extensions: ['json'] }] }); if (f) setComfy((c) => ({ ...c, imageWorkflowPath: f })); }
   function showPrompt(c, label) {
@@ -959,19 +962,22 @@ export default function App() {
               <button className={mode === 'longform' ? 'active' : ''} onClick={() => switchMode('longform')}>롱폼</button>
               <button className={mode === 'shorts' ? 'active' : ''} onClick={() => switchMode('shorts')}>쇼츠</button>
               <button className={mode === 'playlist' ? 'active' : ''} onClick={() => switchMode('playlist')}>🎵 플리</button>
+              <button className={mode === 'book' ? 'active' : ''} onClick={() => switchMode('book')}>📖 출판</button>
             </span>
             <select title="채널(프리셋)" value={presetName} onChange={(e) => setPresetName(e.target.value)}>
               {presets.map((p) => <option key={p.name} value={p.name}>{p.name}</option>)}
             </select>
             <button className="ghost" title="채널(프리셋) 설정 편집" style={{ padding: '6px 9px' }} onClick={openChannelEditor}>⚙</button>
             <button className="ghost" title="새 채널 추가 (현재 채널 설정을 복사해서 시작)" style={{ padding: '6px 9px' }} onClick={addChannel}>＋ 채널</button>
-            {!isPl && <button onClick={openScript}>📂 대본 열기</button>}
+            {!isPl && !isBk && <button onClick={openScript}>📂 대본 열기</button>}
             {isPl && <button onClick={openPlaylist}>🎵 플리 스펙 열기</button>}
+            {isBk && <button onClick={openBook}>📖 원고 열기</button>}
             {!isPl && <button className="ghost" disabled={!loaded} title="대본 내용 수정 → 재파싱(원본 .md 갱신)" onClick={openScriptEdit}>✏ 대본수정</button>}
-            {!isPl && <button className="ghost" disabled={!loaded} title="수동 저장(자동저장도 항상 켜져 있음)" onClick={saveProject}>💾 작업저장</button>}
-            {!isPl && <button className="ghost" title="저장한 프로젝트 불러오기" onClick={loadProject}>📂 불러오기</button>}
+            {isLf && <button className="ghost" disabled={!loaded} title="이 대본을 출판(POD) 원고로 열기 — 같은 .md 를 공유하며, 출판에서 수정하면 롱폼에도 반영됩니다" onClick={openBookFromLongform}>📖 출판편집</button>}
+            {!isPl && !isBk && <button className="ghost" disabled={!loaded} title="수동 저장(자동저장도 항상 켜져 있음)" onClick={saveProject}>💾 작업저장</button>}
+            {!isPl && !isBk && <button className="ghost" title="저장한 프로젝트 불러오기" onClick={loadProject}>📂 불러오기</button>}
             <button className="ghost" title="새 작업 — 현재 화면 비우기" onClick={resetProject}>🆕 초기화</button>
-            {!isPl && <button className="ghost" title="음성·영상 파일을 텍스트로 변환(STT) → 원본과 같은 폴더에 같은 이름 .txt 생성 (OmniVoice Whisper)" onClick={runStt}>🎧 STT</button>}
+            {!isPl && !isBk && <button className="ghost" title="음성·영상 파일을 텍스트로 변환(STT) → 원본과 같은 폴더에 같은 이름 .txt 생성 (OmniVoice Whisper)" onClick={runStt}>🎧 STT</button>}
             {loaded && (
               <span className="autosave-ind" title="작업은 자동으로 수시 저장됩니다. 같은 대본을 다시 열면 이어서 작업할 수 있어요.">
                 {autoSavedAt ? `✓ 자동저장 ${new Date(autoSavedAt).toLocaleTimeString()}` : '자동저장 켜짐'}
@@ -979,7 +985,7 @@ export default function App() {
             )}
           </div>
         </div>
-        {!isPl && (<>
+        {!isPl && !isBk && (<>
         {/* 생성·제작 행 — 가운데: TTS·이미지·비디오 생성컨트롤 / 오른쪽: 프롬프트·미리보기·만들기·출력 */}
         <div className="hrow hrow3">
           <div className="hside" />
@@ -1001,9 +1007,9 @@ export default function App() {
             <button className="ghost" disabled={!loaded} onClick={() => runImg(null)}>🖼 이미지</button>
             <span className="hdiv" />
             <select title="i2v 비디오 엔진" value={videoEngine} onChange={(e) => setVideoEngine(e.target.value)}>
-              <option value="grok">Grok</option><option value="flow">Flow(8초)</option><option value="comfy">LTX2.3</option><option value="none">없음 (이미지만)</option>
+              <option value="grok">Grok</option><option value="flow">Flow(8초)</option><option value="comfy">LTX2.3</option><option value="wan">Wan (i2v)</option><option value="none">없음 (이미지만)</option>
             </select>
-            {videoEngine === 'comfy' && <button className="ghost" title="ComfyUI i2v 설정" style={{ padding: '6px 9px' }} onClick={openComfy}>⚙ Comfy</button>}
+            {(videoEngine === 'comfy' || videoEngine === 'wan') && <button className="ghost" title="ComfyUI i2v 설정" style={{ padding: '6px 9px' }} onClick={openComfy}>⚙ Comfy</button>}
             {videoEngine === 'grok' && <button className="ghost" title="Grok(X) 멀티계정 등록·로그인·한도" style={{ padding: '6px 9px' }} onClick={openGrokAcc}>⚙ 계정</button>}
             {videoEngine === 'flow' && (
               <span title="Flow 영상 옵션">
@@ -1053,8 +1059,8 @@ export default function App() {
         )}
       </header>
 
-      {/* 분할/합치기 바 — 스크롤 내려도 항상 보이도록 topsticky(고정) 안. (플리 모드 제외) */}
-      {!isPl && <div id="capbar">
+      {/* 분할/합치기 바 — 스크롤 내려도 항상 보이도록 topsticky(고정) 안. (플리·출판 모드 제외) */}
+      {!isPl && !isBk && <div id="capbar">
         <span className="grow" />
         {splitBar}
         {!isLf && <button className="ghost" title="TTS 후 캡 미만 그룹들을 한 그룹으로 합치기" onClick={mergeGroups}>🔗 합치기</button>}
@@ -1076,6 +1082,8 @@ export default function App() {
               onPreview={(src) => setPreview({ kind: 'audio', src })}
               onPreviewMedia={(kind, src) => setPreview({ kind, src })}
               onAttachBg={attachPlBg} onClearBg={clearPlBg} />
+          ) : isBk ? (
+            <BookView dto={dto} setDto={setDto} setStatus={setStatus} logline={logline} />
           ) : (<>
           {queue && queue[mode] && queue[mode].items.length > 0 && (
             <div className="qstrip">
@@ -1237,6 +1245,13 @@ export default function App() {
               <div className="frow"><label>최대 길이(초)</label><input className="n" type="number" style={{ width: 60 }} value={comfy.videoMaxSec || 0} onChange={(e) => setComfy({ ...comfy, videoMaxSec: e.target.value })} /><span className="meta">0=캡 없음</span></div>
               <div className="frow"><label>영상 타임아웃(초)</label><input type="number" value={comfy.timeoutSec} onChange={(e) => setComfy({ ...comfy, timeoutSec: e.target.value })} /></div>
               <div className="meta">⚠ 영상 출력은 <b>SaveVideo/VHS(mp4)</b> 노드 필요. 길이는 LTX Duration(초) 노드에 자동 기록.</div>
+
+              <div className="subhead">📹 영상 (i2v · Wan 2.x)</div>
+              <div className="meta" style={{ marginTop: -2, marginBottom: 4 }}>영상 엔진을 <b>Wan (i2v)</b> 로 고르면 이 워크플로를 씀. 노드는 <b>자동탐지</b>(위 LTX 노드 ID 는 Wan 에 적용 안 함 — LoadImage·model.prompt·model.duration 자동 인식). 로컬 Wan(프레임 단위 length)이면 아래 fps 로 초→프레임 변환.</div>
+              <div className="frow full"><label>Wan 워크플로</label><input placeholder="ComfyUI '저장(API 포맷)' JSON 경로 (Wan i2v)" value={comfy.wanWorkflowPath || ''} onChange={(e) => setComfy({ ...comfy, wanWorkflowPath: e.target.value })} /><button className="ghost" style={{ flex: '0 0 auto' }} onClick={pickWanWorkflow}>찾기</button></div>
+              <div className="frow"><label>fps</label><input className="n" type="number" style={{ width: 60 }} placeholder="16" value={comfy.wanFps ?? 16} onChange={(e) => setComfy({ ...comfy, wanFps: e.target.value })} /><span className="meta">프레임 = 초 × fps (Wan2.2/2.7 기본 16)</span></div>
+              <div className="frow"><label>최대 길이(초)</label><input className="n" type="number" style={{ width: 60 }} value={comfy.wanMaxSec || 0} onChange={(e) => setComfy({ ...comfy, wanMaxSec: e.target.value })} /><span className="meta">0=위 LTX 최대치 사용</span></div>
+              <div className="frow"><label>영상 타임아웃(초)</label><input type="number" placeholder="0=위 영상 타임아웃" value={comfy.wanTimeoutSec || 0} onChange={(e) => setComfy({ ...comfy, wanTimeoutSec: e.target.value })} /></div>
 
               <div className="subhead">🎵 음악 (ACE-Step · '플리' 모드)</div>
               <div className="frow full"><label>음악 서버</label><input placeholder="음악만 로컬로 돌리려면 여기에 (예: http://127.0.0.1:8188). 비우면 위 공통 서버 사용" value={comfy.audioBaseUrl || ''} onChange={(e) => setComfy({ ...comfy, audioBaseUrl: e.target.value })} /></div>
@@ -1443,10 +1458,33 @@ export default function App() {
   async function switchMode(m) {
     if (m === mode) return;
     setMode(m);
-    setAspect(m === 'longform' ? '16:9' : m === 'playlist' ? '16:9' : '9:16');
+    setAspect(m === 'shorts' ? '9:16' : '16:9');
     // 모드별 보관된 대본으로 전환 (없으면 빈 화면). 롱폼/쇼츠/플리 대본은 독립.
     try { const r = await api.setMode({ mode: m }); if (r && r.queue) setQueue(r.queue); setDto(r ? r.dto : null); setFtitle(r && r.dto ? (r.dto.fileTitle || '') : ''); }
     catch (e) { logline('모드 전환 오류: ' + e.message); }
+  }
+
+  // 출판 원고(.md) 열기 — book-parser 로 파싱해 출판 큐에 적재.
+  async function openBook() {
+    try {
+      const r = await api.openBookScript({ presetName: presetName || null });
+      if (!r) return;
+      if (r.mode) setMode(r.mode);
+      setDto(r.dto); if (r.queue) setQueue(r.queue);
+      setFtitle(r.dto ? (r.dto.fileTitle || '') : '');
+      setStatus('출판 원고 로드');
+    } catch (e) { logline('원고 열기 오류: ' + e.message); }
+  }
+  // 롱폼 → 출판편집 — 현재 롱폼 대본(.md)을 그대로 출판 모드로 연다(파일 공유).
+  async function openBookFromLongform() {
+    try {
+      const r = await api.openBookPath({});
+      if (!r) { logline('출판 전환 실패 — 대본 파일을 확인하세요'); return; }
+      setMode('book'); setAspect('16:9');
+      setDto(r.dto); if (r.queue) setQueue(r.queue);
+      setFtitle(r.dto ? (r.dto.fileTitle || '') : '');
+      setStatus('출판 편집 — 롱폼과 같은 원고(.md)를 공유합니다');
+    } catch (e) { logline('출판 전환 오류: ' + e.message); }
   }
 
   // 플리 스펙(.md) 열기 — 클로드가 채팅에서 만든 곡 목록 파일.

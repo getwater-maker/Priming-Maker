@@ -38,6 +38,13 @@ const DEFAULTS = {
   videoDurationNodeId: '',
   videoMaxSec: 0,         // 영상 최대 길이(초) — 0 = 캡 없음(그룹 TTS 길이 그대로). >0 이면 그 값으로 상한.
   matchVideoToAudio: true, // 영상 길이를 그룹 TTS 재생시간에 맞춤 (LTX, 초 단위)
+  videoFps: 0,            // i2v 길이 단위 — 0=초(LTX Duration 노드) / >0=프레임(frames=초×fps). LTX는 0 유지.
+  // ── Wan 2.x i2v — LTX 와 별도 슬롯(영상 엔진 드롭다운 'Wan'). 워크플로만 갈아끼우면 됨 ──────────
+  //   Wan 은 길이를 '프레임 수'로 받으므로(WanImageToVideo.length) 초→프레임 변환에 wanFps 사용.
+  wanWorkflowPath: '',    // Wan i2v ComfyUI '저장(API 포맷)' JSON 경로
+  wanFps: 16,             // Wan i2v fps — 영상 길이(프레임) = 초 × fps. Wan2.2/2.7 기본 16.
+  wanTimeoutSec: 0,       // Wan 영상 1개 최대 대기(초) — 0 이면 위 timeoutSec 사용.
+  wanMaxSec: 0,           // Wan 영상 최대 길이(초) — 0 이면 videoMaxSec 사용.
   // ── ACE-Step 음악(t2a) 설정 — '플리' 모드 전용. audioWorkflowPath 필수 ──────────────────
   // 음악 전용 서버 — 값이 있으면 이미지/영상의 클라우드 설정과 무관하게 음악은 '항상 로컬'(이 주소)로 생성.
   //   예: 이미지·영상은 comfy.org 클라우드, 음악만 로컬 RTX3060(http://127.0.0.1:8188). 빈값=위 공통 서버 사용.

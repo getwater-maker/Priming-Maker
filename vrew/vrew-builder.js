@@ -1356,4 +1356,4 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
   };
 }
 
-module.exports = { buildVrew };
+module.exports = { buildVrew, readImageSize };

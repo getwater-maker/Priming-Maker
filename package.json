@@ -1,7 +1,7 @@
 {
   "name": "priming",
   "productName": "Priming",
-  "version": "0.1.61",
+  "version": "0.1.62",
   "description": "롱폼(16:9)·쇼츠(9:16) 통합 영상 제작 — 대본(.md) → TTS → 이미지/영상 → Vrew(.vrew) 자동 제작 (PrimingFlow + Shots-maker 통합)",
   "main": "bootstrap.js",
   "author": "getwater",
@@ -10,6 +10,7 @@
     "build:renderer": "vite build",
     "dev:renderer": "vite",
     "test:parser": "node test/parser.test.js",
+    "test:book": "node test/book-parser.test.js && node test/book-pdf.smoke.js && node test/book-ui.smoke.js",
     "build:shorts": "node build-shorts.js",
     "pack": "vite build && electron-builder --win --dir",
     "dist": "vite build && electron-builder --win nsis --x64 --publish never",
@@ -18,9 +19,13 @@
     "update:publish": "vite build && node scripts/gen-manifest.js"
   },
   "dependencies": {
+    "@vivliostyle/cli": "^11.0.4",
+    "@vivliostyle/core": "^2.43.2",
     "adm-zip": "^0.5.17",
     "electron-updater": "^6.8.3",
     "ffmpeg-static": "^5.3.0",
+    "markdown-it": "^14.3.0",
+    "markdown-it-footnote": "^4.0.0",
     "playwright": "^1.60.0"
   },
   "devDependencies": {

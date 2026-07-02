@@ -56,6 +56,7 @@ class ComfyEngine {
     this.videoHeightNodeId = cfg.videoHeightNodeId || '';
     this.videoDurationNodeId = cfg.videoDurationNodeId || ''; // i2v 길이(초) 노드
     this.videoMaxSec = Number(cfg.videoMaxSec) > 0 ? Number(cfg.videoMaxSec) : 0; // 0 = 캡 없음(그룹 TTS 길이 그대로)
+    this.videoFps = Number(cfg.videoFps) > 0 ? Number(cfg.videoFps) : 0; // 0=초 단위(LTX) / >0=프레임 단위(Wan: frames=초×fps)
     // 오디오(t2a) — ACE-Step 음악. '플리' 모드 전용. audioWorkflowPath 필수.
     this.audioWorkflowPath = cfg.audioWorkflowPath || '';
     this.audioTagsNodeId = cfg.audioTagsNodeId || '';
@@ -135,7 +136,9 @@ class ComfyEngine {
       } catch (e) { if (/인증/.test(e.message)) throw e; continue; }
       const status = (st && (st.status || st.state) || '').toLowerCase();
       if (status === 'failed' || status === 'cancelled' || status === 'error') {
-        throw new Error(`클라우드 작업 ${status}: ${JSON.stringify(st).slice(0, 200)}`);
+        // 진짜 원인은 error_message 안쪽(이스케이프된 JSON)에 있어 넉넉히 노출.
+        const detail = (st && st.error_message) ? String(st.error_message) : JSON.stringify(st);
+        throw new Error(`클라우드 작업 ${status}: ${detail.slice(0, 1200)}`);
       }
       if (status === 'completed' || status === 'success') {
         const r2 = await fetch(this._url(`/jobs/${promptId}`), { headers: this._headers() });
@@ -177,7 +180,7 @@ class ComfyEngine {
     let wDone = setVal(this.videoWidthNodeId, d.w);
     let hDone = setVal(this.videoHeightNodeId, d.h);
     if (wDone && hDone) return;
-    // 자동 탐지 — value 를 가진 노드 중 _meta.title 이 width/height 인 것.
+    // 자동 탐지 ① — value 를 가진 노드 중 _meta.title 이 width/height 인 것.
     for (const id of Object.keys(graph)) {
       const n = graph[id];
       if (!n.inputs || typeof n.inputs.value !== 'number') continue;
@@ -185,22 +188,54 @@ class ComfyEngine {
       if (!wDone && /width/.test(t)) { n.inputs.value = d.w; wDone = true; }
       else if (!hDone && /height/.test(t)) { n.inputs.value = d.h; hDone = true; }
     }
+    if (wDone && hDone) return;
+    // 자동 탐지 ② — width·height 를 리터럴로 직접 가진 노드(WanImageToVideo/EmptyLatent 등)에 주입.
+    //   (Wan 2.2 템플릿의 WanImageToVideo 는 width/height 가 640×640 고정 → 프로젝트 비율로 덮어씀)
+    for (const id of Object.keys(graph)) {
+      const inp = graph[id].inputs || {};
+      if (typeof inp.width === 'number' && typeof inp.height === 'number') {
+        if (!wDone) inp.width = d.w;
+        if (!hDone) inp.height = d.h;
+        return;
+      }
+    }
   }
-  // i2v 길이(LTX 초 단위) — 그룹 TTS 재생시간으로 설정. videoMaxSec>0 일 때만 상한.
-  //   길이 노드의 value/length 등 있는 필드(리터럴)에 기록.
+  // i2v 길이 — 그룹 TTS 재생시간으로 설정. videoMaxSec>0 일 때만 상한.
+  //   길이 필드는 두 종류: '초'(model.duration/duration/seconds — 클라우드 Wan API·LTX) vs
+  //   '프레임'(length/num_frames — 로컬 Wan). 필드명으로 자동 판별해 알맞은 값을 넣는다.
+  //   초 필드=초 그대로, 프레임 필드=초×videoFps(fps=0 이면 초 그대로 = LTX 기존 동작).
   _setVideoDuration(graph, durSec) {
     const ceil = Math.max(1, Math.ceil(Number(durSec) || 0));
     const sec = this.videoMaxSec > 0 ? Math.min(this.videoMaxSec, ceil) : ceil;
-    const target = sec;
-    const FIELDS = ['value', 'length', 'num_frames', 'frames', 'frame_count', 'video_frames'];
-    const setOn = (n) => { if (!n || !n.inputs) return false; for (const f of FIELDS) { if (f in n.inputs && typeof n.inputs[f] !== 'object') { n.inputs[f] = target; return true; } } return false; };
-    if (this.videoDurationNodeId && graph[this.videoDurationNodeId] && setOn(graph[this.videoDurationNodeId])) return target;
+    const frames = this.videoFps > 0 ? Math.max(1, Math.round(sec * this.videoFps)) : sec;
+    const SEC_FIELDS = ['model.duration', 'duration', 'seconds', 'length_seconds']; // 초 단위
+    const FRAME_FIELDS = ['num_frames', 'frames', 'frame_count', 'video_frames', 'length']; // 프레임 단위
+    const valFor = (f) => (SEC_FIELDS.includes(f) ? sec : FRAME_FIELDS.includes(f) ? frames : (this.videoFps > 0 ? frames : sec));
+    // 초 필드 우선(더 명확), 그다음 프레임 필드, 최후에 애매한 'value'.
+    const ORDER = [...SEC_FIELDS, ...FRAME_FIELDS, 'value'];
+    const setOn = (n) => { if (!n || !n.inputs) return null; for (const f of ORDER) { if ((f in n.inputs) && typeof n.inputs[f] !== 'object') { n.inputs[f] = valFor(f); return n.inputs[f]; } } return null; };
+    // ① 명시 노드
+    if (this.videoDurationNodeId && graph[this.videoDurationNodeId]) { const r = setOn(graph[this.videoDurationNodeId]); if (r != null) return r; }
+    // ② 초/프레임 필드를 직접 가진 노드 (Wan2ImageToVideoApi.model.duration, WanImageToVideo.length 등)
+    for (const id of Object.keys(graph)) {
+      const inp = graph[id].inputs; if (!inp) continue;
+      for (const f of [...SEC_FIELDS, ...FRAME_FIELDS]) { if ((f in inp) && typeof inp[f] !== 'object') { inp[f] = valFor(f); return inp[f]; } }
+    }
+    // ③ 제목 기반 — 단위(초/프레임)를 '제목'으로 판별. (예: Wan 2.2 템플릿의 `Float (Duration)`(초) 프리미티브 →
+    //    워크플로가 floor(초×fps+1)로 프레임 자동 계산. 여기에 프레임값을 넣으면 폭발하므로 반드시 '초'를 넣어야 함.)
     for (const id of Object.keys(graph)) {
       const n = graph[id]; if (!n.inputs) continue;
       const t = ((n._meta && n._meta.title) || '').toLowerCase();
-      if (/duration|length|frames|프레임|길이/.test(t) && setOn(n)) return target;
+      const isSec = /duration|seconds|\bsec\b|초/.test(t);
+      const isFrame = /length|frames|프레임/.test(t);
+      if (!isSec && !isFrame) continue;
+      if (/fps/.test(t)) continue; // FPS 노드는 길이가 아님
+      const v = isSec ? sec : frames;
+      for (const f of ['value', 'length', 'num_frames', 'frames', 'duration', 'seconds']) {
+        if ((f in n.inputs) && typeof n.inputs[f] !== 'object') { n.inputs[f] = v; return v; }
+      }
     }
-    return target;
+    return sec;
   }
   _buildGraph(uploadName, prompt, aspect, durSec) {
     if (!this.workflowPath || !fs.existsSync(this.workflowPath)) {
@@ -224,16 +259,39 @@ class ComfyEngine {
       for (const id of imgIds) graph[id].inputs.image = uploadName;
     }
 
-    // 프롬프트 노드 (CLIPTextEncode 첫 번째 = 긍정) — 있으면 주입
+    // 프롬프트 주입 — CLIPTextEncode(text) 또는 API 노드의 긍정 프롬프트 필드(model.prompt/prompt/positive).
+    //   부정 프롬프트(negative)는 건드리지 않는다.
     if (prompt) {
-      const pId = this.promptNodeId || Object.keys(graph).find((id) => graph[id].class_type === 'CLIPTextEncode' && 'text' in (graph[id].inputs || {}));
-      if (pId && graph[pId] && graph[pId].inputs && 'text' in graph[pId].inputs) graph[pId].inputs.text = String(prompt);
+      const POS_KEYS = ['text', 'prompt', 'model.prompt', 'positive', 'positive_prompt'];
+      const injectPos = (n) => { if (!n || !n.inputs) return false; for (const k of POS_KEYS) { if (k in n.inputs && typeof n.inputs[k] !== 'object') { n.inputs[k] = String(prompt); return true; } } return false; };
+      if (this.promptNodeId && graph[this.promptNodeId]) {
+        injectPos(graph[this.promptNodeId]);
+      } else {
+        // ① CLIPTextEncode(로컬 워크플로) — 긍정 프롬프트 노드 선택. 부정(Negative) 노드에 넣으면 안 됨.
+        //    Wan 2.2 템플릿처럼 긍정/부정 2개가 있고 키 순서상 부정이 먼저 올 수 있어 제목으로 구분한다.
+        const clipIds = Object.keys(graph).filter((id) => graph[id].class_type === 'CLIPTextEncode' && 'text' in (graph[id].inputs || {}));
+        const titleOf = (id) => ((graph[id]._meta && graph[id]._meta.title) || '').toLowerCase();
+        const isNeg = (id) => /negative|부정/.test(titleOf(id));
+        const isPos = (id) => /positive|긍정/.test(titleOf(id));
+        const pId = clipIds.find(isPos) || clipIds.filter((id) => !isNeg(id))[0] || clipIds[0];
+        if (pId) injectPos(graph[pId]);
+        else {
+          // ② API 노드류(Wan2ImageToVideoApi 등) — 긍정 프롬프트 키를 가진 첫 노드(부정 키 제외)
+          for (const id of Object.keys(graph)) {
+            const inp = graph[id].inputs || {};
+            const key = ['prompt', 'model.prompt', 'positive', 'positive_prompt'].find((k) => (k in inp) && typeof inp[k] !== 'object');
+            if (key) { inp[key] = String(prompt); break; }
+          }
+        }
+      }
     }
 
     // seed 랜덤화 — KSampler 류 (seed / noise_seed)
+    //   ⚠ 32비트 범위(0..2147483647)로 제한. Wan2ImageToVideoApi 같은 클라우드 API 노드는 seed 를
+    //   int32 로 검증해서 큰 값(예 1e15)을 보내면 400 을 반환한다. LTX/KSampler 도 이 범위면 안전.
     for (const id of Object.keys(graph)) {
       const inp = graph[id].inputs || {};
-      const rnd = Math.floor(Math.random() * 1e15);
+      const rnd = Math.floor(Math.random() * 2147483647);
       if (typeof inp.seed === 'number') inp.seed = rnd;
       if (typeof inp.noise_seed === 'number') inp.noise_seed = rnd;
     }
@@ -245,9 +303,18 @@ class ComfyEngine {
   }
 
   async _queue(graph) {
+    const payload = { prompt: graph, client_id: this.clientId };
+    // API 노드(Wan2ImageToVideoApi 등 comfy_api_nodes)는 내부에서 파트너 API(Alibaba Wan 등)를 다시 호출하며
+    // comfy.org 계정 인증이 필요하다. REST 게이트웨이용 X-API-Key(헤더)와 별개로, 노드가 읽는 인증 키를
+    // extra_data 로 실어 보내야 "Unauthorized: Please login first to use this node" 를 피한다.
+    //   ComfyUI 는 extra_data.api_key_comfy_org / auth_token_comfy_org 를 API 노드의 hidden 입력으로 주입.
+    //   (auth_token_comfy_org 는 OAuth 베어러 토큰용 — API 키를 거기 넣으면 잘못된 인증이 되므로 넣지 않음)
+    if (this.cloud && this.apiKey) {
+      payload.extra_data = { api_key_comfy_org: this.apiKey };
+    }
     const r = await fetch(this._url('/prompt'), {
       method: 'POST', headers: this._headers({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify({ prompt: graph, client_id: this.clientId }),
+      body: JSON.stringify(payload),
     });
     if (r.status === 401 || r.status === 403) throw new Error('API 키 인증 실패 (401/403) — ⚙ ComfyUI 설정의 키를 확인하세요.');
     if (!r.ok) {

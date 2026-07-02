@@ -44,7 +44,7 @@ function presetThresholds(preset) {
 function grokDurOf(engine) { return engine === 'grok10' ? '10s' : 'auto'; }
 // 영상 엔진별 그룹 캡(초) — renderer _clipMaxSec 와 동일 (flow 8 / comfy 8 / grok 10).
 //   Grok 은 그룹 TTS≤6→6초·>6→10초 자동이므로 캡을 10초로 둬야 6초 초과 그룹이 생긴다.
-function clipMaxOf(videoEngine) { return videoEngine === 'flow' ? 8.0 : videoEngine === 'comfy' ? 8.0 : 10.0; }
+function clipMaxOf(videoEngine) { return (videoEngine === 'flow' || videoEngine === 'comfy' || videoEngine === 'wan') ? 8.0 : 10.0; }
 // AI 고지 결정 — 양쪽 모드 모두 사용자 선택(want)을 따른다. 기본값(롱폼 ON / 쇼츠 OFF)은 렌더러가 정함.
 //   롱폼은 켜면 5초 후 5초간 표시(기존 타이밍 유지). 쇼츠는 preset 의 타이밍을 그대로 사용.
 const AI_NOTICE_TEXT = '본 영상의 음성과 이미지는 AI 도구를 활용하여 제작되었습니다.';
@@ -76,7 +76,7 @@ const S = { parsed: null, scriptPath: null, outRoot: null, preset: null, ttsMgr:
   // 모드별 작업 큐 — 각 모드(롱폼/쇼츠)가 대본 여러 개(items)를 순서대로 보관.
   //   item = { id, parsed, scriptPath, outRoot, settings, status }. activeId = 현재 편집/표시 중인 항목.
   //   S.parsed/scriptPath/outRoot 는 '활성 항목'의 미러 — 기존 코드 전부 그대로 동작.
-  modes: { longform: { items: [], activeId: null }, shorts: { items: [], activeId: null }, playlist: { items: [], activeId: null } } };
+  modes: { longform: { items: [], activeId: null }, shorts: { items: [], activeId: null }, playlist: { items: [], activeId: null }, book: { items: [], activeId: null } } };
 
 let _qSeq = 0;
 const newItemId = () => 'q' + (++_qSeq);
@@ -115,17 +115,18 @@ function setSingleItem(parsed, scriptPath, outRoot) {
   q.items = []; q.activeId = null;
   return addItem(parsed, scriptPath, outRoot);
 }
-// 모드 3-way 정규화 (롱폼/쇼츠/플리)
-function normMode(m) { return m === 'longform' ? 'longform' : m === 'playlist' ? 'playlist' : 'shorts'; }
+// 모드 4-way 정규화 (롱폼/쇼츠/플리/출판)
+function normMode(m) { return m === 'longform' ? 'longform' : m === 'playlist' ? 'playlist' : m === 'book' ? 'book' : 'shorts'; }
 // 지정 모드로 전환 — 그 모드 활성 항목을 S.* 로 복원(재파싱 없음).
 function activateMode(m) {
   S.mode = normMode(m);
   syncActiveToS();
 }
-// 현재 모드 기준 렌더러 DTO — 플리는 별도 형식(곡 목록), 그 외는 프로젝트 DTO.
+// 현재 모드 기준 렌더러 DTO — 플리/출판은 별도 형식, 그 외는 프로젝트 DTO.
 function currentDTO() {
   if (!S.parsed) return null;
   if (S.mode === 'playlist' || S.parsed.kind === 'playlist') return playlistDTO(S.parsed);
+  if (S.mode === 'book' || S.parsed.kind === 'book') return bookDTO(S.parsed);
   return P.toDTO(S.parsed);
 }
 // 플리 파싱본 → 렌더러 DTO (생성 상태·오디오 경로 포함).
@@ -143,6 +144,44 @@ function playlistDTO(parsed) {
       audioPath: t.audioPath || null,
       error: t.error || null,
     })),
+  };
+}
+
+// 출판(book) 파싱본 → 렌더러 DTO — 구조 요약(섹션 목록·부/장 트리·메타·표지·규격).
+function bookDTO(parsed) {
+  const BK = require('./core/parsers/book-parser');
+  const SC = require('./core/book/spine-calc');
+  const PP = require('./core/book/platform-presets');
+  const { metaPlatformId } = require('./core/book/html-builder');
+  const meta = parsed.meta || {};
+  const platformId = metaPlatformId(meta);
+  const pf = PP.getPlatform(platformId);
+  const trimId = meta.trim && PP.TRIM_SIZES[meta.trim] ? meta.trim : pf.defaultTrim;
+  const paperId = meta.paper && PP.PAPERS[meta.paper] ? meta.paper : pf.defaultPaper;
+  const flaps = !!(meta.flaps && !/^(없음|no|off|false|x)$/i.test(String(meta.flaps).trim()));
+  const pages = parsed._lastPages || 0;
+  const spread = SC.coverSpread({ platformId, trimId, paperId, totalPages: pages, flaps });
+  const secDTO = (s) => ({ key: s.key, label: s.label, title: s.title, lineStart: s.lineStart, blocks: (s.blocks || []).length });
+  return {
+    kind: 'book',
+    fileTitle: parsed.fileTitle || '책',
+    scriptPath: S.scriptPath || null,
+    meta,
+    front: (parsed.front || []).map(secDTO),
+    back: (parsed.back || []).map(secDTO),
+    parts: (parsed.parts || []).map((p) => ({
+      title: p.title, num: p.num, lineStart: p.lineStart,
+      chapters: (p.chapters || []).map((c) => ({ num: c.num, title: c.title, lineStart: c.lineStart, blocks: (c.blocks || []).length })),
+    })),
+    footnoteCount: Object.keys(parsed.footnotes || {}).length,
+    reserved: BK.reservedSections(),
+    coverImagePath: parsed.coverImagePath || null,
+    coverCheck: parsed._coverCheck || null,
+    lastPages: pages,
+    platformId, trimId, paperId, flaps, spread,
+    platforms: Object.entries(PP.PLATFORMS).map(([id, p]) => ({ id, label: p.label, trims: p.trims, note: p.note, minPages: p.minPages })),
+    trims: Object.entries(PP.TRIM_SIZES).map(([id, t]) => ({ id, label: t.label })),
+    papers: Object.keys(PP.PAPERS),
   };
 }
 
@@ -525,6 +564,12 @@ function playlistOutRoot(specPath, preset) {
   const outBase = (preset && (preset.outLong || preset.outputFolder)) || path.join(__dirname, 'output');
   return path.join(outBase, '플리', folder);
 }
+// 출판 출력 루트 — <채널 outputFolder>/출판/<원고파일명>/ (내지·표지 PDF + _work 빌드폴더)
+function bookOutRoot(scriptPath, preset) {
+  const folder = _safeFolder(path.basename(scriptPath).replace(/\.md$/i, ''));
+  const outBase = (preset && (preset.outLong || preset.outputFolder)) || path.join(__dirname, 'output');
+  return path.join(outBase, '출판', folder);
+}
 // 쇼츠별 폴더: media-N(이미지+영상) · tts-N(음성) · subtitles-N(SRT). 루트에 쇼츠N.vrew.
 function shortsDirs(outRoot, n) {
   const d = { media: path.join(outRoot, `media-${n}`), tts: path.join(outRoot, `tts-${n}`), subtitles: path.join(outRoot, `subtitles-${n}`) };
@@ -899,14 +944,16 @@ function queueDTO() {
         id: it.id,
         title: (it.parsed && it.parsed.fileTitle) || (it.scriptPath ? path.basename(it.scriptPath) : '대본'),
         file: it.scriptPath ? path.basename(it.scriptPath) : '',
-        projects: (it.parsed && (it.parsed.projects ? it.parsed.projects.length : (it.parsed.tracks || []).length)) || 0,
+        projects: (it.parsed && (it.parsed.projects ? it.parsed.projects.length
+          : it.parsed.parts ? it.parsed.parts.reduce((n, p) => n + p.chapters.length, 0)
+          : (it.parsed.tracks || []).length)) || 0,
         status: it.status || 'idle',
         settings: it.settings || null, // 대본별 생성 설정(채널·스타일·배속·엔진·영상범위)
         active: it.id === q.activeId,
       })),
     };
   };
-  return { mode: S.mode, longform: mk('longform'), shorts: mk('shorts'), playlist: mk('playlist') };
+  return { mode: S.mode, longform: mk('longform'), shorts: mk('shorts'), playlist: mk('playlist'), book: mk('book') };
 }
 function pushDtoUpdate() {
   try { if (win && !win.isDestroyed() && S.parsed) { const d = currentDTO(); if (d) { d.timings = { ...S.timings }; d.queue = queueDTO(); win.webContents.send('dto-update', d); } } } catch {}
@@ -967,8 +1014,22 @@ async function maybeUpscale(project, logger, enabled) {
 // ComfyUI(LTX 등) i2v — 대상 그룹의 이미지를 ComfyUI API 로 영상화 → group.videoPath.
 async function runComfyVideos(project, mediaDir, logger, opts = {}) {
   fs.mkdirSync(mediaDir, { recursive: true });
-  const { onlyNums = null } = opts;
-  const cfg = require('./core/comfy-config').load();
+  const { onlyNums = null, wan = false } = opts;
+  let cfg = require('./core/comfy-config').load();
+  // Wan 변형 — LTX 와 별도 워크플로 슬롯. 길이는 프레임 단위(초×wanFps)로 주입.
+  //   ⚠ LTX 전용 노드 ID(imageNodeId/promptNodeId/videoWidth·Height·DurationNodeId)는 Wan 그래프엔 없다
+  //   (예: LTX 의 269 가 Wan 엔 없어 "노드 없음" 에러). Wan 은 노드 ID 를 비워 자동탐지에 맡긴다.
+  if (wan) {
+    if (!cfg.wanWorkflowPath) { logger('Wan 영상: 워크플로 미설정 — ⚙ Comfy 의 "Wan 워크플로" 를 지정하세요.'); return; }
+    cfg = { ...cfg,
+      workflowPath: cfg.wanWorkflowPath,
+      videoFps: Number(cfg.wanFps) > 0 ? Number(cfg.wanFps) : 16,
+      videoMaxSec: Number(cfg.wanMaxSec) > 0 ? Number(cfg.wanMaxSec) : cfg.videoMaxSec,
+      timeoutSec: Number(cfg.wanTimeoutSec) > 0 ? Number(cfg.wanTimeoutSec) : cfg.timeoutSec,
+      imageNodeId: '', promptNodeId: '', videoWidthNodeId: '', videoHeightNodeId: '', videoDurationNodeId: '',
+    };
+  }
+  const engTag = wan ? 'comfy-wan' : 'comfy-ltx';
   const { ComfyEngine } = require('./comfy-engine');
   // 범위(onlyNums) 그룹만, 없으면 이미지 있는 전체. (랜덤 개수 방식 폐지)
   const targets = (onlyNums && onlyNums.length)
@@ -977,12 +1038,12 @@ async function runComfyVideos(project, mediaDir, logger, opts = {}) {
   if (!targets.length) { logger('Comfy 영상: 이미지가 있는 대상 그룹이 없음 (먼저 이미지 생성)'); return; }
   const eng = new ComfyEngine(cfg, logger);
   const MC = require('./core/media-cache');
-  logger(`[Comfy] ${targets.length}개 영상 생성 (${cfg.baseUrl})…`);
+  logger(`[Comfy] ${wan ? 'Wan' : 'LTX'} ${targets.length}개 영상 생성 (${cfg.baseUrl})…`);
   for (const g of targets) {
     if (S.abort) { logger('⏹ 중단'); break; }
     if (g.videoPath && fs.existsSync(g.videoPath)) continue;
     const outputPath = path.join(mediaDir, `${String(g.num).padStart(2, '0')}.mp4`);
-    const ck = MC.videoKey(g.videoPrompt || g.motionNote || '', g.imagePath, project.aspect || '9:16', 'comfy-ltx');
+    const ck = MC.videoKey(g.videoPrompt || g.motionNote || '', g.imagePath, project.aspect || '9:16', engTag);
     const hit = MC.get(ck);
     if (hit) { try { fs.copyFileSync(hit.file, outputPath); g.videoPath = outputPath; g.videoSourceImage = g.imagePath; g.videoStatus = 'done'; logger(`♻ G${g.num} 영상 재활용(캐시)`); pushDtoUpdate(); continue; } catch {} }
     g.videoStatus = 'generating'; pushDtoUpdate();
@@ -1219,9 +1280,9 @@ ipcMain.handle('video-build', async (_e, args = {}) => {
       if (engine === 'flow') {
         log(`🎬 ${prLabel(pr)} 영상 생성 (Flow i2v${rangeLbl})…`);
         await runFlowVideos(pr, videoDir, log, { model: flowVideoModel, count: flowCount, onlyNums });
-      } else if (engine === 'comfy') {
-        log(`🎬 ${prLabel(pr)} 영상 생성 (ComfyUI i2v${rangeLbl})…`);
-        await runComfyVideos(pr, videoDir, log, { onlyNums });
+      } else if (engine === 'comfy' || engine === 'wan') {
+        log(`🎬 ${prLabel(pr)} 영상 생성 (ComfyUI ${engine === 'wan' ? 'Wan' : 'LTX'} i2v${rangeLbl})…`);
+        await runComfyVideos(pr, videoDir, log, { onlyNums, wan: engine === 'wan' });
       } else {
         log(`🎬 ${prLabel(pr)} 비디오 생성 (Grok ${grokDurOf(engine) === 'auto' ? '자동 6/10초' : grokDurOf(engine)}${rangeLbl})…`);
         const vr = await P.generateHookVideosGrok(pr, videoDir, log, () => S.abort, 0, pushDtoUpdate, onlyNums, grokDurOf(engine));
@@ -1456,7 +1517,7 @@ function buildSnapshot() {
 }
 function writeSnapshotSync() {
   if (!S.parsed) return null;
-  if (S.parsed.kind === 'playlist') return null; // 플리는 워크스페이스+스펙(.md)이 진실 — .smproj 스냅샷 불필요
+  if (S.parsed.kind === 'playlist' || S.parsed.kind === 'book') return null; // 플리/출판은 워크스페이스+원본(.md)이 진실 — .smproj 스냅샷 불필요
   try {
     const { projDir, file } = snapshotFile();
     fs.mkdirSync(projDir, { recursive: true });
@@ -1492,7 +1553,7 @@ function writeWorkspace() {
       const q = S.modes[mode];
       return { activeId: q.activeId, items: q.items.map((it) => ({ id: it.id, scriptPath: it.scriptPath, settings: it.settings || null, status: it.status || 'idle' })) };
     };
-    const ws = { version: 1, mode: S.mode, longform: ser('longform'), shorts: ser('shorts'), playlist: ser('playlist') };
+    const ws = { version: 1, mode: S.mode, longform: ser('longform'), shorts: ser('shorts'), playlist: ser('playlist'), book: ser('book') };
     const f = workspaceFile(); const tmp = f + '.tmp';
     fs.mkdirSync(path.dirname(f), { recursive: true });
     fs.writeFileSync(tmp, JSON.stringify(ws, null, 2), 'utf8'); fs.renameSync(tmp, f);
@@ -1534,6 +1595,23 @@ function restoreWorkspace() {
           q.items.push(it); restored++;
           if (wi.id === ws.playlist.activeId) activeNewId = it.id;
         } catch (e) { log(`플리 복원 실패(${path.basename(wi.scriptPath)}): ${e.message}`); }
+      }
+      q.activeId = activeNewId || (q.items.length ? q.items[q.items.length - 1].id : null);
+    }
+    // 출판(book) — 원고(.md)를 book-parser 로 재파싱해 복원.
+    if (ws.book && Array.isArray(ws.book.items)) {
+      const { parseBookText } = require('./core/parsers/book-parser');
+      const q = S.modes.book; let activeNewId = null;
+      for (const wi of ws.book.items) {
+        if (!wi.scriptPath || !fs.existsSync(wi.scriptPath)) continue;
+        try {
+          const parsed = parseBookText(fs.readFileSync(wi.scriptPath, 'utf8'), path.basename(wi.scriptPath).replace(/\.md$/i, ''));
+          if (wi.settings && wi.settings.book && wi.settings.book.coverImage) parsed.coverImagePath = wi.settings.book.coverImage;
+          const it = { id: newItemId(), parsed, scriptPath: wi.scriptPath, outRoot: bookOutRoot(wi.scriptPath, S.preset),
+            settings: wi.settings || null, status: (wi.status === 'running' ? 'idle' : (wi.status || 'idle')) };
+          q.items.push(it); restored++;
+          if (wi.id === ws.book.activeId) activeNewId = it.id;
+        } catch (e) { log(`출판 복원 실패(${path.basename(wi.scriptPath)}): ${e.message}`); }
       }
       q.activeId = activeNewId || (q.items.length ? q.items[q.items.length - 1].id : null);
     }
@@ -1671,7 +1749,9 @@ async function runMakeAllCore(opts = {}) {
   //   비디오가 ComfyUI '클라우드'(REST·로컬 GPU 미사용)면, 그룹 이미지(+필요 시 그 그룹 TTS)가 준비되는 즉시
   //   그 그룹 영상을 바로 시작 → TTS∥이미지∥비디오 3단계가 겹친다(이미지 다 끝나길 안 기다림).
   //   (브라우저 비디오 grok/flow 는 단일 브라우저 인스턴스 충돌·복잡도 때문에 기존 3단계 일괄 유지.)
-  const comfyVideoCloud = videoEngine === 'comfy' && (() => { try { return !!require('./core/comfy-config').load().cloud; } catch { return false; } })();
+  const isComfyVideo = videoEngine === 'comfy' || videoEngine === 'wan'; // 둘 다 ComfyUI REST 경로
+  const useWanVideo = videoEngine === 'wan';
+  const comfyVideoCloud = isComfyVideo && (() => { try { return !!require('./core/comfy-config').load().cloud; } catch { return false; } })();
   const videoPipeline = canParallel && comfyVideoCloud;
   const needTtsForVideo = (() => { try { return require('./core/comfy-config').load().matchVideoToAudio !== false; } catch { return true; } })(); // comfy 영상 길이=그룹 TTS → 그 그룹 TTS 도 필요
   let ttsStageDone = false, imageStageDone = false;
@@ -1751,7 +1831,7 @@ async function runMakeAllCore(opts = {}) {
       const t0 = Date.now();
       try {
         log(`🎬 G${g.num} (${prLabel(pr)}) 이미지 준비 — 즉시 영상 생성(파이프라인)…`);
-        await runComfyVideos(pr, dirs.media, log, { onlyNums: [g.num] });
+        await runComfyVideos(pr, dirs.media, log, { onlyNums: [g.num], wan: useWanVideo });
         if (!S.abort) await maybeUpscale(pr, log, true);
       } catch (e) { log(`G${g.num} 영상 실패: ${e.message}`); }
       S.timings.video += (Date.now() - t0) / 1000;
@@ -1787,7 +1867,7 @@ async function runMakeAllCore(opts = {}) {
       const t0 = Date.now();
       try {
         if (videoEngine === 'flow') await runFlowVideos(pr, dirs.media, log, { model: flowVideoModel, count: flowCount, onlyNums: vOnly });
-        else if (videoEngine === 'comfy') await runComfyVideos(pr, dirs.media, log, { onlyNums: vOnly });
+        else if (isComfyVideo) await runComfyVideos(pr, dirs.media, log, { onlyNums: vOnly, wan: useWanVideo });
         else {
           const vr = await P.generateHookVideosGrok(pr, dirs.media, log, () => S.abort, 0, pushDtoUpdate, vOnly, grokDurOf(videoEngine));
           if (vr && vr.limitReached) { S.grokLimit = vr.limitReached; S.abort = true; log('⛔ Grok 요청 한도 도달 — 작업을 멈춥니다 (한도 풀린 뒤 다시 만들기)'); }
@@ -2027,15 +2107,15 @@ ipcMain.handle('video-group', async (_e, args = {}) => {
   // 단일 그룹 재생성 = 강제 새로 만들기 → 기존 영상·캐시 비우기.
   try {
     const MC = require('./core/media-cache');
-    const engTag = engine === 'comfy' ? 'comfy-ltx' : 'grok';
+    const engTag = engine === 'wan' ? 'comfy-wan' : engine === 'comfy' ? 'comfy-ltx' : 'grok';
     MC.del(MC.videoKey(g.videoPrompt || g.motionNote || '', g.imagePath, pr.aspect || '9:16', engTag));
     g.videoPath = null; g.videoStatus = 'generating'; pushDtoUpdate();
   } catch {}
   try {
     if (engine === 'flow') {
       await runFlowVideos(pr, videoDir, log, { model: flowVideoModel, count: flowCount, onlyNums: [groupNum] });
-    } else if (engine === 'comfy') {
-      await runComfyVideos(pr, videoDir, log, { onlyNums: [groupNum] });
+    } else if (engine === 'comfy' || engine === 'wan') {
+      await runComfyVideos(pr, videoDir, log, { onlyNums: [groupNum], wan: engine === 'wan' });
     } else {
       await P.generateHookVideosGrok(pr, videoDir, log, () => S.abort, 0, pushDtoUpdate, [groupNum], grokDurOf(engine));
     }
@@ -2386,13 +2466,300 @@ ipcMain.handle('make-playlist-video', async () => {
   return currentDTO();
 });
 
+// ── 출판(POD) — MD 원고 → 내지·표지 PDF ─────────────────────────────
+// 원고 텍스트 재파싱 + 파일 저장 (출판 모드 공용 헬퍼)
+function applyBookText(text) {
+  const { parseBookText } = require('./core/parsers/book-parser');
+  const fallback = S.scriptPath ? path.basename(S.scriptPath).replace(/\.md$/i, '') : '책';
+  const prevCover = S.parsed && S.parsed.coverImagePath;
+  const prevPages = S.parsed && S.parsed._lastPages;
+  S.parsed = parseBookText(text, fallback);
+  if (prevCover) S.parsed.coverImagePath = prevCover;
+  if (prevPages) S.parsed._lastPages = prevPages;
+  storeActive();
+  if (S.scriptPath) { try { fs.writeFileSync(S.scriptPath, text, 'utf8'); } catch (e) { log('원고 저장 실패: ' + e.message); } }
+  return currentDTO();
+}
+function bookScriptText() {
+  try { return fs.readFileSync(S.scriptPath, 'utf8'); } catch { return ''; }
+}
+// 출판 조판 옵션 — 렌더러가 넘긴 layout 을 활성 항목 settings 에 보관(워크스페이스 영속).
+function rememberBookLayout(layout) {
+  const it = activeItem();
+  if (it && layout) { it.settings = { ...(it.settings || {}), book: { ...((it.settings || {}).book || {}), ...layout } }; writeWorkspace(); }
+}
+function bookLayoutOpts(args = {}) {
+  const it = activeItem();
+  const saved = (it && it.settings && it.settings.book) || {};
+  const l = { ...saved, ...(args.layout || {}) };
+  return {
+    fontSizePt: l.fontSizePt, lineHeight: l.lineHeight, chapterStart: l.chapterStart,
+    footnoteMode: l.footnoteMode, marginsMm: l.marginsMm,
+  };
+}
+
+// 원고(.md) 열기 — book-parser 로 파싱해 출판 큐에 적재.
+ipcMain.handle('open-book-script', async (_e, args = {}) => {
+  const preset = args.presetName ? P.getPreset(args.presetName) : (S.preset || null);
+  if (preset) S.preset = preset;
+  const opt = { title: '출판 원고(.md) 열기', properties: ['openFile'], filters: [{ name: 'Markdown', extensions: ['md'] }] };
+  if (preset && preset.scriptFolder && fs.existsSync(preset.scriptFolder)) opt.defaultPath = preset.scriptFolder;
+  const r = await dialog.showOpenDialog(win, opt);
+  if (r.canceled || !r.filePaths[0]) return null;
+  return openBookPath(r.filePaths[0], preset);
+});
+// 경로 지정 열기 — 롱폼 「📖 출판편집」 버튼이 현재 대본을 그대로 넘길 때 사용(무인자=현재 대본).
+ipcMain.handle('open-book-path', (_e, args = {}) => {
+  const p = (args && args.scriptPath) || S.scriptPath;
+  if (!p || !fs.existsSync(p)) { log('원고 파일이 없습니다 — 대본을 먼저 여세요.'); return null; }
+  return openBookPath(p, S.preset);
+});
+function openBookPath(scriptPath, preset) {
+  try {
+    const { parseBookText } = require('./core/parsers/book-parser');
+    const parsed = parseBookText(fs.readFileSync(scriptPath, 'utf8'), path.basename(scriptPath).replace(/\.md$/i, ''));
+    S.mode = 'book';
+    const outRoot = bookOutRoot(scriptPath, preset || S.preset);
+    try { fs.mkdirSync(outRoot, { recursive: true }); } catch {}
+    const it = addItem(parsed, scriptPath, outRoot);
+    if (it.settings && it.settings.book && it.settings.book.coverImage && fs.existsSync(it.settings.book.coverImage)) {
+      parsed.coverImagePath = it.settings.book.coverImage;
+    }
+    const chapters = parsed.parts.reduce((n, p) => n + p.chapters.length, 0);
+    log(`📖 출판 원고 열기: ${parsed.fileTitle} — 장 ${chapters}개 · 앞부속 ${parsed.front.length} · 뒷부속 ${parsed.back.length}`);
+    return { dto: currentDTO(), scriptPath, outRoot, queue: queueDTO(), mode: S.mode };
+  } catch (e) { log('출판 원고 파싱 실패: ' + e.message); return null; }
+}
+
+// 실제 페이지 미리보기 — 조판 HTML 을 출력폴더에 쓰고 media:// URL 반환(렌더러 vivliostyle 이 로드).
+ipcMain.handle('book-preview', (_e, args = {}) => {
+  if (!S.parsed || S.parsed.kind !== 'book') return null;
+  try {
+    const { buildBookHtml } = require('./core/book/html-builder');
+    const { bundledFontCss } = require('./core/book/pdf-builder');
+    rememberBookLayout(args.layout);
+    const mediaUrl = (abs) => 'media://' + encodeURIComponent(abs);
+    const { html } = buildBookHtml(S.parsed, {
+      ...bookLayoutOpts(args),
+      baseDir: S.scriptPath ? path.dirname(S.scriptPath) : undefined,
+      imageUrl: mediaUrl,
+      fontCss: bundledFontCss(mediaUrl),
+      sourceMap: true,
+    });
+    const dir = path.join(S.outRoot || bookOutRoot(S.scriptPath || 'book.md', S.preset), '_preview');
+    fs.mkdirSync(dir, { recursive: true });
+    const htmlPath = path.join(dir, 'book.html');
+    fs.writeFileSync(htmlPath, html, 'utf8');
+    return { url: 'media://' + encodeURIComponent(htmlPath), htmlPath };
+  } catch (e) { log('미리보기 조판 실패: ' + e.message); return null; }
+});
+// 미리보기 페이지 수 보고 — 렌더러 vivliostyle 이 조판 완료 후 알려줌(책등 계산용).
+ipcMain.handle('book-report-pages', (_e, args = {}) => {
+  if (!S.parsed || S.parsed.kind !== 'book') return null;
+  const n = Number(args.pages);
+  if (Number.isFinite(n) && n > 0) { S.parsed._lastPages = n; storeActive(); }
+  return currentDTO();
+});
+
+// PDF 생성 — 내지.pdf (+표지 이미지 있으면 표지.pdf). 완료 후 출력폴더 열기.
+ipcMain.handle('book-build-pdf', async (_e, args = {}) => {
+  if (!S.parsed || S.parsed.kind !== 'book') { log('열린 출판 원고가 없습니다.'); return { dto: currentDTO() }; }
+  const t0 = Date.now();
+  try {
+    const { buildBookHtml, metaPlatformId } = require('./core/book/html-builder');
+    const PB = require('./core/book/pdf-builder');
+    const SC = require('./core/book/spine-calc');
+    const PP = require('./core/book/platform-presets');
+    rememberBookLayout(args.layout);
+    const outRoot = S.outRoot || bookOutRoot(S.scriptPath || 'book.md', S.preset);
+    const workDir = path.join(outRoot, '_work');
+    const assets = PB.prepareWorkAssets(workDir);
+    const { html } = buildBookHtml(S.parsed, {
+      ...bookLayoutOpts(args),
+      baseDir: S.scriptPath ? path.dirname(S.scriptPath) : undefined,
+      imageUrl: assets.imageUrl, fontCss: assets.fontCss, sourceMap: false,
+    });
+    const base = _safeFolder(S.parsed.meta.title || S.parsed.fileTitle || '책');
+    const interiorPdf = path.join(outRoot, `${base}_내지.pdf`);
+    const r = await PB.buildInteriorPdf({ html, outPdf: interiorPdf, workDir, log, pressReady: !!args.pressReady, grayScale: !!args.grayScale });
+    if (!r.success) { log('✗ 내지 PDF 실패: ' + r.error); return { dto: currentDTO(), error: r.error }; }
+    S.parsed._lastPages = r.pages || S.parsed._lastPages || 0;
+
+    // 규격 리포트 — 플랫폼 최소쪽수 경고 + 책등/표지 스프레드 안내
+    const meta = S.parsed.meta || {};
+    const platformId = metaPlatformId(meta);
+    const pf = PP.getPlatform(platformId);
+    const trimId = meta.trim && PP.TRIM_SIZES[meta.trim] ? meta.trim : pf.defaultTrim;
+    const paperId = meta.paper && PP.PAPERS[meta.paper] ? meta.paper : pf.defaultPaper;
+    const flaps = !!(meta.flaps && !/^(없음|no|off|false|x)$/i.test(String(meta.flaps).trim()));
+    const spread = SC.coverSpread({ platformId, trimId, paperId, totalPages: S.parsed._lastPages, flaps });
+    if (pf.minPages && S.parsed._lastPages < pf.minPages) {
+      log(`⚠ ${pf.label} 최소 ${pf.minPages}쪽 — 현재 ${S.parsed._lastPages}쪽 (승인 거부될 수 있음)`);
+    }
+    log(`📐 책등 ${spread.spineMm}mm · 표지 스프레드 ${spread.widthMm}×${spread.heightMm}mm (${spread.widthPx}×${spread.heightPx}px @300dpi${flaps ? ' · 날개 포함' : ''})`);
+
+    // 표지 — 첨부 이미지가 있으면 스프레드 치수 PDF 로.
+    let coverResult = null;
+    if (S.parsed.coverImagePath && fs.existsSync(S.parsed.coverImagePath)) {
+      const coverPdf = path.join(outRoot, `${base}_표지.pdf`);
+      coverResult = await PB.buildCoverPdf({ imagePath: S.parsed.coverImagePath, spread, outPdf: coverPdf, workDir, log });
+      if (!coverResult.success) log('✗ 표지 PDF 실패: ' + coverResult.error);
+    } else {
+      log('ℹ 표지 이미지 미첨부 — 내지만 생성. 표지는 우측 패널에서 이미지를 첨부하세요.');
+    }
+    S.timings.make = Math.round((Date.now() - t0) / 1000);
+    log(`📕 출판 PDF 완료 — 내지 ${S.parsed._lastPages}쪽${coverResult && coverResult.success ? ' + 표지' : ''} (${S.timings.make}초) → ${outRoot}`);
+    try { shell.openPath(outRoot); } catch {}
+    storeActive();
+    return { dto: currentDTO(), pages: S.parsed._lastPages, interiorPdf, coverPdf: coverResult && coverResult.success ? coverResult.pdfPath : null };
+  } catch (e) {
+    log('✗ 출판 PDF 오류: ' + e.message);
+    return { dto: currentDTO(), error: e.message };
+  }
+});
+
+// 표지 이미지 첨부 — 스프레드 기대 치수와 검증(±1mm 또는 비율 1%).
+ipcMain.handle('book-attach-cover', async () => {
+  if (!S.parsed || S.parsed.kind !== 'book') return currentDTO();
+  const r = await dialog.showOpenDialog(win, {
+    title: '표지 이미지(앞표지+책등+뒷표지 통합 스프레드) 첨부',
+    properties: ['openFile'], filters: [{ name: '이미지', extensions: ['png', 'jpg', 'jpeg', 'webp', 'tif', 'tiff'] }],
+  });
+  if (r.canceled || !r.filePaths[0]) return currentDTO();
+  const fp = r.filePaths[0];
+  S.parsed.coverImagePath = fp;
+  // 치수 검증 (이미지 헤더에서 px 읽기 — vrew-builder 의 readImageSize 재사용)
+  try {
+    const { readImageSize } = require('./vrew/vrew-builder');
+    const dim = readImageSize ? readImageSize(fp) : null;
+    if (dim && dim.width) {
+      const d = bookDTO(S.parsed);
+      const SC = require('./core/book/spine-calc');
+      S.parsed._coverCheck = { ...SC.validateCoverImage({ imgW: dim.width, imgH: dim.height, spread: d.spread }), imgW: dim.width, imgH: dim.height };
+      const c = S.parsed._coverCheck;
+      log(c.ok
+        ? `🖼 표지 첨부: ${path.basename(fp)} (${dim.width}×${dim.height}px${c.lowDpi ? ' · ⚠ 실효 ' + c.effectiveDpi + 'dpi < 300' : ''})`
+        : `⚠ 표지 치수 불일치: ${dim.width}×${dim.height}px — 기대 ${c.expected.widthPx}×${c.expected.heightPx}px (${c.expected.widthMm}×${c.expected.heightMm}mm)`);
+    } else { S.parsed._coverCheck = null; log(`🖼 표지 첨부: ${path.basename(fp)}`); }
+  } catch (_) { S.parsed._coverCheck = null; log(`🖼 표지 첨부: ${path.basename(fp)}`); }
+  rememberBookLayout({ coverImage: fp });
+  storeActive();
+  return currentDTO();
+});
+ipcMain.handle('book-clear-cover', () => {
+  if (!S.parsed || S.parsed.kind !== 'book') return currentDTO();
+  S.parsed.coverImagePath = null; S.parsed._coverCheck = null;
+  rememberBookLayout({ coverImage: null });
+  log('표지 이미지 제거');
+  return currentDTO();
+});
+
+// 구조 패널 — 예약 섹션 넣기/빼기 = 원고(.md)에 템플릿 삽입/삭제.
+ipcMain.handle('book-toggle-section', (_e, args = {}) => {
+  if (!S.parsed || S.parsed.kind !== 'book' || !S.scriptPath) return currentDTO();
+  const BK = require('./core/parsers/book-parser');
+  const key = args.key;
+  const rs = BK.reservedSections().find((x) => x.key === key);
+  if (!rs) return currentDTO();
+  const text = bookScriptText();
+  const lines = text.split(/\r?\n/);
+  const exists = [...(S.parsed.front || []), ...(S.parsed.back || [])].find((s) => s.key === key);
+  if (args.on && !exists) {
+    const tpl = BK.sectionTemplate(key).trimEnd();
+    if (rs.zone === 'back') {
+      lines.push(tpl);
+    } else {
+      // 앞부속 — 첫 본문 장(비대괄호 ## 헤딩) 앞에 삽입. 없으면 파일 끝.
+      let at = lines.length;
+      for (let i = 0; i < lines.length; i++) {
+        const m = lines[i].match(/^##\s+(.+)$/);
+        if (m && !/^\[/.test(m[1].trim())) { at = i; break; }
+      }
+      lines.splice(at, 0, tpl, '');
+    }
+    log(`＋ [${rs.label}] 섹션 추가`);
+  } else if (!args.on && exists) {
+    // 해당 섹션 헤더부터 다음 ## 헤딩 직전까지 제거
+    const start = exists.lineStart;
+    let end = lines.length;
+    for (let i = start + 1; i < lines.length; i++) { if (/^##\s+/.test(lines[i].trim())) { end = i; break; } }
+    lines.splice(start, end - start);
+    log(`－ [${rs.label}] 섹션 제거`);
+  } else { return currentDTO(); }
+  return applyBookText(lines.join('\n'));
+});
+
+// 책 정보(메타) 편집 — 원고 상단 `> 라벨: 값` 줄을 갱신(없으면 삽입). title 은 H1.
+const BOOK_META_LABELS = {
+  subtitle: '부제', author: '저자', translator: '옮긴이', publisher: '출판사', issuer: '발행인',
+  issueDate: '발행일', isbn: 'ISBN', price: '정가', ebookPrice: '전자책', regNo: '출판등록',
+  address: '주소', phone: '전화', fax: '팩스', homepage: '홈페이지', email: '이메일',
+  copyright: '저작권', trim: '판형', platform: '플랫폼', paper: '용지', flaps: '날개',
+  colophonPos: '판권위치', halfTitle: '반표제지', footnoteMode: '각주방식', logo: '로고',
+  qr: 'QR', qrLabel: 'QR라벨',
+};
+ipcMain.handle('book-set-meta', (_e, args = {}) => {
+  if (!S.parsed || S.parsed.kind !== 'book' || !S.scriptPath) return currentDTO();
+  const key = args.key; const value = String(args.value == null ? '' : args.value).trim();
+  const text = bookScriptText();
+  const lines = text.split(/\r?\n/);
+  if (key === 'title') {
+    let done = false;
+    for (let i = 0; i < lines.length; i++) {
+      if (/^#\s+/.test(lines[i])) { lines[i] = '# ' + value; done = true; break; }
+      if (/^##\s+/.test(lines[i])) break;
+    }
+    if (!done) lines.unshift('# ' + value);
+    return applyBookText(lines.join('\n'));
+  }
+  const label = BOOK_META_LABELS[key];
+  if (!label) return currentDTO();
+  // 이 표준키에 매핑되는 기존 메타 줄 탐색 (별칭 포함 — book-parser 의 META_KEYS 로 판정)
+  const { parseBookText } = require('./core/parsers/book-parser');
+  let bodyStart = lines.findIndex((l) => /^##\s+/.test(l.trim()));
+  if (bodyStart < 0) bodyStart = lines.length;
+  let found = -1;
+  for (let i = 0; i < bodyStart; i++) {
+    const m = lines[i].trim().match(/^>\s*([^:：]{1,12})\s*[:：]/);
+    if (!m) continue;
+    const probe = parseBookText(`# t\n> ${m[1]}: probe`, 't');
+    if (probe.meta[key] === 'probe') { found = i; break; }
+  }
+  if (value === '' && found >= 0) { lines.splice(found, 1); }
+  else if (found >= 0) { lines[found] = `> ${label}: ${value}`; }
+  else if (value !== '') {
+    // H1 뒤 마지막 연속 > 메타 줄 다음에 삽입
+    let at = 0;
+    for (let i = 0; i < bodyStart; i++) {
+      if (/^#\s+/.test(lines[i].trim())) at = i + 1;
+      else if (/^>\s*/.test(lines[i].trim())) at = i + 1;
+    }
+    lines.splice(at, 0, `> ${label}: ${value}`);
+  } else return currentDTO();
+  return applyBookText(lines.join('\n'));
+});
+
+// 미리보기 클릭-편집 — 원고의 lineStart..lineEnd 를 새 텍스트로 치환.
+ipcMain.handle('book-apply-edit', (_e, args = {}) => {
+  if (!S.parsed || S.parsed.kind !== 'book' || !S.scriptPath) return currentDTO();
+  const start = Number(args.lineStart), end = Number(args.lineEnd);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end < start) return currentDTO();
+  const lines = bookScriptText().split(/\r?\n/);
+  if (end >= lines.length) return currentDTO();
+  const newLines = String(args.text == null ? '' : args.text).replace(/\r\n/g, '\n').split('\n');
+  lines.splice(start, end - start + 1, ...newLines);
+  log(`✏ 본문 수정 (${start + 1}~${end + 1}행 → ${newLines.length}행)`);
+  return applyBookText(lines.join('\n'));
+});
+
 // 대본 수정 — 편집한 텍스트로 재파싱(+원본 .md 갱신).
 ipcMain.handle('get-script-text', () => {
   try { return fs.readFileSync(S.scriptPath, 'utf8'); } catch { return ''; }
 });
 ipcMain.handle('apply-script-text', (_e, args = {}) => {
   const text = String((args && args.text) || '');
-  if (!text.trim()) { log('대본 내용이 비어 있습니다'); return S.parsed ? P.toDTO(S.parsed) : null; }
+  if (!text.trim()) { log('대본 내용이 비어 있습니다'); return S.parsed ? currentDTO() : null; }
+  if (S.mode === 'book' || (S.parsed && S.parsed.kind === 'book')) return applyBookText(text); // 출판 — book-parser 로
   S.parsed = P.parseScriptText(text, currentMode(), presetThresholds(S.preset));
   storeActive();
   if (S.scriptPath) { try { fs.writeFileSync(S.scriptPath, text, 'utf8'); } catch (e) { log('대본 파일 저장 실패: ' + e.message); } }

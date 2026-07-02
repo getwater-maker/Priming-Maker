@@ -1,0 +1,156 @@
+/* book-theme.css — 출판(POD) 내지 조판 정적 규칙.
+ * 동적 부분(@page 크기·여백·러닝헤드·폰트)은 html-builder 가 생성해 이 앞에 붙인다.
+ * 근거 수치: 본문 10pt/행간 1.8, 문단 1em 들여쓰기+간격0, 각주 -2pt,
+ *           러닝헤드 짝수쪽=책제목·홀수쪽=장제목, 백면·표제지·장시작 폴리오 숨김. */
+
+/* ── 공통 ── */
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: var(--font-body);
+  font-size: var(--font-size);
+  line-height: var(--line-height);
+  text-align: justify;
+  word-break: keep-all;
+  overflow-wrap: break-word;
+  font-kerning: normal;
+  color: #000;
+}
+p { margin: 0; text-indent: 1em; orphans: 2; widows: 2; }
+p.noindent { text-indent: 0; }
+em { font-style: italic; }
+strong { font-weight: 700; }
+
+/* ── 표제지류(디스플레이 페이지) ── */
+section.halftitle, section.titlepage {
+  page: display;
+  break-before: recto;
+  text-align: center;
+  text-indent: 0;
+}
+section.halftitle .ht-title {
+  margin-top: 30%;
+  font-size: 1.3em;
+  letter-spacing: 0.2em;
+}
+section.titlepage { display: flex; flex-direction: column; height: 100%; }
+section.titlepage .tp-main { margin-top: 22%; }
+section.titlepage .tp-title { font-size: 2em; font-weight: 700; line-height: 1.4; margin: 0; }
+section.titlepage .tp-subtitle { font-size: 1.05em; margin-top: 1.2em; color: #222; }
+section.titlepage .tp-author { margin-top: 3em; font-size: 1.05em; }
+section.titlepage .tp-translator { margin-top: 0.6em; font-size: 0.95em; color: #222; }
+section.titlepage .tp-publisher { margin-top: auto; margin-bottom: 8%; font-size: 0.95em; letter-spacing: 0.15em; }
+section.titlepage .tp-logo { max-height: 14mm; margin: 0 auto 2mm; display: block; }
+
+/* ── 앞부속/뒷부속 섹션 ── */
+section.front-section, section.back-section {
+  page: front;
+  break-before: recto;
+}
+section.front-section > h2, section.back-section > h2 {
+  font-size: 1.35em;
+  font-weight: 700;
+  text-align: center;
+  margin: 18% 0 3em;
+  break-after: avoid;
+}
+/* 헌사·제사 — 제목 없이 본문만 가운데 배치 */
+section.sec-dedication > h2, section.sec-epigraph > h2 { display: none; }
+section.sec-dedication, section.sec-epigraph { text-align: center; }
+section.sec-dedication p, section.sec-epigraph p { text-indent: 0; margin-top: 40%; font-size: 1.05em; }
+
+/* ── 목차 ── */
+nav.toc { page: front; break-before: recto; }
+nav.toc h2 { font-size: 1.35em; text-align: center; margin: 18% 0 3em; }
+nav.toc ol { list-style: none; margin: 0; padding: 0; }
+nav.toc li { margin: 0.35em 0; text-indent: 0; }
+nav.toc li.toc-part { font-weight: 700; margin-top: 1.2em; }
+nav.toc li.toc-front, nav.toc li.toc-back { color: #222; }
+nav.toc li.toc-chapter { padding-left: 1em; }
+nav.toc a { text-decoration: none; color: inherit; }
+nav.toc a::after {
+  content: leader(dotted) " " target-counter(attr(href url), page);
+  font-weight: 400;
+}
+
+/* ── 부(部) 표제지 ── */
+section.part-title {
+  page: display;
+  break-before: recto;
+  break-after: recto;   /* 뒷면 백면 → 다음 장도 홀수쪽 */
+  text-align: center;
+}
+section.part-title .pt-num { margin-top: 30%; font-size: 1.1em; letter-spacing: 0.3em; }
+section.part-title h2 { font-size: 1.7em; font-weight: 700; margin-top: 1.2em; }
+
+/* ── 장(章) ── */
+section.chapter { page: main; break-before: var(--chapter-break); }
+section.chapter > h2.chapter-title {
+  font-size: 1.5em;
+  font-weight: 700;
+  line-height: 1.5;
+  margin: 14% 0 4em;
+  text-align: left;
+  break-after: avoid;
+}
+section.chapter h3 { font-size: 1.1em; font-weight: 700; margin: 2.2em 0 1em; break-after: avoid; }
+section.chapter h4 { font-size: 1em; font-weight: 700; margin: 1.8em 0 0.8em; break-after: avoid; }
+
+/* ── 본문 요소 ── */
+blockquote {
+  margin: 1.4em 1.5em;
+  text-indent: 0;
+  font-size: 0.95em;
+  color: #111;
+  white-space: pre-line;
+}
+div.verse {
+  margin: 1.6em auto;
+  text-align: center;
+  text-indent: 0;
+  white-space: pre-wrap;
+  font-size: 0.98em;
+  line-height: 2.0;
+}
+figure { margin: 1.8em 0; text-align: center; text-indent: 0; break-inside: avoid; }
+figure img { max-width: 100%; max-height: 120mm; }
+figcaption { font-size: 0.85em; color: #333; margin-top: 0.7em; }
+hr.scene { border: none; text-align: center; margin: 1.8em 0; }
+hr.scene::after { content: "✻"; color: #555; font-size: 0.9em; }
+
+/* ── 각주 ── */
+span.footnote {
+  float: footnote;
+  font-size: calc(var(--font-size) - 2pt);
+  line-height: 1.5;
+  text-align: justify;
+  text-indent: 0;
+}
+::footnote-call { content: counter(footnote); font-size: 0.65em; vertical-align: super; line-height: 0; }
+::footnote-marker { content: counter(footnote) ") "; }
+
+/* ── 미주(endnotes 모드) ── */
+section.endnotes ol { font-size: 0.9em; line-height: 1.6; padding-left: 1.5em; }
+section.endnotes li { margin: 0.4em 0; }
+sup.enref { font-size: 0.65em; }
+
+/* ── 판권지 ── */
+section.colophon {
+  page: display;
+  break-before: recto;
+  font-size: 0.82em;
+  line-height: 1.7;
+}
+section.colophon .cp-wrap { margin-top: 55%; }
+section.colophon.cp-front .cp-wrap { margin-top: 10%; }
+section.colophon .cp-title { font-weight: 700; font-size: 1.15em; margin-bottom: 0.2em; text-indent: 0; }
+section.colophon .cp-subtitle { color: #222; margin-bottom: 1.4em; text-indent: 0; }
+section.colophon table { border-collapse: collapse; }
+section.colophon td { padding: 0.06em 0; vertical-align: top; }
+section.colophon td.k { white-space: nowrap; padding-right: 1.2em; color: #333; }
+section.colophon .cp-legal { margin-top: 1.4em; color: #333; text-indent: 0; }
+section.colophon .cp-legal p { text-indent: 0; margin: 0.2em 0; }
+section.colophon img.cp-qr { width: 16mm; height: 16mm; margin-top: 1em; }
+section.colophon .cp-qrlabel { font-size: 0.85em; color: #333; }
+
+/* ── 저자소개 등 뒷부속 본문 ── */
+section.back-section p { text-indent: 0; margin-bottom: 0.6em; }

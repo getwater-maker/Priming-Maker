@@ -7,6 +7,64 @@
 **편별 Vrew 4.0.1 .vrew 파일**을 자동 생성하는 Electron 앱. PrimingFlow(D:\PrimingFlow)의 엔진을
 복사·재활용한 독립 클론.
 
+## 📖 출판(POD) 모드 — MD 원고 → 내지·표지 PDF (2026-07-02, v0.1.62)
+- 모드 토글 **4-way**: 롱폼/쇼츠/🎵플리/**📖출판**. 롱폼과 원고(.md) **공유** — 롱폼 헤더 「📖 출판편집」
+  버튼(IPC `open-book-path`, 무인자=현재 대본)으로 전환. 출판에서 고친 텍스트는 같은 .md 에 저장돼 롱폼에도 반영.
+- **원고 규약** (`docs/출판-원고-예시.md`): `# 제목` + `> 라벨: 값` 메타(저자/ISBN/정가/출판등록…) +
+  **`## [예약섹션]`**(헌사·추천사·역자서문·서문·일러두기·목차·프롤로그/에필로그·후기·감사의글·부록·참고문헌·
+  저자소개·판권 — 별칭 허용, 관행 순서로 자동 재배열) + 일반 `## N장.` = 본문 장(`## N부.` = 부 표제지),
+  H3=절/H4=소절, `>`=인용, ` ```시 `=시(행 보존), `![캡션](경로)`=삽화, `[^1]`=각주. [목차]·[판권]은 마커만
+  (자동 생성 — 목차 쪽번호 target-counter, 판권지는 메타로 조판+법정 7필드 미입력 경고).
+  **롱폼 파서는 `## [예약]` 섹션을 스킵**(book-parser.stripBookSections — longform-parser 전처리).
+- **모듈**: `core/parsers/book-parser.js`(MD→BookModel, lineStart/End 소스매핑) ·
+  `core/book/platform-presets.js`(부크크〔공식 규격도구 실측: 46판/A5/B5/A4·bleed3·날개100 고정·min50p〕/
+  교보POD〔신국판 등 6종〕/작가와〔베타-부크크 준용〕+ 용지 낱장두께) · `spine-calc.js`(책등=(쪽÷2)×두께,
+  표지 스프레드=`bleed3+[날개100]+뒤+책등+앞+[날개100]+3`×`높이+6`) · `html-builder.js`+`book-theme.css`
+  (CSS Paged Media) · `pdf-builder.js`(**@vivliostyle/cli 자식 프로세스**, ELECTRON_RUN_AS_NODE=1 +
+  playwright chromium `--executable-browser` 재사용, PDF 쪽수는 zlib 로 ObjStm 해제 카운트).
+- **조판 확정 사항(스모크 실측)**: 목차 쪽번호(`target-counter`+`leader(dotted)`) ✓ · 러닝헤드 짝수쪽=책제목/
+  홀수쪽=장제목(**`string(chapter-title, first-except)`** — `@page name:first` 는 vivliostyle 에서 장별로 안 먹혀
+  first-except 로 장 시작 러닝헤드 생략) ✓ · `break-before: recto`+`@page :blank` 백면 ✓ · `float: footnote` 각주 ✓
+  · 판형 MediaBox 127×188mm 정확 ✓. **폰트: 가변(variable) TTF 는 Chromium 이 Type3 로 구움** → 정적
+  나눔명조/고딕(OFL, assets/fonts/book/) 동봉 = CIDFontType2 정상 임베딩. **CLI 는 HTML 을 HTTP 서빙하므로
+  file:/// 서브리소스 차단** → `prepareWorkAssets()`가 폰트·이미지를 _work 로 복사해 상대경로 참조.
+- **UI**: `renderer/src/BookView.jsx` 3-pane — 좌 책구조(섹션 체크=MD 템플릿 삽입/삭제 IPC `book-toggle-section`) /
+  중앙 **실제 페이지 미리보기**(@vivliostyle/core CoreViewer, media:// 로 조판 HTML 로드, 렌더 완료 시
+  `book-report-pages` 로 쪽수 보고→책등 계산) + **문단 클릭-편집**(data-src-line → `book-apply-edit` 로 원본 .md
+  줄 치환) / 우 설정(규격·조판·표지 첨부〔치수검증 validateCoverImage〕·책정보 폼=`book-set-meta` 가 `> 메타줄` 갱신).
+- **출력**: `<채널 outLong||outputFolder>/출판/<원고명>/` 에 `<제목>_내지.pdf` + `<제목>_표지.pdf`(표지 이미지
+  첨부 시). press-ready(PDF/X-1a)는 Ghostscript 필요라 옵션(기본 off — 부크크·교보는 일반 PDF 입고 가능).
+- 테스트: `npm run test:book` = book-parser.test(44단언) + book-pdf.smoke(헤드리스 PDF) + book-ui.smoke(Playwright
+  _electron E2E: 부팅→로드→미리보기 조판→클릭-편집→.md 저장 왕복).
+- ⚠ **deps 변경**(@vivliostyle/cli·core, markdown-it) → **이 릴리스는 설치파일 재배포 필요**(라이트업데이트는
+  "재설치 필요" 안내가 뜸). markdown-it 은 현재 미사용(인라인 렌더 자체 구현) — 향후 확장용.
+- ⏳ **실측 필요**: 부크크 규격체크 도구에 실제 내지·표지 PDF 업로드 1회 확인(사용자). 대형 원고(300p+)의
+  미리보기 렌더 속도(renderAllPages) 체감 확인.
+
+## 🎬 Wan i2v 영상 엔진 추가 (2026-07-02)
+- 영상 엔진 드롭다운에 **`Wan (i2v)`** 추가 (Grok/Flow/LTX2.3/**Wan**/없음). LTX·Wan **병행** — 각자 워크플로 슬롯.
+- 구조: `comfy` 영상 엔진은 워크플로 JSON 종속이 없는 범용 i2v 라, Wan 은 **다른 워크플로만 갈아끼움**. `videoEngine==='wan'`
+  이면 `runComfyVideos(...,{wan:true})` 가 cfg 를 `{workflowPath:wanWorkflowPath, videoFps:wanFps, videoMaxSec:wanMaxSec, timeoutSec:wanTimeoutSec}`
+  로 오버라이드. 캐시 태그 `comfy-wan`. **클라우드(comfy.org) 설정(cloud/apiKey)은 그대로 물려받음** — Wan 도 클라우드에서 동작.
+- comfy-config: `wanWorkflowPath`·`wanFps(16)`·`wanMaxSec(0=videoMaxSec)`·`wanTimeoutSec(0=timeoutSec)`·`videoFps(0=초)` 추가.
+- **클라우드 Wan = 단일 API 노드 `Wan2ImageToVideoApi`** (예: `D:\Priming-Maker\Wan2.7 I2V\api_wan2_7_i2v.json`).
+  로컬 Wan(CLIPTextEncode+WanImageToVideo.length 프레임)과 다름 → 엔진이 둘 다 처리:
+  - 프롬프트 주입(`_buildGraph`): CLIPTextEncode.text 없으면 **`model.prompt`/prompt/positive** 키 자동 주입(부정 프롬프트 보존).
+  - 길이 주입(`_setVideoDuration`): 필드명으로 초/프레임 자동 판별 — **`model.duration`/duration/seconds=초**, `length`/`num_frames`=프레임(초×videoFps).
+    클라우드 Wan 은 model.duration(초)라 fps 무시됨. 로컬 Wan 은 fps=16 로 프레임 변환.
+- **워크플로 2종 — 노드 종류로 유·무료 갈림**:
+  - ❌ `Wan2ImageToVideoApi`(API 노드) = comfy.org 가 파트너(Alibaba) 유료 API 를 중계 → **API 크레딧 과금** + 헤드리스 REST 는 계정 인증 필요
+    (`_queue` 가 `extra_data.api_key_comfy_org` 전달로 "Unauthorized" 대응). 길이=`model.duration`(초), 프롬프트=`model.prompt`.
+  - ✅ **로컬노드 워크플로**(`UNETLoader`+`WanImageToVideo`+`CLIPTextEncode`+`KSamplerAdvanced`+`SaveVideo`) = 클라우드 GPU 에서
+    직접 실행 = **구독 GPU 시간만(추가 크레딧 X)**. 예: `D:\Priming-Maker\Wan2.2 I2V\video_wan2_2_14B_i2v.json`(Wan 2.2 14B, 검증됨).
+- **로컬노드 Wan 2.2 주입 특이점**(comfy-engine 이 처리, 실측 검증):
+  - 프롬프트: CLIPTextEncode 가 **긍정/부정 2개** → `_buildGraph` 가 **제목(positive/negative)으로 긍정 노드 선택**(부정에 주입 금지).
+  - 길이: `Float (Duration)`(초) 프리미티브 → 워크플로가 `floor(초×fps+1)`로 프레임 자동계산. `_setVideoDuration` 브랜치③ 이
+    **제목으로 초/프레임 판별**해 Duration 엔 '초'를 넣음(프레임값 넣으면 폭발). WanImageToVideo.length 는 링크라 안 건드림.
+  - 해상도: `WanImageToVideo` 의 width/height(640² 고정) → `_setVideoDims` 자동탐지②가 **width/height 리터럴 직접 주입**(16:9→832×480).
+  - seed: 클라우드 API 노드가 int32 검증 → `_buildGraph` seed 를 **0..2147483647** 로 제한.
+- ⏳ **실측 필요**: (API 노드) 출력이 `_scanMedia`/`_waitCloud` 로 잡히는지 · (로컬노드 Wan 2.2) 실제 생성 mp4/업스케일 완주 1회 확인.
+
 ## 🎵 '플리' 모드 — ACE-Step 음악 생성 (2026-06-30)
 - 모드 토글이 **롱폼/쇼츠/🎵플리** 3-way. 라벨에서 "16:9·9:16" 표기 제거. 플리는 ACE-Step(ComfyUI) 음악 전용.
 - **흐름**: 클로드가 채팅에서 **플리 스펙(.md)** 생성 → 앱 「🎵 플리 스펙 열기」로 로드 → ⚡ 음악 전체 생성 →
