@@ -58,6 +58,20 @@ ${para}
     const pageTxt = await win.locator('.bkpage').innerText();
     console.log('· 미리보기 조판 OK —', pageTxt.trim());
 
+    // 안정성 — 조판 완료 후 재조판 루프(깜빡임)가 없어야 한다.
+    //   busy 표시("조판 중…")가 3초 동안 다시 켜지지 않는지 샘플링.
+    let relayouts = 0;
+    for (let i = 0; i < 12; i++) {
+      const busy = await win.evaluate(() => {
+        const el = document.querySelector('.bkbar .meta');
+        return el ? /조판 중/.test(el.textContent) : false;
+      });
+      if (busy) relayouts++;
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    if (relayouts > 0) throw new Error(`재조판 루프 감지 — 3초간 "조판 중" ${relayouts}회 (깜빡임 버그)`);
+    console.log('· 안정성 OK — 3초간 재조판 없음(루프 해소)');
+
     // 미리보기 안에 실제 페이지 DOM + 소스매핑 존재?
     const nSrc = await win.evaluate(() => document.querySelectorAll('.bkviewport [data-src-line]').length);
     console.log('· 소스매핑 블록:', nSrc, '개');

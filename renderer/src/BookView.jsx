@@ -26,6 +26,7 @@ export default function BookView({ dto, setDto, setStatus, logline }) {
   const viewerRef = useRef(null);   // CoreViewer 인스턴스
   const viewportRef = useRef(null); // 뷰포트 DOM
   const loadedForRef = useRef('');  // 마지막으로 로드한 url (중복 로드 방지)
+  const lastPagesRef = useRef(0);   // 마지막 보고 쪽수 (동일 값 재보고 방지)
 
   const meta = (dto && dto.meta) || {};
   const loaded = !!(dto && dto.kind === 'book');
@@ -40,12 +41,22 @@ export default function BookView({ dto, setDto, setStatus, logline }) {
     } catch (e) { logline('미리보기 오류: ' + e.message); }
   }, [loaded, layout]);
 
-  // dto(원고 구조·메타)가 바뀌면 자동 재조판 — 디바운스 600ms
+  // 조판에 영향을 주는 "내용"만 뽑은 문자열 시그니처.
+  //   ⚠ dto.meta/front/back/parts 를 직접 의존성에 넣으면, 조판 완료 후 bookReportPages 가
+  //   돌려주는 새 dto(내용 동일·참조만 다름) 때문에 effect 가 재실행 → 무한 재조판(깜빡임)이 된다.
+  //   값 기반 문자열이면 쪽수 보고로 dto 가 새로 와도 시그니처가 같아 재조판을 트리거하지 않는다.
+  //   (dto.spread·lastPages 는 조판 결과라 여기서 제외)
+  const contentSig = loaded ? JSON.stringify({
+    path: dto.scriptPath, meta: dto.meta, front: dto.front, back: dto.back, parts: dto.parts,
+    cover: dto.coverImagePath, layout,
+  }) : '';
+
+  // 내용이 바뀌면 자동 재조판 — 디바운스 600ms
   useEffect(() => {
     if (!loaded) return;
     const t = setTimeout(refreshPreview, 600);
     return () => clearTimeout(t);
-  }, [loaded, dto && dto.scriptPath, dto && dto.meta, dto && dto.front, dto && dto.back, dto && dto.parts, layout]);
+  }, [contentSig]);
 
   // ── vivliostyle 로드 ──
   useEffect(() => {
@@ -66,7 +77,11 @@ export default function BookView({ dto, setDto, setStatus, logline }) {
         const total = (viewer.getPageSizes() || []).length;
         setPageInfo((pi) => ({ ...pi, total }));
         setPreviewBusy(false); setStatus(`조판 완료 — ${total}쪽`);
-        api.bookReportPages({ pages: total }).then((d) => { if (d) setDto(d); }).catch(() => {});
+        // 쪽수가 실제로 바뀔 때만 dto 갱신(책등·규격 재계산). 같은 값이면 불필요한 재렌더 회피.
+        if (total > 0 && total !== lastPagesRef.current) {
+          lastPagesRef.current = total;
+          api.bookReportPages({ pages: total }).then((d) => { if (d) setDto(d); }).catch(() => {});
+        }
       }
     });
     viewer.loadDocument(previewUrl, {}, {});
