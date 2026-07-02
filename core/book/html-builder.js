@@ -97,7 +97,15 @@ function titlePageHtml(meta, ctx) {
   <div class="tp-publisher">${logo}${esc(meta.publisher || '')}</div>
 </section>`;
 }
-function colophonHtml(meta, ctx, isFront, section, book, srcAttr) {
+// 판권 자동 생성 항목 정의 — UI 체크박스와 1:1 (key, 라벨, 값 추출)
+const COLOPHON_FIELDS = [
+  ['issueDate', '초판 1쇄 발행'], ['author', '지은이'], ['translator', '옮긴이'], ['issuer', '펴낸이'],
+  ['publisher', '펴낸곳'], ['regNo', '출판등록'], ['address', '주소'], ['phone', '전화'], ['fax', '팩스'],
+  ['homepage', '홈페이지'], ['email', '이메일'], ['isbn', 'ISBN'], ['price', '정가'], ['ebookPrice', '전자책'],
+  ['copyright', 'ⓒ 저작권 문구'], ['legal', '무단복제 금지 문구'], ['exchange', '파본 교환 안내'],
+];
+
+function colophonHtml(meta, ctx, isFront, section, book, srcAttr, fields) {
   // [판권] 섹션에 자유 문구가 있으면(예: AI 활용 고지·편역 저작권 안내) 그걸 그대로 조판 —
   //   자동 테이블·고정 법정 문구는 생략(중복 방지). 없으면 메타로 자동 생성.
   if (section && section.blocks && section.blocks.length) {
@@ -110,23 +118,25 @@ ${blocksHtml(section.blocks, book, ctx, srcAttr)}
   </div>
 </section>`;
   }
+  // 항목 선택 — fields 배열(체크박스)이 오면 그 항목만, null 이면 전부
+  const on = (key) => !Array.isArray(fields) || fields.includes(key);
   const rows = [];
-  const add = (k, v) => { if (v) rows.push(`<tr><td class="k">${esc(k)}</td><td>${esc(v)}</td></tr>`); };
-  add('초판 1쇄 발행', meta.issueDate);
-  add('지은이', meta.author);
-  add('옮긴이', meta.translator);
-  add('펴낸이', meta.issuer);
-  add('펴낸곳', meta.publisher);
-  add('출판등록', meta.regNo);
-  add('주소', meta.address);
-  add('전화', meta.phone);
-  add('팩스', meta.fax);
-  add('홈페이지', meta.homepage);
-  add('이메일', meta.email);
-  add('ISBN', meta.isbn);
-  add('정가', meta.price);
-  if (meta.ebookPrice) add('전자책', meta.ebookPrice);
-  for (const [k, v] of Object.entries(meta.extra || {})) add(k, v);
+  const add = (fieldKey, label, v) => { if (v && on(fieldKey)) rows.push(`<tr><td class="k">${esc(label)}</td><td>${esc(v)}</td></tr>`); };
+  add('issueDate', '초판 1쇄 발행', meta.issueDate);
+  add('author', '지은이', meta.author);
+  add('translator', '옮긴이', meta.translator);
+  add('issuer', '펴낸이', meta.issuer);
+  add('publisher', '펴낸곳', meta.publisher);
+  add('regNo', '출판등록', meta.regNo);
+  add('address', '주소', meta.address);
+  add('phone', '전화', meta.phone);
+  add('fax', '팩스', meta.fax);
+  add('homepage', '홈페이지', meta.homepage);
+  add('email', '이메일', meta.email);
+  add('isbn', 'ISBN', meta.isbn);
+  add('price', '정가', meta.price);
+  add('ebookPrice', '전자책', meta.ebookPrice);
+  for (const [k, v] of Object.entries(meta.extra || {})) { if (v) rows.push(`<tr><td class="k">${esc(k)}</td><td>${esc(v)}</td></tr>`); }
 
   const year = (String(meta.issueDate || '').match(/\d{4}/) || [new Date().getFullYear()])[0];
   const cline = meta.copyright || (meta.author ? `ⓒ ${meta.author}, ${year}` : '');
@@ -137,9 +147,9 @@ ${blocksHtml(section.blocks, book, ctx, srcAttr)}
     ${meta.subtitle ? `<div class="cp-subtitle">${esc(meta.subtitle)}</div>` : ''}
     <table>${rows.join('')}</table>
     <div class="cp-legal">
-      ${cline ? `<p>${esc(cline)}</p>` : ''}
-      <p>이 책은 저작권법에 따라 보호받는 저작물이므로 무단 전재와 복제를 금합니다.</p>
-      <p>잘못된 책은 구입하신 곳에서 바꾸어 드립니다.</p>
+      ${cline && on('copyright') ? `<p>${esc(cline)}</p>` : ''}
+      ${on('legal') ? '<p>이 책은 저작권법에 따라 보호받는 저작물이므로 무단 전재와 복제를 금합니다.</p>' : ''}
+      ${on('exchange') ? '<p>잘못된 책은 구입하신 곳에서 바꾸어 드립니다.</p>' : ''}
     </div>
     ${qrIsImg ? `<img class="cp-qr" src="${esc(ctx.resolveImage(meta.qr))}" alt="QR" />` : ''}
     ${meta.qrLabel ? `<div class="cp-qrlabel">${esc(meta.qrLabel)}${!qrIsImg && meta.qr ? ' — ' + esc(meta.qr) : ''}</div>`
@@ -170,36 +180,89 @@ function endnotesHtml(ctx) {
   return `<section class="back-section endnotes" id="sec-endnotes"><h2>미주</h2><ol style="list-style:none">${lis}</ol></section>`;
 }
 
+// 폰트 키 → 스택 (전부 동봉 정적 웨이트 — 가변폰트는 PDF 에 Type3 로 구워져 배제)
+const FONT_STACKS = {
+  kopub: `'KoPubWorld Batang', 'NanumMyeongjo', 'Batang', serif`,
+  'kopub-dotum': `'KoPubWorld Dotum', 'NanumGothic', 'Dotum', sans-serif`,
+  'nanum-myeongjo': `'NanumMyeongjo', 'KoPubWorld Batang', 'Batang', serif`,
+  'nanum-gothic': `'NanumGothic', 'KoPubWorld Dotum', 'Dotum', sans-serif`,
+};
+const FONT_OPTIONS = [
+  { id: 'kopub', label: 'KoPub월드 바탕 (권장)' },
+  { id: 'kopub-dotum', label: 'KoPub월드 돋움' },
+  { id: 'nanum-myeongjo', label: '나눔명조' },
+  { id: 'nanum-gothic', label: '나눔고딕' },
+];
+const GOTHIC_STACK = FONT_STACKS['kopub-dotum'];
+
 // ── 동적 CSS(@page) ──
-function pageCss(opts) {
-  const m = opts.marginsMm;
-  const rh = 'font-size: 7.5pt; letter-spacing: 0.06em; color: #333;';
-  const fo = 'font-size: 8.5pt; color: #222;';
+function pageCss(o) {
+  const m = o.marginsMm;
+  // 머리글 — 구 앱 스타일: 고딕 9pt 회색(#595959) (+선택 시 아래 구분선)
+  const rh = `font-family: ${GOTHIC_STACK}; font-size: 9pt; color: #595959;`
+    + (o.headerLine ? ' border-bottom: 0.4pt solid #dddddd; margin-bottom: 3pt;' : '');
+  const fo = `font-family: ${GOTHIC_STACK}; font-size: 9pt; font-weight: 700; color: #000;`;
+  // 머리글 내용 선택 — 없음/책제목/장제목(first-except: 장 시작 페이지에선 생략)
+  const rhContent = (kind) => kind === 'title' ? 'string(book-title)'
+    : kind === 'chapter' ? 'string(chapter-title, first-except)' : 'none';
+  const headerEvenBox = o.headerEven !== 'none' ? `@top-center { content: ${rhContent(o.headerEven)}; ${rh} }` : '';
+  const headerOddBox = o.headerOdd !== 'none' ? `@top-center { content: ${rhContent(o.headerOdd)}; ${rh} }` : '';
+  // 쪽번호 위치 — 바깥 하단 / 하단 가운데 / 숨김
+  const numEven = o.pageNum === 'outer' ? `@bottom-left { content: counter(page); ${fo} }`
+    : o.pageNum === 'center' ? `@bottom-center { content: counter(page); ${fo} }` : '';
+  const numOdd = o.pageNum === 'outer' ? `@bottom-right { content: counter(page); ${fo} }`
+    : o.pageNum === 'center' ? `@bottom-center { content: counter(page); ${fo} }` : '';
   return `
 @page {
-  size: ${opts.trimW}mm ${opts.trimH}mm;
+  size: ${o.trimW}mm ${o.trimH}mm;
   margin-top: ${m.top}mm; margin-bottom: ${m.bottom}mm;
 }
-/* 짝수쪽(왼쪽): 바깥=왼쪽. 러닝헤드=책제목, 폴리오=왼쪽 하단 */
+/* 짝수쪽(왼쪽): 바깥여백=왼쪽 */
 @page :left {
   margin-left: ${m.outer}mm; margin-right: ${m.inner}mm;
-  @top-center { content: string(book-title); ${rh} }
-  @bottom-left { content: counter(page); ${fo} }
+  ${headerEvenBox}
+  ${numEven}
 }
-/* 홀수쪽(오른쪽): 러닝헤드=장제목, 폴리오=오른쪽 하단.
-   first-except = 값이 설정되는 페이지(장 시작)에서는 빈 문자열 — 장 시작 러닝헤드 생략 관행. */
+/* 홀수쪽(오른쪽): 바깥여백=오른쪽 */
 @page :right {
   margin-left: ${m.inner}mm; margin-right: ${m.outer}mm;
-  @top-center { content: string(chapter-title, first-except); ${rh} }
-  @bottom-right { content: counter(page); ${fo} }
+  ${headerOddBox}
+  ${numOdd}
 }
 /* 디스플레이 페이지(표제지·부표제지·판권) + 앞부속: 러닝헤드·폴리오 없음 */
-@page display { @top-center { content: none; } @bottom-left { content: none; } @bottom-right { content: none; } }
-@page front { @top-center { content: none; } @bottom-left { content: none; } @bottom-right { content: none; } }
+@page display { @top-center { content: none; } @bottom-left { content: none; } @bottom-center { content: none; } @bottom-right { content: none; } }
+@page front { @top-center { content: none; } @bottom-left { content: none; } @bottom-center { content: none; } @bottom-right { content: none; } }
 /* recto 강제로 생긴 백면 */
-@page :blank { @top-center { content: none; } @bottom-left { content: none; } @bottom-right { content: none; } }
+@page :blank { @top-center { content: none; } @bottom-left { content: none; } @bottom-center { content: none; } @bottom-right { content: none; } }
 h2.chapter-title { string-set: chapter-title content(); }
 .book-title-anchor { string-set: book-title content(); display: none; }
+
+/* ── 본문 타이포(옵션) — 테마 기본을 덮어씀 ── */
+body {
+  font-weight: ${o.fontWeight};
+  letter-spacing: ${o.letterSpacingPt}pt;
+}
+p { text-indent: ${o.indentPt}pt; margin-bottom: ${o.paragraphSpacingPt}pt; }
+p.noindent, p.chapter-lead { text-indent: 0; }
+strong { font-weight: ${Math.min(900, o.fontWeight + 400)}; }
+/* 소제목(원고 ## = 절) */
+section.chapter h3 {
+  font-family: ${o.h2Gothic ? GOTHIC_STACK : o.fontStack};
+  font-size: ${o.h2SizePt}pt;
+  font-weight: ${o.h2Weight};
+  text-align: ${o.h2Align};
+  margin: ${o.h2MarginTopPt}pt 0 ${o.h2MarginBottomPt}pt;
+  letter-spacing: 0;
+}
+${o.h2Prefix ? `section.chapter h3::before { content: "${o.h2Prefix.replace(/"/g, '\\"')} "; }` : ''}
+/* 목차 쪽번호 — 우측 고정(absolute). leader()는 미리보기(코어)와 CLI 지원이 달라
+   양쪽 동일하게 나오는 방식으로 통일. */
+nav.toc li { position: relative; padding-right: 2.2em; }
+nav.toc a::after {
+  content: target-counter(attr(href url), page);
+  position: absolute; right: 0; font-weight: 400;
+  font-family: ${GOTHIC_STACK}; font-size: 0.9em;
+}
 `;
 }
 
@@ -214,14 +277,36 @@ function buildBookHtml(book, opts = {}) {
 
   const o = {
     trimW: trim.width, trimH: trim.height,
+    // ── 본문 타이포 — 기본값은 구 Book Publishing 앱에서 사용자가 쓰던 값 그대로 ──
+    fontKey: FONT_STACKS[opts.fontKey] ? opts.fontKey : 'kopub',
     fontSizePt: num(opts.fontSizePt, 10),
-    lineHeight: num(opts.lineHeight, 1.8),
-    marginsMm: Object.assign({ top: 18, bottom: 22, inner: 25, outer: 16 }, opts.marginsMm || {}),
+    lineHeight: num(opts.lineHeight, 1.65),
+    fontWeight: num(opts.fontWeight, 300),
+    letterSpacingPt: numAllowNeg(opts.letterSpacingPt, -0.4),
+    indentPt: numAllowZero(opts.indentPt, 15),
+    paragraphSpacingPt: numAllowZero(opts.paragraphSpacingPt, 10),
+    // ── 여백(mm) — 구 앱: 위20 / 아래15 / 안쪽20 / 바깥17 ──
+    marginsMm: Object.assign({ top: 20, bottom: 15, inner: 20, outer: 17 }, opts.marginsMm || {}),
     chapterStart: opts.chapterStart === 'page' ? 'page' : 'recto',
     footnoteMode: (meta.footnoteMode === '미주' || opts.footnoteMode === 'endnote') ? 'endnote' : 'footnote',
-    fontStack: opts.fontStack || `'KoPub World Batang', 'KoPubWorld Batang', 'RIDIBatang', 'NanumMyeongjo', 'Batang', serif`,
+    // ── 머리글/쪽번호 노출 선택 ──
+    headerEven: pick(opts.headerEven, ['title', 'chapter', 'none'], 'title'),   // 짝수쪽(왼쪽)
+    headerOdd: pick(opts.headerOdd, ['chapter', 'title', 'none'], 'chapter'),   // 홀수쪽(오른쪽)
+    headerLine: opts.headerLine !== false,                                       // 머리글 아래 구분선
+    pageNum: pick(opts.pageNum, ['outer', 'center', 'none'], 'outer'),
+    // ── 소제목(원고의 ## = 절) 스타일 — 구 앱: 고딕 800, ❖ 접두, 위25pt/아래10pt ──
+    h2SizePt: num(opts.h2SizePt, 10.5),
+    h2Gothic: opts.h2Gothic !== false,
+    h2Weight: num(opts.h2Weight, 700),
+    h2Align: pick(opts.h2Align, ['left', 'center', 'right'], 'left'),
+    h2Prefix: opts.h2Prefix != null ? String(opts.h2Prefix) : '❖',
+    h2MarginTopPt: numAllowZero(opts.h2MarginTopPt, 25),
+    h2MarginBottomPt: numAllowZero(opts.h2MarginBottomPt, 10),
+    // ── 판권 자동 항목 선택 (null = 전부) ──
+    colophonFields: Array.isArray(opts.colophonFields) ? opts.colophonFields : null,
     sourceMap: opts.sourceMap !== false,
   };
+  o.fontStack = FONT_STACKS[o.fontKey];
 
   const baseDir = opts.baseDir || process.cwd();
   const imageUrl = typeof opts.imageUrl === 'function' ? opts.imageUrl : (abs) => 'file:///' + abs.replace(/\\/g, '/');
@@ -245,7 +330,7 @@ function buildBookHtml(book, opts = {}) {
   bodyParts.push(titlePageHtml(meta, ctx));
   const colFront = /앞/.test(String(meta.colophonPos || ''));
   const colSection = book.back.find((s) => s.key === 'colophon');
-  if (colFront && colSection) bodyParts.push(colophonHtml(meta, ctx, true, colSection, book, srcAttr));
+  if (colFront && colSection) bodyParts.push(colophonHtml(meta, ctx, true, colSection, book, srcAttr, o.colophonFields));
   for (const s of book.front) {
     if (s.key === 'toc') { bodyParts.push(tocHtml(book, s.title)); continue; }
     bodyParts.push(`<section class="front-section sec-${s.key}" id="sec-${s.key}">
@@ -281,7 +366,7 @@ ${blocksHtml(s.blocks, book, ctx, srcAttr)}
     }
   }
   if (o.footnoteMode === 'endnote' && ctx.endnotes.length && !ctx._endnotesDone) bodyParts.push(endnotesHtml(ctx));
-  if (colSection && !colFront) bodyParts.push(colophonHtml(meta, ctx, false, colSection, book, srcAttr));
+  if (colSection && !colFront) bodyParts.push(colophonHtml(meta, ctx, false, colSection, book, srcAttr, o.colophonFields));
 
   // ⚠ CSS 변수(:root + var()) 를 쓰지 않고 값을 직접 치환 — vivliostyle core(브라우저 미리보기)가
   //   var() 를 CLI 와 다르게 해석해 본문 크기가 16px 로 폴백 → 쪽수가 ~2.5배로 뻥튀기되던 문제.
@@ -291,7 +376,8 @@ ${blocksHtml(s.blocks, book, ctx, srcAttr)}
     .replace(/var\(--font-size\)/g, `${o.fontSizePt}pt`)
     .replace(/var\(--line-height\)/g, String(o.lineHeight))
     .replace(/var\(--chapter-break\)/g, o.chapterStart === 'page' ? 'page' : 'recto');
-  const css = (opts.fontCss || '') + '\n' + pageCss(o) + '\n' + theme;
+  // 순서: 폰트 → 테마(기본) → pageCss(옵션 오버라이드가 마지막에 이기도록)
+  const css = (opts.fontCss || '') + '\n' + theme + '\n' + pageCss(o);
   const html = `<!DOCTYPE html>
 <html lang="ko">
 <head>
@@ -309,6 +395,9 @@ ${bodyParts.join('\n\n')}
 }
 
 function num(v, d) { const x = Number(v); return Number.isFinite(x) && x > 0 ? x : d; }
+function numAllowZero(v, d) { const x = Number(v); return Number.isFinite(x) && x >= 0 ? x : d; }
+function numAllowNeg(v, d) { const x = Number(v); return Number.isFinite(x) ? x : d; }
+function pick(v, allowed, d) { return allowed.includes(v) ? v : d; }
 function truthyDefault(v, d) {
   if (v == null || v === '') return d;
   return !/^(off|no|없음|아니오|false|0|x)$/i.test(String(v).trim());
@@ -320,4 +409,4 @@ function metaPlatformId(meta) {
   return 'bookk';
 }
 
-module.exports = { buildBookHtml, metaPlatformId, esc, inlineMd };
+module.exports = { buildBookHtml, metaPlatformId, esc, inlineMd, FONT_OPTIONS, COLOPHON_FIELDS, FONT_STACKS, GOTHIC_STACK };

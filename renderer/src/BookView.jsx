@@ -34,8 +34,30 @@ function svgToPngDataUrl(svg, w, h) {
   });
 }
 
+// 조판 옵션 기본값 — 구 Book Publishing 앱에서 사용자가 쓰던 값 그대로
+const LAYOUT_DEFAULTS = {
+  fontKey: 'kopub', fontSizePt: 10, lineHeight: 1.65, fontWeight: 300,
+  letterSpacingPt: -0.4, indentPt: 15, paragraphSpacingPt: 10,
+  marginsMm: { top: 20, bottom: 15, inner: 20, outer: 17 },
+  chapterStart: 'recto',
+  headerEven: 'title', headerOdd: 'chapter', headerLine: true, pageNum: 'outer',
+  h2SizePt: 10.5, h2Gothic: true, h2Weight: 700, h2Align: 'left', h2Prefix: '❖',
+  h2MarginTopPt: 25, h2MarginBottomPt: 10,
+  colophonFields: null, coverOverlay: false, coverBarcode: true, coverTextColor: '#111111',
+};
+
 export default function BookView({ dto, setDto, setStatus, logline }) {
-  const [layout, setLayout] = useState({ fontSizePt: 10, lineHeight: 1.8, chapterStart: 'recto' });
+  const [layout, setLayout] = useState(LAYOUT_DEFAULTS);
+  // 원고 전환 시 저장된 조판 설정 복원(없으면 기본값)
+  const layoutLoadedFor = useRef('');
+  useEffect(() => {
+    if (!dto || dto.kind !== 'book' || layoutLoadedFor.current === dto.scriptPath) return;
+    layoutLoadedFor.current = dto.scriptPath;
+    const saved = dto.layoutSaved || {};
+    setLayout({ ...LAYOUT_DEFAULTS, ...saved, marginsMm: { ...LAYOUT_DEFAULTS.marginsMm, ...(saved.marginsMm || {}) } });
+  }, [dto && dto.scriptPath]);
+  const L = (k, v) => setLayout((s) => ({ ...s, [k]: v }));
+  const Lm = (k, v) => setLayout((s) => ({ ...s, marginsMm: { ...s.marginsMm, [k]: Number(v) || 0 } }));
   const [previewUrl, setPreviewUrl] = useState(null);
   const [previewBusy, setPreviewBusy] = useState(false);
   const [building, setBuilding] = useState(false);
@@ -66,7 +88,7 @@ export default function BookView({ dto, setDto, setStatus, logline }) {
   //   (dto.spread·lastPages 는 조판 결과라 여기서 제외)
   const contentSig = loaded ? JSON.stringify({
     path: dto.scriptPath, meta: dto.meta, front: dto.front, back: dto.back, parts: dto.parts,
-    cover: dto.coverImagePath, layout,
+    covers: dto.covers, cover: dto.coverImagePath, layout,
   }) : '';
 
   // 내용이 바뀌면 자동 재조판 — 디바운스 600ms
@@ -239,7 +261,7 @@ html,body{margin:0;padding:0;background:#8a8177}
     );
   }
 
-  const presentKeys = new Set([...(dto.front || []), ...(dto.back || [])].map((s) => s.key));
+  const presentKeys = new Set([...(dto.front || []), ...(dto.back || []), ...(dto.covers || [])].map((s) => s.key));
   const missing = REQUIRED_KEYS.filter(([k]) => !(k === 'title' ? (meta.title || dto.fileTitle) : meta[k]));
   const spread = dto.spread || {};
   const chapters = (dto.parts || []).flatMap((p) => p.chapters);
@@ -273,6 +295,12 @@ html,body{margin:0;padding:0;background:#8a8177}
         <div className="bkzone">뒷부속</div>
         {(dto.reserved || []).filter((r) => r.zone === 'back').map((r) => (
           <label key={r.key} className="chk">
+            <input type="checkbox" checked={presentKeys.has(r.key)} onChange={(e) => toggleSection(r.key, e.target.checked)} /> {r.label}
+          </label>
+        ))}
+        <div className="bkzone">표지 구성 (표지 PDF)</div>
+        {(dto.reserved || []).filter((r) => r.zone === 'cover').map((r) => (
+          <label key={r.key} className="chk" title="체크하면 원고에 섹션이 추가되고, 내용이 표지 PDF 의 해당 영역에 조판됩니다 (내지에는 안 들어감)">
             <input type="checkbox" checked={presentKeys.has(r.key)} onChange={(e) => toggleSection(r.key, e.target.checked)} /> {r.label}
           </label>
         ))}
@@ -343,14 +371,31 @@ html,body{margin:0;padding:0;background:#8a8177}
           </div>
         </details>
         <details open>
-          <summary>조판</summary>
+          <summary>본문 조판</summary>
           <div className="bkform">
-            <label>본문 크기(pt) <input type="number" step="0.5" min="7" max="14" value={layout.fontSizePt}
-              onChange={(e) => setLayout({ ...layout, fontSizePt: Number(e.target.value) || 10 })} /></label>
-            <label>행간 <input type="number" step="0.05" min="1.2" max="2.5" value={layout.lineHeight}
-              onChange={(e) => setLayout({ ...layout, lineHeight: Number(e.target.value) || 1.8 })} /></label>
+            <label>본문 폰트
+              <select value={layout.fontKey} onChange={(e) => L('fontKey', e.target.value)}>
+                {(dto.fontOptions || []).map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}
+              </select>
+            </label>
+            <div className="bkrow">
+              <label>크기(pt) <input type="number" step="0.5" min="7" max="14" value={layout.fontSizePt} onChange={(e) => L('fontSizePt', Number(e.target.value) || 10)} /></label>
+              <label>행간 <input type="number" step="0.05" min="1.2" max="2.5" value={layout.lineHeight} onChange={(e) => L('lineHeight', Number(e.target.value) || 1.65)} /></label>
+            </div>
+            <div className="bkrow">
+              <label>굵기
+                <select value={layout.fontWeight} onChange={(e) => L('fontWeight', Number(e.target.value))}>
+                  <option value={300}>가늘게(300) — 단행본 관행</option><option value={400}>보통(400)</option><option value={700}>굵게(700)</option>
+                </select>
+              </label>
+              <label>자간(pt) <input type="number" step="0.1" min="-2" max="2" value={layout.letterSpacingPt} onChange={(e) => L('letterSpacingPt', Number(e.target.value) || 0)} /></label>
+            </div>
+            <div className="bkrow">
+              <label title="문단 첫 줄 들여쓰기">들여쓰기(pt) <input type="number" step="1" min="0" max="40" value={layout.indentPt} onChange={(e) => L('indentPt', Math.max(0, Number(e.target.value) || 0))} /></label>
+              <label title="문단과 문단 사이 간격">문단 간격(pt) <input type="number" step="1" min="0" max="40" value={layout.paragraphSpacingPt} onChange={(e) => L('paragraphSpacingPt', Math.max(0, Number(e.target.value) || 0))} /></label>
+            </div>
             <label>장 시작
-              <select value={layout.chapterStart} onChange={(e) => setLayout({ ...layout, chapterStart: e.target.value })}>
+              <select value={layout.chapterStart} onChange={(e) => L('chapterStart', e.target.value)}>
                 <option value="recto">홀수쪽(오른쪽) — 관행</option><option value="page">다음 쪽 (분량 절약)</option>
               </select>
             </label>
@@ -359,6 +404,97 @@ html,body{margin:0;padding:0;background:#8a8177}
                 <option value="각주">각주 (페이지 하단)</option><option value="미주">미주 (책 끝 모음)</option>
               </select>
             </label>
+          </div>
+        </details>
+        <details>
+          <summary>여백 (mm)</summary>
+          <div className="bkform">
+            <div className="bkrow">
+              <label>위 <input type="number" step="1" min="5" max="40" value={layout.marginsMm.top} onChange={(e) => Lm('top', e.target.value)} /></label>
+              <label>아래 <input type="number" step="1" min="5" max="40" value={layout.marginsMm.bottom} onChange={(e) => Lm('bottom', e.target.value)} /></label>
+            </div>
+            <div className="bkrow">
+              <label title="제본되는 안쪽(책등 쪽) — 무선제본은 파묻히므로 바깥보다 넓게">안쪽 <input type="number" step="1" min="5" max="40" value={layout.marginsMm.inner} onChange={(e) => Lm('inner', e.target.value)} /></label>
+              <label>바깥 <input type="number" step="1" min="5" max="40" value={layout.marginsMm.outer} onChange={(e) => Lm('outer', e.target.value)} /></label>
+            </div>
+            <div className="meta">기본 20/15/20/17 — 안쪽≥바깥이 무선제본 관행입니다.</div>
+          </div>
+        </details>
+        <details>
+          <summary>머리글 · 쪽번호</summary>
+          <div className="bkform">
+            <label>짝수쪽(왼쪽) 머리글
+              <select value={layout.headerEven} onChange={(e) => L('headerEven', e.target.value)}>
+                <option value="title">책 제목 (관행)</option><option value="chapter">장 제목</option><option value="none">표시 안 함</option>
+              </select>
+            </label>
+            <label>홀수쪽(오른쪽) 머리글
+              <select value={layout.headerOdd} onChange={(e) => L('headerOdd', e.target.value)}>
+                <option value="chapter">장 제목 (관행)</option><option value="title">책 제목</option><option value="none">표시 안 함</option>
+              </select>
+            </label>
+            <label className="chk"><input type="checkbox" checked={layout.headerLine} onChange={(e) => L('headerLine', e.target.checked)} /> 머리글 아래 구분선</label>
+            <label>쪽번호
+              <select value={layout.pageNum} onChange={(e) => L('pageNum', e.target.value)}>
+                <option value="outer">바깥 하단 (관행)</option><option value="center">하단 가운데</option><option value="none">표시 안 함</option>
+              </select>
+            </label>
+            <div className="meta">표제지·판권·백면·장 시작 페이지에는 자동으로 표시되지 않습니다.</div>
+          </div>
+        </details>
+        <details>
+          <summary>소제목(##) 스타일</summary>
+          <div className="bkform">
+            <div className="bkrow">
+              <label>크기(pt) <input type="number" step="0.5" min="8" max="18" value={layout.h2SizePt} onChange={(e) => L('h2SizePt', Number(e.target.value) || 10.5)} /></label>
+              <label>굵기
+                <select value={layout.h2Weight} onChange={(e) => L('h2Weight', Number(e.target.value))}>
+                  <option value={500}>중간(500)</option><option value={700}>굵게(700)</option>
+                </select>
+              </label>
+            </div>
+            <div className="bkrow">
+              <label>정렬
+                <select value={layout.h2Align} onChange={(e) => L('h2Align', e.target.value)}>
+                  <option value="left">왼쪽</option><option value="center">가운데</option><option value="right">오른쪽</option>
+                </select>
+              </label>
+              <label title="소제목 앞에 붙는 장식 문자 — 비우면 없음">장식 <input type="text" value={layout.h2Prefix} style={{ width: 50 }} onChange={(e) => L('h2Prefix', e.target.value)} /></label>
+            </div>
+            <div className="bkrow">
+              <label>위 여백(pt) <input type="number" step="1" min="0" max="60" value={layout.h2MarginTopPt} onChange={(e) => L('h2MarginTopPt', Math.max(0, Number(e.target.value) || 0))} /></label>
+              <label>아래 여백(pt) <input type="number" step="1" min="0" max="40" value={layout.h2MarginBottomPt} onChange={(e) => L('h2MarginBottomPt', Math.max(0, Number(e.target.value) || 0))} /></label>
+            </div>
+            <label className="chk"><input type="checkbox" checked={layout.h2Gothic} onChange={(e) => L('h2Gothic', e.target.checked)} /> 고딕체 사용 (해제 시 본문 폰트)</label>
+          </div>
+        </details>
+        <details>
+          <summary>판권 구성</summary>
+          <div className="bkform">
+            <label>판권 위치
+              <select value={/앞/.test(String(meta.colophonPos || '')) ? '앞' : '뒤'} onChange={(e) => setMeta('colophonPos', e.target.value === '앞' ? '앞(속표지 뒷면)' : '')}>
+                <option value="뒤">맨 뒤 (한국 관행)</option><option value="앞">앞 (속표지 뒷면)</option>
+              </select>
+            </label>
+            {(() => {
+              const colSec = (dto.back || []).find((s) => s.key === 'colophon');
+              if (colSec && colSec.blocks > 0) return <div className="meta">✏ [판권] 섹션에 직접 쓴 문구가 있어 그대로 조판됩니다 — 아래 항목 선택은 자동 생성 모드에서만 적용.</div>;
+              return null;
+            })()}
+            <div className="meta">자동 생성 시 넣을 항목 (값이 입력된 항목만 표시됨):</div>
+            {(dto.colophonFieldDefs || []).map(([k, label]) => {
+              const checked = !Array.isArray(layout.colophonFields) || layout.colophonFields.includes(k);
+              return (
+                <label key={k} className="chk">
+                  <input type="checkbox" checked={checked} onChange={(e) => {
+                    const all = (dto.colophonFieldDefs || []).map(([kk]) => kk);
+                    const cur = Array.isArray(layout.colophonFields) ? layout.colophonFields : all;
+                    const next = e.target.checked ? [...new Set([...cur, k])] : cur.filter((x) => x !== k);
+                    L('colophonFields', next.length === all.length ? null : next);
+                  }} /> {label}
+                </label>
+              );
+            })}
           </div>
         </details>
         <details open>
@@ -377,7 +513,17 @@ html,body{margin:0;padding:0;background:#8a8177}
                   {dto.coverCheck && dto.coverCheck.ok && dto.coverCheck.lowDpi && <div className="bkwarn">⚠ 해상도 낮음 (실효 {dto.coverCheck.effectiveDpi}dpi &lt; 300)</div>}
                   <div className="mbtns"><button className="ghost" onClick={attachCover}>교체</button><button className="ghost" onClick={clearCover}>제거</button></div>
                 </>)
-              : <button onClick={attachCover}>🖼 표지 이미지 첨부</button>}
+              : <button onClick={attachCover}>🖼 표지 이미지 첨부 (배경)</button>}
+            <label className="chk" title="배경 이미지 위에 제목·부제·저자·출판사 글자를 얹어 조판 — 완성 이미지에 글자가 이미 있으면 끄세요">
+              <input type="checkbox" checked={!!layout.coverOverlay} onChange={(e) => L('coverOverlay', e.target.checked)} /> 앞표지에 제목·저자 얹기
+            </label>
+            <label className="chk" title="뒷표지 오른쪽 하단에 ISBN 바코드+정가 자동 배치">
+              <input type="checkbox" checked={layout.coverBarcode !== false} onChange={(e) => L('coverBarcode', e.target.checked)} disabled={!meta.isbn} /> 뒷표지 바코드·정가 {!meta.isbn && <span className="meta">(ISBN 필요)</span>}
+            </label>
+            {(layout.coverOverlay || (dto.covers || []).length > 0) && (
+              <label>표지 글자색 <input type="color" value={layout.coverTextColor || '#111111'} onChange={(e) => L('coverTextColor', e.target.value)} style={{ width: 60, padding: 0, height: 26 }} /></label>
+            )}
+            <div className="meta">뒷표지 소개글·날개 글·책등 문구는 좌측 「표지 구성」 섹션에 쓰면 표지 PDF 에 조판됩니다.</div>
             <div className="mbtns">
               <button className="ghost" title="재단선·책등·날개 구분선이 그려진 투명 PNG(300dpi) — 캔바 등에서 밑그림 레이어로" onClick={exportCoverGuide}>📐 표지 가이드</button>
               <button className="ghost" title="ISBN(EAN-13)+부가기호 바코드를 SVG·PNG 로 생성 — 표지 뒷면 오른쪽 하단에 배치" onClick={exportBarcode} disabled={!meta.isbn}>🏷 바코드</button>

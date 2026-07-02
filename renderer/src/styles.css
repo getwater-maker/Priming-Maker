@@ -300,6 +300,8 @@ h1 .ver{font-size:11px;font-weight:600;color:#a89878;margin-left:6px;vertical-al
 .bkform{display:flex;flex-direction:column;gap:7px;padding:8px 2px}
 .bkform label{display:flex;flex-direction:column;gap:3px;font-size:12.5px;color:var(--base)}
 .bkform label.chk{flex-direction:row;align-items:center}
+.bkrow{display:flex;gap:8px}
+.bkrow label{flex:1;min-width:0}
 .bkform input[type=text],.bkform input[type=number],.bkform select{width:100%;box-sizing:border-box}
 .bkright details{border:1px solid var(--line);border-radius:8px;padding:7px 10px;margin-bottom:8px;background:#fdfaf4}
 .bkright summary{font-size:13px;font-weight:700;color:var(--strong);cursor:pointer}

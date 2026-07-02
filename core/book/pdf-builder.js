@@ -33,6 +33,13 @@ function bundledFontCss(urlFor) {
     if (fs.existsSync(p)) css.push(`@font-face { font-family: '${family}'; src: url('${toUrl(p)}'); font-weight: ${weight}; }`);
   };
   try {
+    // KoPubWorld (구 Book Publishing 앱에서 이식 — 문화부 배포 무료·출판 허용)
+    //   ⚠ woff2/otf(CFF)는 Chromium PDF 가 Type3(패스)로 구움 → fonttools(cu2qu)로 TrueType 변환해 동봉 = Type0(CID) 임베딩.
+    //   용량 절약으로 Light(300)·Bold(700)만 동봉(Medium 제외).
+    face('KoPubWorld Batang', 'KoPubWorld-Batang-Light.ttf', 300);
+    face('KoPubWorld Batang', 'KoPubWorld-Batang-Bold.ttf', 700);
+    face('KoPubWorld Dotum', 'KoPubWorld-Dotum-Light.ttf', 300);
+    face('KoPubWorld Dotum', 'KoPubWorld-Dotum-Bold.ttf', 700);
     face('NanumMyeongjo', 'NanumMyeongjo-Regular.ttf', 400);
     face('NanumMyeongjo', 'NanumMyeongjo-Bold.ttf', 700);
     face('NanumGothic', 'NanumGothic-Regular.ttf', 400);
@@ -52,7 +59,7 @@ function prepareWorkAssets(workDir) {
   // 폰트 복사 + 상대 URL @font-face
   try {
     for (const f of fs.readdirSync(FONT_DIR)) {
-      if (!/\.(ttf|otf)$/i.test(f)) continue;
+      if (!/\.(ttf|otf|woff2?)$/i.test(f)) continue;
       const dst = path.join(workDir, 'fonts', f);
       if (!fs.existsSync(dst)) fs.copyFileSync(path.join(FONT_DIR, f), dst);
     }
@@ -156,23 +163,28 @@ async function buildInteriorPdf(a) {
 }
 
 /**
- * 표지 이미지 → 스프레드 치수 그대로의 표지 PDF (1쪽).
+ * 표지 PDF (1쪽 스프레드) — 배경 이미지(선택) 위에 텍스트 요소를 조판.
+ *   compose = { meta, covers([뒷표지]/[앞날개]/[뒷날개]/[책등] 섹션), overlay(앞표지 제목 얹기),
+ *               textColor, barcode(뒷표지 바코드+정가) } — 전부 선택. 없으면 이미지만.
  * spread = spine-calc.coverSpread() 결과.
  */
-async function buildCoverPdf({ imagePath, spread, outPdf, workDir, log, timeoutSec }) {
+async function buildCoverPdf({ imagePath, spread, outPdf, workDir, log, timeoutSec, compose }) {
   const L = log || (() => {});
   try {
-    if (!fs.existsSync(imagePath)) return { success: false, error: '표지 이미지가 없습니다: ' + imagePath };
+    const hasImg = imagePath && fs.existsSync(imagePath);
+    const c = compose || {};
+    const hasText = !!(c.overlay || (c.covers && c.covers.length) || c.barcode);
+    if (!hasImg && !hasText) return { success: false, error: '표지 이미지도 표지 문구도 없습니다' };
     fs.mkdirSync(workDir, { recursive: true });
-    // HTTP 서빙에서 file:/// 차단 → 이미지를 workDir 로 복사해 상대경로 참조
-    const coverName = 'cover-image' + path.extname(imagePath);
-    fs.copyFileSync(imagePath, path.join(workDir, coverName));
-    const url = coverName;
-    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
-@page { size: ${spread.widthMm}mm ${spread.heightMm}mm; margin: 0; }
-html,body { margin:0; padding:0; }
-img { display:block; width: ${spread.widthMm}mm; height: ${spread.heightMm}mm; object-fit: fill; }
-</style></head><body><img src="${url.replace(/"/g, '&quot;')}" /></body></html>`;
+    let bgTag = '';
+    if (hasImg) {
+      // HTTP 서빙에서 file:/// 차단 → 이미지를 workDir 로 복사해 상대경로 참조
+      const coverName = 'cover-image' + path.extname(imagePath);
+      fs.copyFileSync(imagePath, path.join(workDir, coverName));
+      bgTag = `<img class="bg" src="${coverName.replace(/"/g, '&quot;')}" />`;
+    }
+    const assets = prepareWorkAssets(workDir); // 동봉 폰트(KoPub 등) 상대경로 주입
+    const html = buildCoverHtml({ spread, bgTag, compose: c, fontCss: assets.fontCss });
     const htmlPath = path.join(workDir, 'cover.html');
     fs.writeFileSync(htmlPath, html, 'utf8');
     const args = ['build', htmlPath, '-d', '-o', outPdf, '--log-level', 'info', '-t', String(timeoutSec || 180), '--no-vite-config-file'];
@@ -186,6 +198,91 @@ img { display:block; width: ${spread.widthMm}mm; height: ${spread.heightMm}mm; o
   } catch (e) {
     return { success: false, error: String(e.message || e) };
   }
+}
+
+// 표지 스프레드 HTML — 영역(mm 좌표)은 spread.parts 에서 계산. 안전여백 5mm 안쪽에 배치.
+function buildCoverHtml({ spread, bgTag, compose, fontCss }) {
+  const { esc, inlineMd, FONT_STACKS, GOTHIC_STACK } = require('./html-builder');
+  const c = compose || {};
+  const meta = c.meta || {};
+  const covers = c.covers || [];
+  const color = c.textColor || '#111111';
+  const safe = (spread.safeMm || 5);
+  // 영역 x 좌표(mm)
+  let x = 0; const region = {};
+  for (const part of spread.parts) {
+    region[part.name] = region[part.name] || { x, w: part.mm };
+    x += part.mm;
+  }
+  const H = spread.heightMm;
+  const secText = (key) => {
+    const s = covers.find((v) => v.key === key);
+    if (!s || !s.blocks || !s.blocks.length) return '';
+    return s.blocks.map((b) => b.type === 'p' || b.type === 'quote' ? `<p>${inlineMd(b.text)}</p>`
+      : b.type === 'h3' || b.type === 'h4' ? `<p class="b">${inlineMd(b.text)}</p>` : '').join('\n');
+  };
+  const box = (r, cls, inner, padTopMm = 0) => r && inner
+    ? `<div class="area ${cls}" style="left:${r.x + safe}mm; width:${r.w - safe * 2}mm; top:${3 + safe + padTopMm}mm; height:${H - 6 - safe * 2 - padTopMm}mm;">${inner}</div>` : '';
+
+  const areas = [];
+  // 뒷표지 — [뒷표지] 글 + (하단) 바코드·정가
+  const back = region['뒤표지'];
+  const backIntro = secText('backCover');
+  let backBottom = '';
+  if (c.barcode && c.barcode.svg) {
+    backBottom = `<div class="bc"><div class="bcimg">${c.barcode.svg}</div>${meta.price ? `<div class="price">값 ${esc(meta.price).replace(/원?$/, '원')}</div>` : ''}</div>`;
+  }
+  if (back && (backIntro || backBottom)) {
+    areas.push(box(back, 'back', `${backIntro}${backBottom}`, Math.round(H * 0.1))); // 소개글은 위 10% 아래부터(관행)
+  }
+  // 책등 — [책등] 문구 또는 제목·저자·출판사 (세로쓰기)
+  const spineR = region['책등'];
+  if (spineR && spineR.w >= 3) {
+    const spineSec = covers.find((v) => v.key === 'spine');
+    const spineTxt = spineSec && spineSec.blocks.length
+      ? spineSec.blocks.map((b) => esc(b.text || '')).join(' ')
+      : [meta.title, meta.author, meta.publisher].filter(Boolean).map(esc).join('&nbsp;&nbsp;·&nbsp;&nbsp;');
+    if (spineTxt) areas.push(`<div class="spine" style="left:${spineR.x}mm; width:${spineR.w}mm; top:${3 + safe}mm; height:${H - 6 - safe * 2}mm;"><span>${spineTxt}</span></div>`);
+  }
+  // 앞표지 — 제목/부제/저자/출판사 얹기(옵션 — 완성 이미지에 이미 있으면 끔)
+  const front = region['앞표지'];
+  if (front && c.overlay) {
+    areas.push(`<div class="area front" style="left:${front.x + safe}mm; width:${front.w - safe * 2}mm; top:${3 + safe}mm; height:${H - 6 - safe * 2}mm;">
+<div class="ft" style="top:34%">${esc(meta.title || '')}</div>
+${meta.subtitle ? `<div class="fs" style="top:46%">${esc(meta.subtitle)}</div>` : ''}
+<div class="fa" style="top:56%">${esc(meta.author || '')}${meta.translator ? ' · ' + esc(meta.translator) : ''}</div>
+<div class="fp" style="top:88%">${esc(meta.publisher || '')}</div>
+</div>`);
+  }
+  // 날개
+  const ff = region['앞날개'], bf = region['뒷날개'];
+  areas.push(box(ff, 'flap', secText('frontFlap')));
+  areas.push(box(bf, 'flap', secText('backFlap')));
+
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+${fontCss || ''}
+@page { size: ${spread.widthMm}mm ${spread.heightMm}mm; margin: 0; }
+html,body { margin:0; padding:0; width:${spread.widthMm}mm; height:${spread.heightMm}mm; position:relative;
+  font-family: ${FONT_STACKS.kopub}; color: ${color}; }
+img.bg { position:absolute; left:0; top:0; width:${spread.widthMm}mm; height:${spread.heightMm}mm; object-fit: fill; }
+.area { position:absolute; overflow:hidden; }
+.area p { margin: 0 0 0.7em; font-size: 9.5pt; line-height: 1.7; text-indent: 0; word-break: keep-all; }
+.area p.b { font-weight: 700; font-family: ${GOTHIC_STACK}; }
+.back { display:flex; flex-direction:column; }
+.back .bc { margin-top:auto; align-self:flex-end; text-align:center; background:#fff; padding:2mm; }
+.back .bc svg { display:block; width:32mm; height:auto; }
+.back .price { font-family:${GOTHIC_STACK}; font-size:9pt; margin-top:1mm; color:#000; }
+.spine { position:absolute; display:flex; align-items:center; justify-content:center; }
+.spine span { writing-mode: vertical-rl; font-size:${spread.spineMm >= 10 ? 11 : 8.5}pt; font-weight:700; letter-spacing:0.12em; white-space:nowrap; }
+.front .ft { position:absolute; width:100%; text-align:center; font-size:24pt; font-weight:700; line-height:1.4; }
+.front .fs { position:absolute; width:100%; text-align:center; font-size:12pt; }
+.front .fa { position:absolute; width:100%; text-align:center; font-size:11pt; }
+.front .fp { position:absolute; width:100%; text-align:center; font-size:10pt; letter-spacing:0.15em; }
+.front div { left:0; }
+.flap p { font-size: 8.5pt; }
+</style></head><body>${bgTag}
+${areas.filter(Boolean).join('\n')}
+</body></html>`;
 }
 
 function lastLines(s, n = 4) {

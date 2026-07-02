@@ -67,10 +67,7 @@ nav.toc li.toc-part { font-weight: 700; margin-top: 1.2em; }
 nav.toc li.toc-front, nav.toc li.toc-back { color: #222; }
 nav.toc li.toc-chapter { padding-left: 1em; }
 nav.toc a { text-decoration: none; color: inherit; }
-nav.toc a::after {
-  content: leader(dotted) " " target-counter(attr(href url), page);
-  font-weight: 400;
-}
+/* 쪽번호(+점선 리더)는 html-builder pageCss 가 폴백 포함으로 생성 */
 
 /* ── 부(部) 표제지 ── */
 section.part-title {

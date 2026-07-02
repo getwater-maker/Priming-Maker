@@ -7,6 +7,26 @@
 **편별 Vrew 4.0.1 .vrew 파일**을 자동 생성하는 Electron 앱. PrimingFlow(D:\PrimingFlow)의 엔진을
 복사·재활용한 독립 클론.
 
+## 📖 출판 조판 8종 개선 — 사용자 리뷰 반영 (2026-07-03, v0.1.65)
+> 삼국지 미리보기 검토 피드백 8건 반영. 조판 기본값 = **구 Book Publishing 앱 사용자 설정 그대로**
+> (defaults.ts 실측: KoPub바탕 Light 10pt/1.65/자간-0.4pt/들여15pt/문단간격10pt/여백 20·15·20·17).
+- **① 폰트**: KoPubWorld 바탕·돋움 이식. ⚠ **woff2·otf(CFF)는 Chromium PDF 가 Type3 로 구움** →
+  fonttools(cu2qu)로 **TrueType 변환**해 동봉(Light/Bold만, 56MB) = Type0(CID) 임베딩 실측.
+  본문 폰트 select(KoPub바탕/돋움/나눔명조/고딕) + 굵기 300/400/700. `assets/fonts/` 는 라이트업데이트
+  제외라 기존 설치본은 나눔 폴백 — 다음 설치본 재배포에 포함.
+- **② 표지 구성**: 예약 섹션 zone 'cover' — `## [뒷표지]`(소개글) `## [앞날개]` `## [뒷날개]` `## [책등]`
+  (구조 패널 「표지 구성」). 표지 PDF 가 배경 이미지(선택) 위에 조판: 앞표지 제목·저자 오버레이(옵션),
+  책등 세로쓰기(자동=제목·저자·출판사), 뒷표지 소개글(위 10%부터)+**ISBN 바코드+정가**(우하단),
+  날개 글. 이미지 없이 텍스트만으로도 표지 PDF 생성 가능. buildCoverPdf compose 파라미터.
+- **③ 여백**: 기본 20/15/20/17(구 앱) + UI 4필드. **④ 목차 쪽번호**: leader() 가 코어(미리보기)와 CLI 에서
+  달라 점선 리더 폐기 → **absolute 우측 고정 쪽번호**로 통일(양쪽 동일 실측).
+- **⑤ 머리글·쪽번호 선택**: 짝/홀 각각 책제목/장제목/없음, 구분선 on/off(9pt 회색 고딕), 쪽번호
+  바깥하단/가운데/숨김. **⑥ 문단**: 문단 간격(pt)·들여쓰기(pt) UI. **⑦ 소제목(## = h3)**: 크기·고딕/본문체·
+  굵기·정렬·장식문자(❖ 기본)·위아래 여백. **⑧ 판권**: 자동 항목 17종 체크박스(colophonFields)+위치(앞/뒤)
+  — 「판권 구성」 패널. 자유문([판권] 내용) 있으면 체크박스 무시 안내.
+- 구현: html-builder pageCss 가 옵션 전부 반영(CSS 순서 = 폰트→테마→pageCss 오버라이드),
+  layout 옵션은 item.settings.book 영속(bookDTO.layoutSaved 로 복원). BookView LAYOUT_DEFAULTS.
+
 ## 📖 출판 모드 확장 — 다중 파일 원고·ePub·바코드·표지가이드 (2026-07-03, v0.1.64)
 > D:\PrimingBook(구 Book Publishing 앱) 기능 이식. **사용자 실원고 = 삼국지연의 1권**
 > (`D:\PrimingBook\book-publishing\data\삼국지연의_1권_필수파일.md` + `출판_삼국지_제001~015회.md`)로 실측 검증.

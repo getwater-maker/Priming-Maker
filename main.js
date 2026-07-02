@@ -173,12 +173,16 @@ function bookDTO(parsed) {
       title: p.title, num: p.num, lineStart: p.lineStart,
       chapters: (p.chapters || []).map((c) => ({ num: c.num, title: c.title, lineStart: c.lineStart, blocks: (c.blocks || []).length })),
     })),
+    covers: (parsed.covers || []).map(secDTO),
     footnoteCount: Object.keys(parsed.footnotes || {}).length,
     reserved: BK.reservedSections(),
+    fontOptions: require('./core/book/html-builder').FONT_OPTIONS,
+    colophonFieldDefs: require('./core/book/html-builder').COLOPHON_FIELDS,
     coverImagePath: parsed.coverImagePath || null,
     coverCheck: parsed._coverCheck || null,
     lastPages: pages,
     platformId, trimId, paperId, flaps, spread,
+    layoutSaved: (activeItem() && activeItem().settings && activeItem().settings.book) || {},
     platforms: Object.entries(PP.PLATFORMS).map(([id, p]) => ({ id, label: p.label, trims: p.trims, note: p.note, minPages: p.minPages })),
     trims: Object.entries(PP.TRIM_SIZES).map(([id, t]) => ({ id, label: t.label })),
     papers: Object.keys(PP.PAPERS),
@@ -2527,8 +2531,19 @@ function bookLayoutOpts(args = {}) {
   const saved = (it && it.settings && it.settings.book) || {};
   const l = { ...saved, ...(args.layout || {}) };
   return {
-    fontSizePt: l.fontSizePt, lineHeight: l.lineHeight, chapterStart: l.chapterStart,
-    footnoteMode: l.footnoteMode, marginsMm: l.marginsMm,
+    // 본문 타이포
+    fontKey: l.fontKey, fontSizePt: l.fontSizePt, lineHeight: l.lineHeight, fontWeight: l.fontWeight,
+    letterSpacingPt: l.letterSpacingPt, indentPt: l.indentPt, paragraphSpacingPt: l.paragraphSpacingPt,
+    // 여백·장
+    marginsMm: l.marginsMm, chapterStart: l.chapterStart, footnoteMode: l.footnoteMode,
+    // 머리글/쪽번호
+    headerEven: l.headerEven, headerOdd: l.headerOdd, headerLine: l.headerLine, pageNum: l.pageNum,
+    // 소제목
+    h2SizePt: l.h2SizePt, h2Gothic: l.h2Gothic, h2Weight: l.h2Weight, h2Align: l.h2Align,
+    h2Prefix: l.h2Prefix, h2MarginTopPt: l.h2MarginTopPt, h2MarginBottomPt: l.h2MarginBottomPt,
+    // 판권·표지
+    colophonFields: l.colophonFields, coverOverlay: l.coverOverlay, coverBarcode: l.coverBarcode,
+    coverTextColor: l.coverTextColor,
   };
 }
 
@@ -2650,14 +2665,25 @@ ipcMain.handle('book-build-pdf', async (_e, args = {}) => {
     }
     log(`📐 책등 ${spread.spineMm}mm · 표지 스프레드 ${spread.widthMm}×${spread.heightMm}mm (${spread.widthPx}×${spread.heightPx}px @300dpi${flaps ? ' · 날개 포함' : ''})`);
 
-    // 표지 — 첨부 이미지가 있으면 스프레드 치수 PDF 로.
+    // 표지 — 배경 이미지(선택) + 표지 문구([뒷표지]/[앞날개]/[뒷날개]/[책등])·제목 오버레이·바코드 조판.
     let coverResult = null;
-    if (S.parsed.coverImagePath && fs.existsSync(S.parsed.coverImagePath)) {
+    const layoutOpts = bookLayoutOpts(args);
+    const coverHasImg = S.parsed.coverImagePath && fs.existsSync(S.parsed.coverImagePath);
+    const coverHasText = (S.parsed.covers || []).some((s) => (s.blocks || []).length) || layoutOpts.coverOverlay;
+    if (coverHasImg || coverHasText) {
+      let barcode = null;
+      if (layoutOpts.coverBarcode !== false && meta.isbn) {
+        try { barcode = require('./core/book/isbn-barcode').isbnBarcodeSvg(meta.isbn, meta.isbnAddon || ''); } catch (_) {}
+      }
       const coverPdf = path.join(outRoot, `${base}_표지.pdf`);
-      coverResult = await PB.buildCoverPdf({ imagePath: S.parsed.coverImagePath, spread, outPdf: coverPdf, workDir, log });
+      coverResult = await PB.buildCoverPdf({
+        imagePath: coverHasImg ? S.parsed.coverImagePath : null,
+        spread, outPdf: coverPdf, workDir, log,
+        compose: { meta, covers: S.parsed.covers || [], overlay: !!layoutOpts.coverOverlay, textColor: layoutOpts.coverTextColor, barcode },
+      });
       if (!coverResult.success) log('✗ 표지 PDF 실패: ' + coverResult.error);
     } else {
-      log('ℹ 표지 이미지 미첨부 — 내지만 생성. 표지는 우측 패널에서 이미지를 첨부하세요.');
+      log('ℹ 표지 이미지·문구 없음 — 내지만 생성. 우측 패널에서 이미지 첨부 또는 [뒷표지]·[책등] 섹션을 추가하세요.');
     }
     S.timings.make = Math.round((Date.now() - t0) / 1000);
     log(`📕 출판 PDF 완료 — 내지 ${S.parsed._lastPages}쪽${coverResult && coverResult.success ? ' + 표지' : ''} (${S.timings.make}초) → ${outRoot}`);
@@ -2722,7 +2748,7 @@ ipcMain.handle('book-toggle-section', (_e, args = {}) => {
   const key = args.key;
   const rs = BK.reservedSections().find((x) => x.key === key);
   if (!rs) return currentDTO();
-  const exists = [...(S.parsed.front || []), ...(S.parsed.back || [])].find((s) => s.key === key);
+  const exists = [...(S.parsed.front || []), ...(S.parsed.back || []), ...(S.parsed.covers || [])].find((s) => s.key === key);
   if (args.on && !exists) {
     // 추가 — 필수(essential) 파일 끝에 템플릿 append (표시 순서는 파서가 관행대로 재배열)
     const target = bookEssentialPath();

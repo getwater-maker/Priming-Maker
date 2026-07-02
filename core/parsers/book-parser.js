@@ -42,6 +42,11 @@ const RESERVED = [
   { key: 'references', zone: 'back', label: '참고문헌', names: ['참고문헌', '참고 문헌'] },
   { key: 'authorBio', zone: 'back', label: '저자소개', names: ['저자소개', '저자 소개', '작가소개', '작가 소개'] },
   { key: 'colophon', zone: 'back', label: '판권', names: ['판권', '판권지', '간기'] },
+  // 표지 스프레드 구성 요소 — 내지에는 안 들어가고 표지 PDF 조판에 사용
+  { key: 'backCover', zone: 'cover', label: '뒷표지 글', names: ['뒷표지', '뒷표지글', '책소개'] },
+  { key: 'frontFlap', zone: 'cover', label: '앞날개 글', names: ['앞날개'] },
+  { key: 'backFlap', zone: 'cover', label: '뒷날개 글', names: ['뒷날개'] },
+  { key: 'spine', zone: 'cover', label: '책등 문구', names: ['책등'] },
   // 자동 생성 페이지 지시 섹션(필수파일 형식의 # 속표지/# 표제지) — 내용은 버림(앱이 메타로 자동 조판)
   { key: 'ignore', zone: 'ignore', label: '(자동)', names: ['속표지', '표제지', '반표제지', '표지', '목차페이지'] },
 ];
@@ -93,6 +98,7 @@ function parseBookText(text, fallbackTitle) {
   let fileTitle = fallbackTitle || '책';
   const front = [];   // { key, label, title, blocks }
   const back = [];
+  const covers = []; // 표지 구성([뒷표지]/[앞날개]/[뒷날개]/[책등]) — 내지 제외, 표지 PDF 조판용
   const parts = [];   // { title:null|string, lineStart, chapters: [{num,title,lineStart,blocks}] }
   const footnotes = {}; // id → { text, line }
 
@@ -149,6 +155,7 @@ function parseBookText(text, fallbackTitle) {
           // ignore 존(속표지·표제지 지시문) = 내용 버림 — 컨테이너를 어디에도 안 붙임
           if (r.zone === 'front') front.push(cur);
           else if (r.zone === 'back') back.push(cur);
+          else if (r.zone === 'cover') covers.push(cur);
           continue;
         }
         // 모르는 대괄호 섹션 → 본문 장으로 취급 (제목에 대괄호 유지)
@@ -248,7 +255,7 @@ function parseBookText(text, fallbackTitle) {
   // 메타의 책제목(예: 필수파일 `책제목:` 줄)이 있으면 파일 제목으로
   if (meta.title) fileTitle = meta.title;
 
-  return { kind: 'book', fileTitle, meta, front, parts, back, footnotes, totalLines: lines.length };
+  return { kind: 'book', fileTitle, meta, front, parts, back, covers, footnotes, totalLines: lines.length };
 }
 
 // 예약 섹션 목록(구조 패널·템플릿 삽입용) — ignore(속표지·표제지 지시)는 UI 비노출
