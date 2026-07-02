@@ -36,7 +36,7 @@ function svgToPngDataUrl(svg, w, h) {
 
 // 조판 옵션 기본값 — 구 Book Publishing 앱에서 사용자가 쓰던 값 그대로
 const LAYOUT_DEFAULTS = {
-  fontKey: 'kopub', fontSizePt: 10, lineHeight: 1.65, fontWeight: 300,
+  fontKey: 'kopub', fontSizePt: 10, lineHeight: 1.8, fontWeight: 300,
   letterSpacingPt: -0.4, indentPt: 15, paragraphSpacingPt: 10,
   marginsMm: { top: 20, bottom: 15, inner: 20, outer: 17 },
   chapterStart: 'recto',
@@ -390,7 +390,7 @@ html,body{margin:0;padding:0;background:#8a8177}
             </label>
             <div className="bkrow">
               <label>크기(pt) <input type="number" step="0.5" min="7" max="14" value={layout.fontSizePt} onChange={(e) => L('fontSizePt', Number(e.target.value) || 10)} /></label>
-              <label>행간 <input type="number" step="0.05" min="1.2" max="2.5" value={layout.lineHeight} onChange={(e) => L('lineHeight', Number(e.target.value) || 1.65)} /></label>
+              <label title="한국 단행본 관행 = 글자 크기의 1.7~2.0배 (대표 1.8)">행간 <input type="number" step="0.05" min="1.2" max="2.5" value={layout.lineHeight} onChange={(e) => L('lineHeight', Number(e.target.value) || 1.8)} /></label>
             </div>
             <div className="bkrow">
               <label>굵기

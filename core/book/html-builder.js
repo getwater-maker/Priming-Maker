@@ -295,7 +295,9 @@ function buildBookHtml(book, opts = {}) {
     // ── 본문 타이포 — 기본값은 구 Book Publishing 앱에서 사용자가 쓰던 값 그대로 ──
     fontKey: FONT_STACKS[opts.fontKey] ? opts.fontKey : 'kopub',
     fontSizePt: num(opts.fontSizePt, 10),
-    lineHeight: num(opts.lineHeight, 1.65),
+    // 행간 — 한국 단행본 관행 = 글자 크기의 1.7~2.0배(10pt 본문 → 17~20pt 행간, 대표 1.8).
+    //   구 앱 값(1.65)은 관행 하한보다 좁아 기본을 1.8 로.
+    lineHeight: num(opts.lineHeight, 1.8),
     fontWeight: num(opts.fontWeight, 300),
     letterSpacingPt: numAllowNeg(opts.letterSpacingPt, -0.4),
     indentPt: numAllowZero(opts.indentPt, 15),

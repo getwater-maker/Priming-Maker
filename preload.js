@@ -91,6 +91,7 @@ contextBridge.exposeInMainWorld('api', {
   bookExportBarcode: () => ipcRenderer.invoke('book-export-barcode'),
   bookSaveAsset: (args) => ipcRenderer.invoke('book-save-asset', args),
   bookBuildEpub: (args) => ipcRenderer.invoke('book-build-epub', args),
+  exportPremiere: (args) => ipcRenderer.invoke('export-premiere', args),
   makeAll: (args) => ipcRenderer.invoke('make-all', args),
   abort: () => ipcRenderer.invoke('abort'),
   resetProject: () => ipcRenderer.invoke('reset-project'),

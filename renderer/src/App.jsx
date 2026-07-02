@@ -395,6 +395,12 @@ export default function App() {
     try { const r = await api.exportVrew({ shortsNum, presetName: presetName || null, captionStyle: capOverride(), captionMaxChars: effCap, aiNotice }); setStatus(`.vrew ${r.outs.length}개`); }
     catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
   }
+  // Premiere Pro 임포트용 XML(FCP7 xmeml) — 파일 > 가져오기로 시퀀스가 바로 열림.
+  async function runPremiere(shortsNum) {
+    setStatus('프리미어 XML 내보내는 중…');
+    try { const r = await api.exportPremiere({ shortsNum }); setStatus(r && r.outs && r.outs.length ? `프리미어 XML ${r.outs.length}개 — Premiere 에서 파일>가져오기` : '프리미어 XML 실패 — 로그 확인'); }
+    catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
+  }
   async function attachAsset(shortsNum, groupNum) {
     setStatus('이미지/영상 첨부…');
     try { const d = await api.attachAsset({ shortsNum, groupNum }); setDto(d); setStatus('첨부 완료'); }
@@ -1103,7 +1109,7 @@ export default function App() {
           <Cards dto={dto} isLf={isLf} capCharsN={effCap}
             onTts={runTts} onImg={runImg} onVid={runVid} onBulk={runBulk}
             onPlayShorts={playShorts} onPlayGroup={playGroup} onRegen={runRegen}
-            onMake={runMake} onVrew={runVrew} onAttach={attachAsset} onClear={clearAsset}
+            onMake={runMake} onVrew={runVrew} onPremiere={runPremiere} onAttach={attachAsset} onClear={clearAsset}
             onTitleField={updateTitleField} onPreview={(kind, src) => setPreview({ kind, src })}
             onPlayFrom={playFrom} onGroupTts={runGroupTts} onGroupVid={runGroupVid} onShowPrompt={showPrompt} onSplit={splitGroup} />
           </>)}
@@ -1581,7 +1587,7 @@ function PlaylistView({ dto, onMakeOne, onPreview, onPreviewMedia, onAttachBg, o
 }
 
 // ── 카드 목록 (편별 그룹/컷) ──────────────────────────────
-function Cards({ dto, isLf, capCharsN, onTts, onImg, onVid, onBulk, onPlayShorts, onPlayGroup, onRegen, onMake, onVrew, onAttach, onClear, onTitleField, onPreview, onPlayFrom, onGroupTts, onGroupVid, onShowPrompt, onSplit }) {
+function Cards({ dto, isLf, capCharsN, onTts, onImg, onVid, onBulk, onPlayShorts, onPlayGroup, onRegen, onMake, onVrew, onPremiere, onAttach, onClear, onTitleField, onPreview, onPlayFrom, onGroupTts, onGroupVid, onShowPrompt, onSplit }) {
   // dto.projects 부재 가드 — 출판/플리 dto 가 모드 전환 직후 한 프레임 남아 들어올 수 있음(크래시 방지)
   if (!dto || !dto.projects || !dto.projects.length) {
     return <div id="cards"><div className="empty">대본(.md)을 열면 편별 그룹과 컷이 여기에 표시됩니다.</div></div>;
@@ -1603,10 +1609,11 @@ function Cards({ dto, isLf, capCharsN, onTts, onImg, onVid, onBulk, onPlayShorts
                 <button className="ghost" onClick={() => onTts(pr.shortsNum)}>🎤 TTS</button>
                 <button className="ghost" onClick={() => onImg(pr.shortsNum)}>🖼 이미지</button>
                 <button className="ghost" title="폴더 선택 → 파일명 숫자로 그룹 자동첨부" onClick={() => onBulk(pr.shortsNum)}>📎 일괄첨부</button>
-                <button className="ghost" onClick={() => onVid(pr.shortsNum)}>🎬 영상</button>
+                <button className="ghost" onClick={() => onVid(pr.shortsNum)}>🎬 비디오</button>
                 <button className="ghost" onClick={() => onPlayShorts(pr.shortsNum)}>▶ 미리보기</button>
                 <button className="ghost" onClick={() => onMake(pr.shortsNum)}>⚡ 만들기</button>
                 <button onClick={() => onVrew(pr.shortsNum)}>💾 .vrew</button>
+                <button className="ghost" title="Premiere Pro 임포트용 XML 시퀀스 생성 — 파일 > 가져오기로 열면 클립·TTS가 배치된 시퀀스가 바로 열립니다 (자막은 .srt 캡션 가져오기)" onClick={() => onPremiere(pr.shortsNum)}>🎞 프리미어</button>
               </span>
             </h2>
             {!isLf && <TitleEditor pr={pr} onTitleField={onTitleField} />}

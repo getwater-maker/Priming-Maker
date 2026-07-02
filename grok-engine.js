@@ -649,9 +649,43 @@ class GrokEngine {
       // 동일 https video URL 이 ready 상태로 연속 감지된 횟수 — 프리뷰가 아닌 완성본 확인용
       let stableReady = 0;
       let lastReadyUrl = null;
-      while (Date.now() - startedAt < TIMEOUT_MS) {
+      // ★ 새 UI(2026-07) 대응: 제출 후 원본 "이미지" 화면에 머물고, 생성 중인 비디오는
+      //   사이드바 썸네일의 진행률(N%) 배지로만 표시됨 — 이 화면엔 <video> 가 없어 5분 타임아웃
+      //   → 실패 → 재시도(크레딧 추가 차감)로 이어졌음. 대응:
+      //   ① 진행률 배지를 감지하면 로그에 표시 + 썸네일 클릭으로 비디오 화면 진입
+      //   ② 진행률이 보이는 동안(=생성 중)은 타임아웃을 연장해 재시도 낭비 방지
+      let _progressClicks = 0;
+      let _progressSeenAt = 0;
+      let _lastPct = '';
+      const HARD_TIMEOUT_MS = 15 * 60 * 1000; // 진행률 연장 포함 절대 상한
+      while ((Date.now() - startedAt < TIMEOUT_MS || (Date.now() - _progressSeenAt) < 90 * 1000)
+             && (Date.now() - startedAt < HARD_TIMEOUT_MS)) {
         if (abortSignal && abortSignal()) return { success: false, error: '사용자 중단' };
         await this.page.waitForTimeout(POLL_INTERVAL);
+
+        // 진행률(N%) 배지 탐지 — 이미지 화면에 머무는 새 UI 흐름 감지 + 비디오 화면으로 클릭 진입
+        try {
+          const hasVideoNow = await this.page.$(GROK_SELECTORS.videoElement);
+          if (!hasVideoNow) {
+            const pr = await this.page.evaluate(() => {
+              const els = Array.from(document.querySelectorAll('div,span,p'))
+                .filter((e) => e.children.length === 0 && /^\d{1,3}\s*%$/.test((e.textContent || '').trim()));
+              if (!els.length) return null;
+              const el = els[0];
+              const r = el.getBoundingClientRect();
+              if (!r.width || !r.height) return null;
+              return { pct: el.textContent.trim(), x: r.x + r.width / 2, y: r.y + r.height / 2 };
+            });
+            if (pr) {
+              _progressSeenAt = Date.now();
+              if (pr.pct !== _lastPct) { _lastPct = pr.pct; this.log(`[Grok] 생성 진행 ${pr.pct} (이미지 화면 — 비디오 화면 진입 시도)`); }
+              if (_progressClicks < 4) {
+                _progressClicks++;
+                try { await this.page.mouse.click(pr.x, pr.y); await this.page.waitForTimeout(2500); } catch (_) {}
+              }
+            }
+          }
+        } catch (_) { /* 탐지 실패는 무시 — 기존 흐름 계속 */ }
 
         // 토스트 텍스트 감지 — 매 폴링마다 (5초 간격)
         if (!_downgradeDetected) {
@@ -806,7 +840,7 @@ class GrokEngine {
         }
       }
 
-      return { success: false, error: '5분 대기 후에도 비디오 미완성 (timeout)' };
+      return { success: false, error: `대기 시간 초과 — 비디오 미완성${_lastPct ? ` (마지막 진행률 ${_lastPct} — 이미지 화면에서 비디오 화면으로 진입 실패했을 수 있음)` : ''} (timeout)` };
     } catch (e) {
       return { success: false, error: `Grok 자동화 예외: ${e.message}` };
     }

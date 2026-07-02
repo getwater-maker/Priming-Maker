@@ -622,6 +622,25 @@ ipcMain.handle('tts-build', async (_e, args = {}) => {
   return P.toDTO(S.parsed);
 });
 
+// Premiere Pro 임포트용 XML(FCP7 xmeml) — 편별 시퀀스 파일 생성. Premiere: 파일 > 가져오기.
+ipcMain.handle('export-premiere', async (_e, args = {}) => {
+  if (!S.parsed) throw new Error('대본을 먼저 여세요.');
+  const { shortsNum = null } = args;
+  const { buildPremiereXml } = require('./core/premiere-xml');
+  try { fs.mkdirSync(S.outRoot, { recursive: true }); } catch {}
+  const outs = [];
+  for (const pr of S.parsed.projects) {
+    if (shortsNum && pr.shortsNum !== shortsNum) continue;
+    const baseName = vrewBaseName(pr);
+    const xmlPath = path.join(S.outRoot, `${baseName}_premiere.xml`);
+    const r = await buildPremiereXml(pr, { outPath: xmlPath, log });
+    if (r.success) outs.push(r.xmlPath);
+    else log(`✗ ${prLabel(pr)} 프리미어 XML 실패: ${r.error}`);
+  }
+  if (outs.length) { try { shell.openPath(S.outRoot); } catch {} }
+  return { outs };
+});
+
 ipcMain.handle('export-vrew', async (_e, args = {}) => {
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
   const { shortsNum = null, presetName = null, captionStyle = null, captionMaxChars = 7, aiNotice = false } = args;
@@ -1767,7 +1786,11 @@ async function runMakeAllCore(opts = {}) {
   const isComfyVideo = videoEngine === 'comfy' || videoEngine === 'wan'; // 둘 다 ComfyUI REST 경로
   const useWanVideo = videoEngine === 'wan';
   const comfyVideoCloud = isComfyVideo && (() => { try { return !!require('./core/comfy-config').load().cloud; } catch { return false; } })();
-  const videoPipeline = canParallel && comfyVideoCloud;
+  // Grok 비디오도 파이프라인 가능 — Grok 은 별도 크롬 프로필이라 이미지 브라우저(Genspark/Flow)와
+  //   충돌하지 않음(동시 실행 시 grok.com 로딩이 느린 문제는 waitUntil 'load' 로 이미 완화).
+  //   ⚠ Flow 비디오는 이미지와 같은 브라우저(S.flowEng)를 쓰므로 파이프라인 제외(순차 유지).
+  const grokVideoPipeline = videoEngine === 'grok' || videoEngine === 'grok10';
+  const videoPipeline = canParallel && (comfyVideoCloud || grokVideoPipeline);
   const needTtsForVideo = (() => { try { return require('./core/comfy-config').load().matchVideoToAudio !== false; } catch { return true; } })(); // comfy 영상 길이=그룹 TTS → 그 그룹 TTS 도 필요
   let ttsStageDone = false, imageStageDone = false;
 
@@ -1813,49 +1836,64 @@ async function runMakeAllCore(opts = {}) {
     imageStageDone = true;
   };
 
-  // 그룹별 비디오 파이프라인 — 이미지(+필요 시 그 그룹 TTS)가 준비된 그룹부터 즉시 Comfy 클라우드로 영상 생성.
+  // 그룹별 비디오 파이프라인 — 이미지(+필요 시 그 그룹 TTS)가 준비된 그룹부터 즉시 영상 생성.
+  //   Comfy 클라우드 = 그룹 단건씩 / Grok = 준비된 그룹을 모아 배치(브라우저 기동 오버헤드 절약).
   const videoStage = async () => {
     const done = new Set();
     const vmap = new Map();
     for (const pr of projects) vmap.set(pr, rangeNums(pr, fromNum, toNum)); // I2V 범위(미지정=전체)
     const ttsReady = (pr, g) => {
-      if (!needTtsForVideo) return true;
+      // Grok 'auto' 는 그룹 TTS 합으로 6s/10s 를 정하므로 TTS 필요. 고정(10s)이면 불필요.
+      if (grokVideoPipeline) {
+        if (grokDurOf(videoEngine) !== 'auto') return true;
+      } else if (!needTtsForVideo) return true;
       const ss = pr.getSentencesOfGroup(g);
       return ss.length > 0 && ss.every((s) => s.ttsDurationSec != null);
     };
     while (!S.abort) {
-      let picked = null;
+      // 지금 준비된 그룹 전부 수집 (편 순서 유지)
+      const ready = [];
       for (const pr of projects) {
         const vOnly = vmap.get(pr);
         for (const g of pr.groups) {
           if (done.has(g)) continue;
           if (!vOnly.includes(g.num)) { done.add(g); continue; }                          // 영상 범위 밖
           if (!(g.imagePath && fs.existsSync(g.imagePath)) || !ttsReady(pr, g)) continue;  // 아직 준비 안 됨
-          picked = { pr, g }; break;
+          ready.push({ pr, g });
         }
-        if (picked) break;
       }
-      if (!picked) {
+      if (!ready.length) {
         if (ttsStageDone && imageStageDone) break; // 단계 끝 + 더 준비될 그룹 없음 → 종료
         await new Promise((r) => setTimeout(r, 400));
         continue;
       }
-      done.add(picked.g);
-      const { pr, g } = picked;
-      const dirs = shortsDirs(S.outRoot, pr.shortsNum);
-      const t0 = Date.now();
-      try {
-        log(`🎬 G${g.num} (${prLabel(pr)}) 이미지 준비 — 즉시 영상 생성(파이프라인)…`);
-        await runComfyVideos(pr, dirs.media, log, { onlyNums: [g.num], wan: useWanVideo });
-        if (!S.abort) await maybeUpscale(pr, log, true);
-      } catch (e) { log(`G${g.num} 영상 실패: ${e.message}`); }
-      S.timings.video += (Date.now() - t0) / 1000;
-      pushDtoUpdate();
+      // 편(pr)별로 묶어 배치 처리 — Grok 은 호출당 브라우저를 새로 띄우므로 모아서 한 번에.
+      const byPr = new Map();
+      for (const x of ready) { if (!byPr.has(x.pr)) byPr.set(x.pr, []); byPr.get(x.pr).push(x.g); }
+      for (const [pr, gs] of byPr) {
+        if (S.abort) break;
+        gs.forEach((g) => done.add(g));
+        const nums = gs.map((g) => g.num);
+        const dirs = shortsDirs(S.outRoot, pr.shortsNum);
+        const t0 = Date.now();
+        try {
+          log(`🎬 G${nums.join(',G')} (${prLabel(pr)}) 이미지 준비 — 즉시 비디오 생성(파이프라인${grokVideoPipeline ? '·Grok' : '·Comfy'})…`);
+          if (grokVideoPipeline) {
+            const vr = await P.generateHookVideosGrok(pr, dirs.media, log, () => S.abort, 0, pushDtoUpdate, nums, grokDurOf(videoEngine));
+            if (vr && vr.limitReached) { S.grokLimit = vr.limitReached; S.abort = true; log('⛔ Grok 요청 한도 도달 — 작업을 멈춥니다 (한도 풀린 뒤 다시 만들기)'); }
+          } else {
+            await runComfyVideos(pr, dirs.media, log, { onlyNums: nums, wan: useWanVideo });
+          }
+          if (!S.abort) await maybeUpscale(pr, log, true);
+        } catch (e) { log(`G${nums.join(',G')} 영상 실패: ${e.message}`); }
+        S.timings.video += (Date.now() - t0) / 1000;
+        pushDtoUpdate();
+      }
     }
   };
 
   if (videoPipeline) {
-    log('⚡ 1·2·3단계 파이프라인 — TTS ∥ 이미지 ∥ 비디오(그룹 이미지 준비 즉시, Comfy 클라우드)');
+    log(`⚡ 1·2·3단계 파이프라인 — TTS ∥ 이미지 ∥ 비디오(그룹 이미지 준비 즉시, ${grokVideoPipeline ? 'Grok' : 'Comfy 클라우드'})`);
     await Promise.all([ttsStage(), imageStage(), videoStage()]);
   } else if (canParallel) {
     log(`⚡ 1·2단계 병렬 — TTS ∥ 이미지(${engine}${comfyCloud ? ' 클라우드' : ''}, 로컬 GPU 비충돌)`);
