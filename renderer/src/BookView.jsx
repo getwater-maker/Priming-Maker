@@ -11,10 +11,28 @@ const META_FIELDS = [
   ['publisher', '출판사'], ['issuer', '발행인'], ['issueDate', '발행일'], ['isbn', 'ISBN'],
   ['price', '정가(POD)'], ['ebookPrice', '전자책 가격'], ['regNo', '출판등록'],
   ['address', '주소'], ['phone', '대표전화'], ['homepage', '홈페이지'], ['email', '이메일'],
-  ['copyright', '저작권(ⓒ)'], ['logo', '출판사 로고(이미지 경로)'], ['qr', 'QR(주소/이미지)'], ['qrLabel', 'QR 라벨'],
+  ['copyright', '저작권(ⓒ)'], ['isbnAddon', '부가기호(5자리)'], ['logo', '출판사 로고(이미지 경로)'], ['qr', 'QR(주소/이미지)'], ['qrLabel', 'QR 라벨'],
 ];
 // 판권 법정 필수 7필드 — 미입력 경고
 const REQUIRED_KEYS = [['title', '제목'], ['author', '저자'], ['issuer', '발행인'], ['issueDate', '발행일'], ['publisher', '출판사'], ['isbn', 'ISBN'], ['price', '정가']];
+
+// SVG 문자열 → PNG dataURL (렌더러 캔버스 사용)
+function svgToPngDataUrl(svg, w, h) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' }));
+    img.onload = () => {
+      const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+      const ctx = cv.getContext('2d');
+      ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, w, h);
+      ctx.drawImage(img, 0, 0, w, h);
+      URL.revokeObjectURL(url);
+      resolve(cv.toDataURL('image/png'));
+    };
+    img.onerror = (e) => { URL.revokeObjectURL(url); reject(new Error('SVG 렌더 실패')); };
+    img.src = url;
+  });
+}
 
 export default function BookView({ dto, setDto, setStatus, logline }) {
   const [layout, setLayout] = useState({ fontSizePt: 10, lineHeight: 1.8, chapterStart: 'recto' });
@@ -22,7 +40,7 @@ export default function BookView({ dto, setDto, setStatus, logline }) {
   const [previewBusy, setPreviewBusy] = useState(false);
   const [building, setBuilding] = useState(false);
   const [pageInfo, setPageInfo] = useState({ cur: 0, total: 0 });
-  const [edit, setEdit] = useState(null); // { lineStart, lineEnd, text }
+  const [edit, setEdit] = useState(null); // { lineStart, lineEnd, text, file }
   const viewerRef = useRef(null);   // CoreViewer 인스턴스
   const viewportRef = useRef(null); // 뷰포트 DOM
   const loadedForRef = useRef('');  // 마지막으로 로드한 url (중복 로드 방지)
@@ -59,13 +77,23 @@ export default function BookView({ dto, setDto, setStatus, logline }) {
   }, [contentSig]);
 
   // ── vivliostyle 로드 ──
+  //   ⚠ 반드시 iframe 안에 렌더 — 같은 document 에 렌더하면 앱 전역 CSS(p 마진·폰트 14px 등)가
+  //   조판 DOM 에 캐스케이드돼 실측 기반 페이지 분할이 왜곡됨(삼국지 255쪽 → 660쪽으로 부풀던 원인).
   useEffect(() => {
     if (!previewUrl || !viewportRef.current) return;
     if (loadedForRef.current === previewUrl) return;
     loadedForRef.current = previewUrl;
-    const vp = viewportRef.current;
-    vp.innerHTML = '';
-    const viewer = new CoreViewer({ viewportElement: vp }, {
+    const iframe = viewportRef.current;
+    const fdoc = iframe.contentDocument;
+    fdoc.open();
+    fdoc.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+html,body{margin:0;padding:0;background:#8a8177}
+[data-src-line]:hover{outline:2px solid rgba(212,165,116,.9);outline-offset:1px;cursor:pointer}
+</style></head><body><div id="vp"></div></body></html>`);
+    fdoc.close();
+    fdoc.addEventListener('click', (e) => onPreviewClickRef.current(e));
+    const vp = fdoc.getElementById('vp');
+    const viewer = new CoreViewer({ viewportElement: vp, window: iframe.contentWindow }, {
       renderAllPages: true, pageViewMode: PageViewMode.SPREAD, fitToScreen: true, autoResize: true,
     });
     viewerRef.current = viewer;
@@ -87,7 +115,7 @@ export default function BookView({ dto, setDto, setStatus, logline }) {
     viewer.loadDocument(previewUrl, {}, {});
   }, [previewUrl]);
 
-  // ── 문단 클릭 → 편집 ──
+  // ── 문단 클릭 → 편집 ── (iframe 내부 click 리스너가 ref 를 통해 항상 최신 핸들러 호출)
   const onPreviewClick = useCallback(async (e) => {
     const el = e.target && e.target.closest && e.target.closest('[data-src-line]');
     if (!el) return;
@@ -95,11 +123,14 @@ export default function BookView({ dto, setDto, setStatus, logline }) {
     const lineEnd = parseInt(el.getAttribute('data-src-end') || el.getAttribute('data-src-line'), 10);
     if (isNaN(lineStart)) return;
     try {
-      const text = await api.getScriptText();
-      const lines = String(text || '').replace(/\r\n/g, '\n').split('\n');
-      setEdit({ lineStart, lineEnd, text: lines.slice(lineStart, lineEnd + 1).join('\n') });
+      // 원본 파일 기준 줄 텍스트 — 다중 파일 원고(필수파일+회차)에서도 정확한 파일·줄로 역매핑
+      const r = await api.bookGetLines({ lineStart, lineEnd });
+      if (!r) return;
+      setEdit({ lineStart, lineEnd, text: r.text, file: r.file });
     } catch (err) { logline('원고 읽기 오류: ' + err.message); }
   }, []);
+  const onPreviewClickRef = useRef(onPreviewClick);
+  onPreviewClickRef.current = onPreviewClick;
 
   async function saveEdit() {
     if (!edit) return;
@@ -120,6 +151,15 @@ export default function BookView({ dto, setDto, setStatus, logline }) {
     } catch (e) { logline('PDF 오류: ' + e.message); }
     setBuilding(false);
   }
+  async function buildEpubFile() {
+    setBuilding(true); setStatus('ePub 생성 중…');
+    try {
+      const r = await api.bookBuildEpub({});
+      if (r && r.dto) setDto(r.dto);
+      setStatus(r && !r.error ? 'ePub 완료 — 출력폴더 확인' : 'ePub 실패 — 로그 확인');
+    } catch (e) { logline('ePub 오류: ' + e.message); }
+    setBuilding(false);
+  }
   async function toggleSection(key, on) {
     const d = await api.bookToggleSection({ key, on });
     if (d) setDto(d);
@@ -131,6 +171,59 @@ export default function BookView({ dto, setDto, setStatus, logline }) {
   }
   async function attachCover() { const d = await api.bookAttachCover(); if (d) setDto(d); }
   async function clearCover() { const d = await api.bookClearCover(); if (d) setDto(d); }
+
+  // ISBN 바코드 — main 이 SVG 저장, 렌더러가 PNG(300dpi 상당)로도 변환 저장.
+  async function exportBarcode() {
+    try {
+      const r = await api.bookExportBarcode();
+      if (!r || r.error) { setStatus(r ? r.error : '바코드 생성 실패'); return; }
+      const png = await svgToPngDataUrl(r.svg, r.widthPx * 2, r.heightPx * 2); // 2배(≈600px 폭) 고해상
+      await api.bookSaveAsset({ name: `ISBN바코드_${r.isbn13}.png`, dataUrl: png });
+      setStatus('ISBN 바코드 저장 (SVG+PNG) — 표지 뒷면 오른쪽 하단에 배치하세요');
+    } catch (e) { logline('바코드 오류: ' + e.message); }
+  }
+  // 표지 가이드 PNG — 300dpi 실치수 캔버스에 재단선/책등/날개 구분선 + 치수 라벨.
+  async function exportCoverGuide() {
+    try {
+      const sp = dto.spread;
+      if (!sp || !sp.parts) return;
+      const mmToPx = (mm) => Math.round((mm / 25.4) * 300);
+      const W = mmToPx(sp.widthMm), H = mmToPx(sp.heightMm);
+      const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+      const ctx = cv.getContext('2d');
+      ctx.clearRect(0, 0, W, H); // 투명 배경 — 캔바 등에서 레이어로 얹기
+      const font = (px) => { ctx.font = `${px}px sans-serif`; };
+      // 구분선(파란 점선) + 라벨
+      ctx.strokeStyle = '#1976d2'; ctx.fillStyle = '#1976d2'; ctx.lineWidth = 3;
+      ctx.setLineDash([18, 14]);
+      let xMm = 0;
+      for (let i = 0; i < sp.parts.length; i++) {
+        const part = sp.parts[i];
+        const x0 = mmToPx(xMm);
+        if (i > 0) { ctx.beginPath(); ctx.moveTo(x0, 0); ctx.lineTo(x0, H); ctx.stroke(); }
+        font(54); ctx.textAlign = 'center';
+        const cx = mmToPx(xMm + part.mm / 2);
+        if (part.name !== 'bleed') {
+          ctx.fillText(part.name, cx, Math.round(H * 0.5));
+          font(40); ctx.fillText(`${part.mm}mm`, cx, Math.round(H * 0.5) + 56);
+        }
+        xMm += part.mm;
+      }
+      // 재단선(빨강 실선) — 사방 bleed 안쪽
+      const bl = mmToPx(3);
+      ctx.setLineDash([]); ctx.strokeStyle = '#d32f2f'; ctx.lineWidth = 3;
+      ctx.strokeRect(bl, bl, W - bl * 2, H - bl * 2);
+      // 안전선(초록 점선) — 재단선 안쪽 5mm
+      const sf = mmToPx(3 + (sp.safeMm || 5));
+      ctx.setLineDash([12, 10]); ctx.strokeStyle = '#2e7d32'; ctx.lineWidth = 2;
+      ctx.strokeRect(sf, sf, W - sf * 2, H - sf * 2);
+      // 상단 안내
+      ctx.setLineDash([]); ctx.fillStyle = '#d32f2f'; ctx.textAlign = 'left'; font(44);
+      ctx.fillText(`표지 스프레드 ${sp.widthMm}×${sp.heightMm}mm = ${W}×${H}px @300dpi · 빨강=재단선 · 초록=안전선(글자 금지 바깥)`, sf + 10, sf + 60);
+      await api.bookSaveAsset({ name: '표지가이드.png', dataUrl: cv.toDataURL('image/png') });
+      setStatus(`표지 가이드 저장 — ${W}×${H}px. 이 위에 디자인하고 가이드 레이어는 지우세요`);
+    } catch (e) { logline('표지 가이드 오류: ' + e.message); }
+  }
   const nav = (dir) => { try { viewerRef.current && viewerRef.current.navigateToPage(dir); } catch {} };
 
   if (!loaded) {
@@ -198,10 +291,10 @@ export default function BookView({ dto, setDto, setStatus, logline }) {
           <span className="meta">{previewBusy ? '⏳ 조판 중…' : '문단을 클릭하면 수정할 수 있습니다'}</span>
           <button className="ghost" onClick={refreshPreview} title="원고를 다시 조판">🔄 미리보기 갱신</button>
         </div>
-        <div className="bkviewport" ref={viewportRef} onClick={onPreviewClick} />
+        <iframe className="bkviewport" ref={viewportRef} title="페이지 미리보기" />
         {edit && (
           <div className="bkedit">
-            <div className="meta">원고 {edit.lineStart + 1}{edit.lineEnd !== edit.lineStart ? `~${edit.lineEnd + 1}` : ''}행 수정 — 저장하면 원본 .md 에 반영되고 재조판됩니다</div>
+            <div className="meta">{edit.file ? `${edit.file} — ` : '원고 '}수정 후 저장하면 원본 .md 에 반영되고 재조판됩니다</div>
             <textarea value={edit.text} rows={Math.min(8, edit.text.split('\n').length + 1)}
               onChange={(e) => setEdit({ ...edit, text: e.target.value })} autoFocus />
             <div className="mbtns">
@@ -285,6 +378,10 @@ export default function BookView({ dto, setDto, setStatus, logline }) {
                   <div className="mbtns"><button className="ghost" onClick={attachCover}>교체</button><button className="ghost" onClick={clearCover}>제거</button></div>
                 </>)
               : <button onClick={attachCover}>🖼 표지 이미지 첨부</button>}
+            <div className="mbtns">
+              <button className="ghost" title="재단선·책등·날개 구분선이 그려진 투명 PNG(300dpi) — 캔바 등에서 밑그림 레이어로" onClick={exportCoverGuide}>📐 표지 가이드</button>
+              <button className="ghost" title="ISBN(EAN-13)+부가기호 바코드를 SVG·PNG 로 생성 — 표지 뒷면 오른쪽 하단에 배치" onClick={exportBarcode} disabled={!meta.isbn}>🏷 바코드</button>
+            </div>
             <div className="meta">표지 = 뒷표지+책등+앞표지(+날개) 통합 한 장. 위 픽셀 치수로 만들어 첨부하면 표지 PDF 로 변환됩니다.</div>
           </div>
         </details>
@@ -303,6 +400,7 @@ export default function BookView({ dto, setDto, setStatus, logline }) {
         </details>
         <div className="bkactions">
           <button disabled={building} onClick={buildPdf}>{building ? '⏳ 생성 중…' : '📕 PDF 생성 (내지+표지)'}</button>
+          <button className="ghost" disabled={building} title="같은 원고로 전자책(ePub 3.0) 생성 — 표지는 전자책표지 메타 또는 인쇄 표지에서 앞표지 자동 크롭" onClick={buildEpubFile}>📱 ePub</button>
           <button className="ghost" onClick={() => api.openFolder()}>📁 출력폴더</button>
         </div>
         <div className="bkstatus">

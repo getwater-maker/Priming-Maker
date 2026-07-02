@@ -1582,7 +1582,8 @@ function PlaylistView({ dto, onMakeOne, onPreview, onPreviewMedia, onAttachBg, o
 
 // ── 카드 목록 (편별 그룹/컷) ──────────────────────────────
 function Cards({ dto, isLf, capCharsN, onTts, onImg, onVid, onBulk, onPlayShorts, onPlayGroup, onRegen, onMake, onVrew, onAttach, onClear, onTitleField, onPreview, onPlayFrom, onGroupTts, onGroupVid, onShowPrompt, onSplit }) {
-  if (!dto || !dto.projects.length) {
+  // dto.projects 부재 가드 — 출판/플리 dto 가 모드 전환 직후 한 프레임 남아 들어올 수 있음(크래시 방지)
+  if (!dto || !dto.projects || !dto.projects.length) {
     return <div id="cards"><div className="empty">대본(.md)을 열면 편별 그룹과 컷이 여기에 표시됩니다.</div></div>;
   }
   return (

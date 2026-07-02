@@ -92,6 +92,20 @@ section.chapter > h2.chapter-title {
   text-align: left;
   break-after: avoid;
 }
+/* 장 리드문(*이탤릭 한 줄*) — 제목 아래 붙는 장 부제/도입 문구 */
+p.chapter-lead {
+  font-style: italic;
+  color: #333;
+  font-size: 0.95em;
+  margin: -3.2em 0 4em;
+  break-after: avoid;
+}
+/* 판권 자유 문구 모드 — 문단 간격을 촘촘하게 */
+section.colophon.cp-free .cp-wrap { margin-top: 30%; }
+section.colophon.cp-free p { text-indent: 0; margin: 0.25em 0; }
+section.colophon.cp-free hr.scene { margin: 1em 0; }
+section.colophon.cp-free hr.scene::after { content: ""; }
+section.colophon.cp-free h3 { font-size: 1em; margin: 1.2em 0 0.4em; }
 section.chapter h3 { font-size: 1.1em; font-weight: 700; margin: 2.2em 0 1em; break-after: avoid; }
 section.chapter h4 { font-size: 1em; font-weight: 700; margin: 1.8em 0 0.8em; break-after: avoid; }
 

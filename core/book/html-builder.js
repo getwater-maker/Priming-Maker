@@ -62,6 +62,7 @@ function blockHtml(b, book, ctx, srcAttr) {
   const src = srcAttr(b);
   switch (b.type) {
     case 'p': return `<p${src}>${renderInline(b.text, book, ctx)}</p>`;
+    case 'lead': return `<p class="chapter-lead noindent"${src}>${renderInline(b.text, book, ctx)}</p>`;
     case 'h3': return `<h3${src}>${renderInline(b.text, book, ctx)}</h3>`;
     case 'h4': return `<h4${src}>${renderInline(b.text, book, ctx)}</h4>`;
     case 'quote': return `<blockquote${src}>${renderInline(b.text, book, ctx)}</blockquote>`;
@@ -96,7 +97,19 @@ function titlePageHtml(meta, ctx) {
   <div class="tp-publisher">${logo}${esc(meta.publisher || '')}</div>
 </section>`;
 }
-function colophonHtml(meta, ctx, isFront) {
+function colophonHtml(meta, ctx, isFront, section, book, srcAttr) {
+  // [판권] 섹션에 자유 문구가 있으면(예: AI 활용 고지·편역 저작권 안내) 그걸 그대로 조판 —
+  //   자동 테이블·고정 법정 문구는 생략(중복 방지). 없으면 메타로 자동 생성.
+  if (section && section.blocks && section.blocks.length) {
+    const qrIsImg2 = meta.qr && /\.(png|jpe?g|svg|webp)$/i.test(meta.qr);
+    return `<section class="colophon cp-free${isFront ? ' cp-front' : ''}">
+  <div class="cp-wrap">
+${blocksHtml(section.blocks, book, ctx, srcAttr)}
+    ${qrIsImg2 ? `<img class="cp-qr" src="${esc(ctx.resolveImage(meta.qr))}" alt="QR" />` : ''}
+    ${meta.qrLabel ? `<div class="cp-qrlabel">${esc(meta.qrLabel)}${!qrIsImg2 && meta.qr ? ' — ' + esc(meta.qr) : ''}</div>` : ''}
+  </div>
+</section>`;
+  }
   const rows = [];
   const add = (k, v) => { if (v) rows.push(`<tr><td class="k">${esc(k)}</td><td>${esc(v)}</td></tr>`); };
   add('초판 1쇄 발행', meta.issueDate);
@@ -163,12 +176,6 @@ function pageCss(opts) {
   const rh = 'font-size: 7.5pt; letter-spacing: 0.06em; color: #333;';
   const fo = 'font-size: 8.5pt; color: #222;';
   return `
-:root {
-  --font-body: ${opts.fontStack};
-  --font-size: ${opts.fontSizePt}pt;
-  --line-height: ${opts.lineHeight};
-  --chapter-break: ${opts.chapterStart === 'page' ? 'page' : 'recto'};
-}
 @page {
   size: ${opts.trimW}mm ${opts.trimH}mm;
   margin-top: ${m.top}mm; margin-bottom: ${m.bottom}mm;
@@ -238,7 +245,7 @@ function buildBookHtml(book, opts = {}) {
   bodyParts.push(titlePageHtml(meta, ctx));
   const colFront = /앞/.test(String(meta.colophonPos || ''));
   const colSection = book.back.find((s) => s.key === 'colophon');
-  if (colFront && colSection) bodyParts.push(colophonHtml(meta, ctx, true));
+  if (colFront && colSection) bodyParts.push(colophonHtml(meta, ctx, true, colSection, book, srcAttr));
   for (const s of book.front) {
     if (s.key === 'toc') { bodyParts.push(tocHtml(book, s.title)); continue; }
     bodyParts.push(`<section class="front-section sec-${s.key}" id="sec-${s.key}">
@@ -274,9 +281,16 @@ ${blocksHtml(s.blocks, book, ctx, srcAttr)}
     }
   }
   if (o.footnoteMode === 'endnote' && ctx.endnotes.length && !ctx._endnotesDone) bodyParts.push(endnotesHtml(ctx));
-  if (colSection && !colFront) bodyParts.push(colophonHtml(meta, ctx, false));
+  if (colSection && !colFront) bodyParts.push(colophonHtml(meta, ctx, false, colSection, book, srcAttr));
 
-  const theme = fs.readFileSync(THEME_CSS_PATH, 'utf8');
+  // ⚠ CSS 변수(:root + var()) 를 쓰지 않고 값을 직접 치환 — vivliostyle core(브라우저 미리보기)가
+  //   var() 를 CLI 와 다르게 해석해 본문 크기가 16px 로 폴백 → 쪽수가 ~2.5배로 뻥튀기되던 문제.
+  const theme = fs.readFileSync(THEME_CSS_PATH, 'utf8')
+    .replace(/var\(--font-body\)/g, o.fontStack)
+    .replace(/calc\(var\(--font-size\) - 2pt\)/g, `${Math.max(6, o.fontSizePt - 2)}pt`)
+    .replace(/var\(--font-size\)/g, `${o.fontSizePt}pt`)
+    .replace(/var\(--line-height\)/g, String(o.lineHeight))
+    .replace(/var\(--chapter-break\)/g, o.chapterStart === 'page' ? 'page' : 'recto');
   const css = (opts.fontCss || '') + '\n' + pageCss(o) + '\n' + theme;
   const html = `<!DOCTYPE html>
 <html lang="ko">
@@ -306,4 +320,4 @@ function metaPlatformId(meta) {
   return 'bookk';
 }
 
-module.exports = { buildBookHtml, metaPlatformId };
+module.exports = { buildBookHtml, metaPlatformId, esc, inlineMd };

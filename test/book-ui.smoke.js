@@ -72,14 +72,18 @@ ${para}
     if (relayouts > 0) throw new Error(`재조판 루프 감지 — 3초간 "조판 중" ${relayouts}회 (깜빡임 버그)`);
     console.log('· 안정성 OK — 3초간 재조판 없음(루프 해소)');
 
-    // 미리보기 안에 실제 페이지 DOM + 소스매핑 존재?
-    const nSrc = await win.evaluate(() => document.querySelectorAll('.bkviewport [data-src-line]').length);
-    console.log('· 소스매핑 블록:', nSrc, '개');
+    // 미리보기(iframe 격리) 안에 실제 페이지 DOM + 소스매핑 존재?
+    const nSrc = await win.evaluate(() => {
+      const f = document.querySelector('iframe.bkviewport');
+      return f && f.contentDocument ? f.contentDocument.querySelectorAll('[data-src-line]').length : -1;
+    });
+    console.log('· 소스매핑 블록(iframe):', nSrc, '개');
     if (nSrc < 1) throw new Error('data-src-line 블록 없음 — 클릭-편집 불가');
 
-    // 클릭-편집 왕복 — 본문 문단 클릭 → 편집창 → 저장 → 원본 .md 반영 확인
+    // 클릭-편집 왕복 — 본문 문단 클릭(iframe 내부) → 편집창 → 저장 → 원본 .md 반영 확인
     await win.evaluate(() => {
-      const els = document.querySelectorAll('.bkviewport p[data-src-line]');
+      const f = document.querySelector('iframe.bkviewport');
+      const els = f.contentDocument.querySelectorAll('p[data-src-line]');
       for (const el of els) { if (el.textContent.includes('조선의 밤')) { el.click(); return; } }
       throw new Error('본문 문단을 못 찾음');
     });
@@ -97,6 +101,39 @@ ${para}
       const el = document.querySelector('.bkpage');
       return el && /\/\s*\d+쪽/.test(el.textContent);
     }, null, { timeout: 60000 });
+
+    // ── 다중 파일 원고 (삼국지 필수파일+회차) — 원고가 있을 때만 ──
+    const DATA = 'D:/PrimingBook/book-publishing/data';
+    if (fs.existsSync(path.join(DATA, '삼국지연의_1권_필수파일.md'))) {
+      const multi = [path.join(DATA, '삼국지연의_1권_필수파일.md')];
+      for (let i = 1; i <= 15; i++) multi.push(path.join(DATA, `출판_삼국지_제${String(i).padStart(3, '0')}회.md`));
+      const rm = await win.evaluate((ps) => window.api.openBookPath({ scriptPaths: ps }), multi);
+      if (!rm || !rm.dto || rm.dto.kind !== 'book') throw new Error('다중 파일 열기 실패');
+      const chN = rm.dto.parts.reduce((n, p) => n + p.chapters.length, 0);
+      if (chN !== 15) throw new Error(`다중 파일 장 수 ${chN} ≠ 15`);
+      console.log('· 다중 파일(삼국지 16개) 로드 OK — 장', chN, '개, 제목:', rm.dto.fileTitle);
+      // IPC 직접 호출은 React dto 를 안 바꾸므로 실사용처럼 모드 토글로 재로드
+      await win.click('.modetoggle button:has-text("롱폼")');
+      await win.waitForTimeout(800);
+      try {
+        await win.click('.modetoggle button:has-text("📖 출판")', { timeout: 15000 });
+      } catch (e) {
+        await win.screenshot({ path: path.join(ROOT, 'output', '_book-multi', 'ui-fail.png') });
+        console.log('[debug] 출판 탭 클릭 실패 — 화면:', await win.evaluate(() => ({
+          buttons: [...document.querySelectorAll('.modetoggle button')].map((b) => b.textContent),
+          hasBody: !!document.querySelector('#body'),
+        })).catch(() => 'evaluate 실패'));
+        throw e;
+      }
+      // 조판 완료 대기 — 대작(200쪽+)이 실제 조판됐는지 (이전 14쪽 잔상 배제)
+      await win.waitForFunction(() => {
+        const el = document.querySelector('.bkpage');
+        const m = el && el.textContent.match(/\/\s*(\d+)쪽/);
+        return m && parseInt(m[1], 10) > 100;
+      }, null, { timeout: 180000 });
+      console.log('· 삼국지 미리보기 조판 OK —', (await win.locator('.bkpage').innerText()).trim());
+      await win.screenshot({ path: path.join(ROOT, 'output', '_book-multi', 'ui-samgukji.png') });
+    } else console.log('⏭ 삼국지 원고 없음 — 다중 파일 케이스 스킵');
 
     // 스크린샷
     await win.screenshot({ path: path.join(ROOT, 'output', '_book-smoke', 'ui-bookview.png') });

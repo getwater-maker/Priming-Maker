@@ -42,6 +42,8 @@ const RESERVED = [
   { key: 'references', zone: 'back', label: '참고문헌', names: ['참고문헌', '참고 문헌'] },
   { key: 'authorBio', zone: 'back', label: '저자소개', names: ['저자소개', '저자 소개', '작가소개', '작가 소개'] },
   { key: 'colophon', zone: 'back', label: '판권', names: ['판권', '판권지', '간기'] },
+  // 자동 생성 페이지 지시 섹션(필수파일 형식의 # 속표지/# 표제지) — 내용은 버림(앱이 메타로 자동 조판)
+  { key: 'ignore', zone: 'ignore', label: '(자동)', names: ['속표지', '표제지', '반표제지', '표지', '목차페이지'] },
 ];
 // 표시 순서(관행) — 파일 내 순서와 무관하게 이 순서로 재배열.
 const FRONT_ORDER = ['dedication', 'epigraph', 'recommendation', 'transPreface', 'preface', 'notes', 'toc', 'prologue'];
@@ -55,6 +57,7 @@ function reservedByName(name) {
 
 // 메타 키 별칭 → 표준 키
 const META_KEYS = {
+  '책제목': 'title', '제목': 'title',
   '부제': 'subtitle', '부제목': 'subtitle',
   '저자': 'author', '지은이': 'author', '글': 'author',
   '옮긴이': 'translator', '역자': 'translator',
@@ -62,8 +65,10 @@ const META_KEYS = {
   '발행인': 'issuer', '펴낸이': 'issuer',
   '발행일': 'issueDate', '초판발행': 'issueDate', '초판 1쇄': 'issueDate', '초판1쇄': 'issueDate',
   'isbn': 'isbn',
+  '부가기호': 'isbnAddon',
   '정가': 'price', '가격': 'price', 'pod가격': 'price', 'pod 가격': 'price',
   '전자책': 'ebookPrice', '전자책가격': 'ebookPrice', '전자책 가격': 'ebookPrice',
+  '전자책표지': 'ebookCover', '전자책 표지': 'ebookCover',
   '출판등록': 'regNo', '등록': 'regNo',
   '주소': 'address', '전화': 'phone', '대표전화': 'phone', '팩스': 'fax',
   '홈페이지': 'homepage', '이메일': 'email', 'email': 'email',
@@ -141,7 +146,9 @@ function parseBookText(text, fallbackTitle) {
         if (r) {
           seenHeading = true;
           cur = { key: r.key, label: r.label, title: br[2].trim() || r.label, lineStart: i, blocks: [] };
-          (r.zone === 'front' ? front : back).push(cur);
+          // ignore 존(속표지·표제지 지시문) = 내용 버림 — 컨테이너를 어디에도 안 붙임
+          if (r.zone === 'front') front.push(cur);
+          else if (r.zone === 'back') back.push(cur);
           continue;
         }
         // 모르는 대괄호 섹션 → 본문 장으로 취급 (제목에 대괄호 유지)
@@ -227,16 +234,27 @@ function parseBookText(text, fallbackTitle) {
   front.sort((a, b) => orderOf(FRONT_ORDER, a.key) - orderOf(FRONT_ORDER, b.key));
   back.sort((a, b) => orderOf(BACK_ORDER, a.key) - orderOf(BACK_ORDER, b.key));
 
-  // 장 번호 부여 (부 무관 통산)
+  // 장 번호 부여 (부 무관 통산) + 리드문 — 장 첫 블록이 전체 이탤릭 한 문장(*...*)이면 lead(장 부제)로
   let chNum = 0;
-  for (const p of parts) for (const c of p.chapters) { chNum++; c.num = chNum; }
+  for (const p of parts) for (const c of p.chapters) {
+    chNum++; c.num = chNum;
+    const b0 = c.blocks[0];
+    if (b0 && b0.type === 'p' && /^\*[^*].*\*$/.test(b0.text.trim())) {
+      b0.type = 'lead';
+      b0.text = b0.text.trim().replace(/^\*|\*$/g, '').trim();
+    }
+  }
+
+  // 메타의 책제목(예: 필수파일 `책제목:` 줄)이 있으면 파일 제목으로
+  if (meta.title) fileTitle = meta.title;
 
   return { kind: 'book', fileTitle, meta, front, parts, back, footnotes, totalLines: lines.length };
 }
 
-// 예약 섹션 목록(구조 패널·템플릿 삽입용)
+// 예약 섹션 목록(구조 패널·템플릿 삽입용) — ignore(속표지·표제지 지시)는 UI 비노출
 function reservedSections() {
-  return RESERVED.map((r) => ({ key: r.key, zone: r.zone, label: r.label, name: r.names[0] }));
+  return RESERVED.filter((r) => r.zone !== 'ignore')
+    .map((r) => ({ key: r.key, zone: r.zone, label: r.label, name: r.names[0] }));
 }
 
 // 섹션 템플릿(.md 삽입용) — key → 기본 마크다운 조각
@@ -246,6 +264,95 @@ function sectionTemplate(key) {
   if (key === 'toc') return `\n## [${r.names[0]}]\n`;
   if (key === 'colophon') return `\n## [${r.names[0]}]\n`;
   return `\n## [${r.names[0]}]\n(내용을 입력하세요)\n`;
+}
+
+// ── 다중 파일 원고 (필수파일 + 회차 파일 N개 → 한 권) ──────────────────────
+// Book Publishing(구 앱) 원고 형식 호환. 각 파일을 "라인수 보존" 변환으로 우리 단일 형식에
+// 맞춘 뒤 이어붙여 parseBookText 에 태운다 — 결합 라인 ↔ 원본 파일·라인 역매핑이 오프셋만으로 성립.
+//
+//   필수파일: `책제목: X` 평문 메타 + `===앞부속물===` 구분자 + `# 헌사`/`# 판권` H1 부속물
+//   회차 파일: `# 제N회 제목`(장) + `*이탤릭 리드문*` + `## 절` + 본문
+
+// 파일 종류 감지 — 'essential'(필수/부속물) | 'chapter'(회차=본문 장) | 'native'(우리 단일 형식)
+function detectBookFileKind(text) {
+  const head = String(text || '').slice(0, 4000);
+  if (/^===.*(앞부속물|뒷부속물|본문).*===$/m.test(head) || /^(책제목|제목)\s*[:：]/m.test(head)) return 'essential';
+  if (/^##\s+\[/m.test(head) || /^>\s*(저자|책제목|부제|출판사)\s*[:：]/m.test(head)) return 'native';
+  return 'chapter';
+}
+
+// 필수파일 → 우리 형식 (라인수 보존: 같은 줄 안에서만 치환)
+function normalizeEssentialFile(text) {
+  const lines = String(text || '').replace(/\r\n/g, '\n').split('\n');
+  let seenHeading = false;
+  return lines.map((line) => {
+    const t = line.trim();
+    if (/^===.*===$/.test(t)) return '';               // 존 구분자 → 빈 줄 (존은 헤딩 이름으로 판정)
+    const h1 = t.match(/^#\s+(.+)$/);
+    if (h1 && !/^##/.test(t)) {
+      seenHeading = true;
+      const name = h1[1].trim();
+      const r = reservedByName(name);
+      return r ? `## [${name}]` : `## ${name}`;        // 예약명 → [섹션] / 그 외 → 본문 장
+    }
+    if (/^#{2,}\s+/.test(t)) { seenHeading = true; return line; }
+    // 평문 메타 (첫 헤딩 전, `라벨: 값`) → `> 라벨: 값`
+    if (!seenHeading) {
+      const m = t.match(/^([^:：#>\-*\s][^:：]{0,11})\s*[:：]\s*(.*)$/);
+      if (m && (META_KEYS[m[1].trim().toLowerCase()] || META_KEYS[m[1].trim()])) return `> ${m[1].trim()}: ${m[2]}`;
+    }
+    return line;
+  }).join('\n');
+}
+
+// 회차 파일 → 우리 형식 — 모든 헤딩 레벨 +1 (H1=장 → H2, H2=절 → H3, H3 → H4).
+//   첫 비공백 줄이 헤딩 없는 평문 제목(예: `제9회 여포의 칼…`)이면 장 헤딩으로 승격.
+function normalizeChapterFile(text) {
+  const lines = String(text || '').replace(/\r\n/g, '\n').split('\n');
+  let first = true;
+  return lines.map((line) => {
+    const t = line.trim();
+    if (!t) return line;
+    if (first) {
+      first = false;
+      if (!/^#/.test(t) && !/^[*>!\[`-]/.test(t) && t.length <= 60) return '## ' + t;
+    }
+    return /^#{1,3}\s+/.test(t) ? '#' + line.trimStart() : line;
+  }).join('\n');
+}
+
+/**
+ * 여러 원고 파일 → 한 권. files = [{ path, text }] (호출자가 순서 정렬: 필수파일 먼저 + 회차 번호순).
+ * @returns BookModel + _files: [{ path, startLine, lineCount }] (결합 기준 오프셋 — 소스매핑 역변환용)
+ */
+function parseBookFiles(files, fallbackTitle) {
+  const chunks = [];
+  const map = [];
+  let offset = 0;
+  for (const f of files) {
+    const kind = detectBookFileKind(f.text);
+    const norm = kind === 'essential' ? normalizeEssentialFile(f.text)
+      : kind === 'chapter' ? normalizeChapterFile(f.text)
+      : String(f.text || '').replace(/\r\n/g, '\n');
+    const lineCount = norm.split('\n').length;
+    map.push({ path: f.path, kind, startLine: offset, lineCount });
+    chunks.push(norm);
+    offset += lineCount;
+  }
+  const book = parseBookText(chunks.join('\n'), fallbackTitle);
+  book._files = map;
+  return book;
+}
+
+// 결합 라인 번호 → { path, kind, line(원본 파일 내 0-based) }. 단일 파일(_files 없음)이면 null.
+function resolveSourceLine(book, combinedLine) {
+  if (!book || !Array.isArray(book._files)) return null;
+  for (const f of book._files) {
+    if (combinedLine >= f.startLine && combinedLine < f.startLine + f.lineCount) {
+      return { path: f.path, kind: f.kind, line: combinedLine - f.startLine };
+    }
+  }
+  return null;
 }
 
 // `## [이름]` 헤더가 출판 예약 섹션인지 — 롱폼 파서가 영상 대본에서 스킵할 때 사용.
@@ -266,4 +373,8 @@ function stripBookSections(text) {
   return out.join('\n');
 }
 
-module.exports = { parseBookText, reservedSections, sectionTemplate, isReservedHeading, stripBookSections, RESERVED, FRONT_ORDER, BACK_ORDER };
+module.exports = {
+  parseBookText, parseBookFiles, resolveSourceLine, detectBookFileKind,
+  reservedSections, sectionTemplate, isReservedHeading, stripBookSections,
+  RESERVED, FRONT_ORDER, BACK_ORDER,
+};

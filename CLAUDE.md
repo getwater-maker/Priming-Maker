@@ -7,6 +7,37 @@
 **편별 Vrew 4.0.1 .vrew 파일**을 자동 생성하는 Electron 앱. PrimingFlow(D:\PrimingFlow)의 엔진을
 복사·재활용한 독립 클론.
 
+## 📖 출판 모드 확장 — 다중 파일 원고·ePub·바코드·표지가이드 (2026-07-03, v0.1.64)
+> D:\PrimingBook(구 Book Publishing 앱) 기능 이식. **사용자 실원고 = 삼국지연의 1권**
+> (`D:\PrimingBook\book-publishing\data\삼국지연의_1권_필수파일.md` + `출판_삼국지_제001~015회.md`)로 실측 검증.
+- **다중 파일 원고**: 「📖 원고 열기」 multiSelections — 필수파일(평문 `책제목:` 메타 + `===앞부속물===` 구분 +
+  `# 헌사`/`# 판권` H1 부속물) + 회차 파일(H1(또는 첫 줄 평문)=장, `*이탤릭*`=리드문, H2=절) N개 → 한 권.
+  구현: book-parser `parseBookFiles` — 파일별 **라인수 보존 변환**(`# 헌사`→`## [헌사]`, 평문 메타→`> 메타`,
+  회차 헤딩 +1레벨) 후 결합 → 기존 parseBookText. `_files[{path,kind,startLine,lineCount}]` 오프셋으로
+  결합 라인↔원본 파일 역매핑(`resolveSourceLine`) → 클릭-편집이 **원본 파일의 올바른 줄**을 수정
+  (IPC `book-get-lines`/`book-apply-edit`). 메타·섹션 토글은 essential 파일에 기록(스타일 보존: 평문/`>`).
+  정렬 = essential 먼저 + 파일명 숫자 정렬. 워크스페이스 `settings.book.files` 복원. `# 속표지/# 표제지`
+  지시 섹션은 RESERVED zone:'ignore'(내용 버림 — 앱이 자동 조판). 다중일 때 ✏대본수정(전체 텍스트)은 차단.
+- **판권 자유 문구**: `[판권]` 섹션에 내용이 있으면(AI 활용 고지 등) 자동 테이블 대신 그대로 조판(cp-free).
+- **장 리드문**: 장 첫 블록이 `*...*` 전체 이탤릭이면 type 'lead' → 제목 아래 이탤릭 부제.
+- **ISBN 바코드**: `core/book/isbn-barcode.js` — 의존성 없는 EAN-13+부가기호(EAN-5) SVG(인코딩 테이블 직접).
+  pyzbar 디코딩 실측 통과. IPC `book-export-barcode`(SVG 저장) + BookView 「🏷 바코드」가 PNG 변환도 저장.
+  메타 `> 부가기호: 03910`(isbnAddon).
+- **표지 가이드**: BookView 「📐 표지 가이드」 — 300dpi 투명 PNG(재단선 빨강/안전선 초록/책등·날개 구분+치수)
+  를 canvas 로 그려 IPC `book-save-asset` 로 저장. 캔바 밑그림 레이어용.
+- **ePub 3.0**: `core/book/epub-builder.js` + IPC `book-build-epub` + 「📱 ePub」. ⚠ **adm-zip 은 writeZip 때
+  이름순 정렬**해 mimetype=첫 엔트리 규격을 못 지킴 → zlib+CRC32 **MiniZip**(직접 조립, mimetype STORED) 사용.
+  각주=epub:type noteref/footnote(팝업). 전자책 표지 = `> 전자책표지:` 경로 우선, 없으면 인쇄 표지 스프레드에서
+  **앞표지를 ffmpeg 크롭**. 판권 자유문 재사용.
+- 🐞 **미리보기 쪽수 왜곡(255→660쪽) 해결**: CoreViewer 를 앱 document 에 직접 렌더하면 **앱 전역 CSS
+  (p 마진·14px 폰트)가 조판 DOM 에 캐스케이드**돼 실측 페이지 분할이 부풀음 → **iframe 격리**
+  (`viewportElement`=iframe 내 div + `window: iframe.contentWindow`, 클릭은 iframe doc 리스너). 미리보기=PDF 쪽수 일치 실측.
+  같은 원인 계열로 html-builder 는 CSS 변수(:root/var()) 대신 값 직접 치환.
+- 🐞 **모드 전환 크래시 수정**: 출판→롱폼 탭 전환 시 한 프레임 동안 book dto 가 Cards 에 들어와
+  `dto.projects.length` TypeError → 가드 보강 (App.jsx:1585).
+- 테스트: `test/book-multi.smoke.js`(삼국지 16파일 → 255쪽 PDF+ePub 구조 검증) + book-ui.smoke 에
+  다중 파일 케이스(255쪽 조판 확인). `npm run test:book` 에 포함.
+
 ## 📖 출판(POD) 모드 — MD 원고 → 내지·표지 PDF (2026-07-02, v0.1.62)
 - 모드 토글 **4-way**: 롱폼/쇼츠/🎵플리/**📖출판**. 롱폼과 원고(.md) **공유** — 롱폼 헤더 「📖 출판편집」
   버튼(IPC `open-book-path`, 무인자=현재 대본)으로 전환. 출판에서 고친 텍스트는 같은 .md 에 저장돼 롱폼에도 반영.

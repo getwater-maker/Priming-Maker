@@ -293,9 +293,8 @@ h1 .ver{font-size:11px;font-weight:600;color:#a89878;margin-left:6px;vertical-al
 .bkbar{display:flex;align-items:center;gap:6px;padding:7px 10px;border-bottom:1px solid var(--line);background:#faf6ee}
 .bkbar .grow{flex:1}
 .bkpage{font-size:13px;font-weight:700;color:var(--strong);min-width:86px;text-align:center}
-.bkviewport{flex:1;overflow:auto;background:#8a8177;position:relative}
-.bkviewport [data-vivliostyle-viewer-viewport]{background:#8a8177 !important}
-.bkviewport [data-src-line]:hover{outline:2px solid rgba(212,165,116,.75);outline-offset:1px;cursor:pointer}
+/* 미리보기 = iframe (앱 CSS 가 조판 DOM 에 간섭하지 않도록 격리 — 쪽수 왜곡 방지) */
+.bkviewport{flex:1;border:none;width:100%;background:#8a8177}
 .bkedit{border-top:2px solid var(--accent);background:#fdf9f1;padding:10px 12px}
 .bkedit textarea{width:100%;box-sizing:border-box;margin:6px 0;font-size:13.5px;line-height:1.6;font-family:inherit}
 .bkform{display:flex;flex-direction:column;gap:7px;padding:8px 2px}

@@ -1598,20 +1598,24 @@ function restoreWorkspace() {
       }
       q.activeId = activeNewId || (q.items.length ? q.items[q.items.length - 1].id : null);
     }
-    // 출판(book) — 원고(.md)를 book-parser 로 재파싱해 복원.
+    // 출판(book) — 원고(.md)를 book-parser 로 재파싱해 복원. 다중 파일이면 settings.book.files 재합침.
     if (ws.book && Array.isArray(ws.book.items)) {
-      const { parseBookText } = require('./core/parsers/book-parser');
+      const BK = require('./core/parsers/book-parser');
       const q = S.modes.book; let activeNewId = null;
       for (const wi of ws.book.items) {
-        if (!wi.scriptPath || !fs.existsSync(wi.scriptPath)) continue;
+        const savedFiles = (wi.settings && wi.settings.book && Array.isArray(wi.settings.book.files)) ? wi.settings.book.files : null;
+        const paths = (savedFiles || [wi.scriptPath]).filter((p) => p && fs.existsSync(p));
+        if (!paths.length) continue;
         try {
-          const parsed = parseBookText(fs.readFileSync(wi.scriptPath, 'utf8'), path.basename(wi.scriptPath).replace(/\.md$/i, ''));
+          const files = paths.map((p) => ({ path: p, text: fs.readFileSync(p, 'utf8') }));
+          const parsed = BK.parseBookFiles(files, path.basename(paths[0]).replace(/\.md$/i, ''));
           if (wi.settings && wi.settings.book && wi.settings.book.coverImage) parsed.coverImagePath = wi.settings.book.coverImage;
-          const it = { id: newItemId(), parsed, scriptPath: wi.scriptPath, outRoot: bookOutRoot(wi.scriptPath, S.preset),
+          const folderKey = parsed.meta.title || path.basename(paths[0]).replace(/\.md$/i, '');
+          const it = { id: newItemId(), parsed, scriptPath: paths[0], outRoot: bookOutRoot(folderKey + '.md', S.preset),
             settings: wi.settings || null, status: (wi.status === 'running' ? 'idle' : (wi.status || 'idle')) };
           q.items.push(it); restored++;
           if (wi.id === ws.book.activeId) activeNewId = it.id;
-        } catch (e) { log(`출판 복원 실패(${path.basename(wi.scriptPath)}): ${e.message}`); }
+        } catch (e) { log(`출판 복원 실패(${path.basename(paths[0])}): ${e.message}`); }
       }
       q.activeId = activeNewId || (q.items.length ? q.items[q.items.length - 1].id : null);
     }
@@ -2467,20 +2471,50 @@ ipcMain.handle('make-playlist-video', async () => {
 });
 
 // ── 출판(POD) — MD 원고 → 내지·표지 PDF ─────────────────────────────
-// 원고 텍스트 재파싱 + 파일 저장 (출판 모드 공용 헬퍼)
-function applyBookText(text) {
-  const { parseBookText } = require('./core/parsers/book-parser');
-  const fallback = S.scriptPath ? path.basename(S.scriptPath).replace(/\.md$/i, '') : '책';
+// 다중 파일 원고: S.parsed._files = [{path, kind, startLine, lineCount}] (결합 라인 오프셋).
+//   필수파일(메타·부속물) + 회차 .md N개 → 한 권. 편집은 결합 라인 → 원본 파일 역매핑.
+function isMultiBook() { return !!(S.parsed && Array.isArray(S.parsed._files) && S.parsed._files.length > 1); }
+function bookFilePaths() {
+  if (S.parsed && Array.isArray(S.parsed._files)) return S.parsed._files.map((f) => f.path);
+  return S.scriptPath ? [S.scriptPath] : [];
+}
+// 메타·부속물 편집 대상 파일 — 필수(essential) 파일 우선, 없으면 첫 파일.
+function bookEssentialPath() {
+  if (S.parsed && Array.isArray(S.parsed._files)) {
+    const e = S.parsed._files.find((f) => f.kind === 'essential');
+    return (e || S.parsed._files[0]).path;
+  }
+  return S.scriptPath;
+}
+// 원고 파일들 재파싱(다중=재합침) — 편집·섹션 토글 후 항상 이걸로 갱신.
+function rebuildBook() {
+  const BK = require('./core/parsers/book-parser');
+  const paths = bookFilePaths();
+  if (!paths.length) return currentDTO();
   const prevCover = S.parsed && S.parsed.coverImagePath;
   const prevPages = S.parsed && S.parsed._lastPages;
-  S.parsed = parseBookText(text, fallback);
+  const files = paths.map((p) => ({ path: p, text: fs.readFileSync(p, 'utf8') }));
+  S.parsed = BK.parseBookFiles(files, path.basename(paths[0]).replace(/\.md$/i, ''));
   if (prevCover) S.parsed.coverImagePath = prevCover;
   if (prevPages) S.parsed._lastPages = prevPages;
   storeActive();
-  if (S.scriptPath) { try { fs.writeFileSync(S.scriptPath, text, 'utf8'); } catch (e) { log('원고 저장 실패: ' + e.message); } }
   return currentDTO();
 }
+// (단일 파일 전용) 원고 텍스트 재파싱 + 파일 저장
+function applyBookText(text) {
+  if (isMultiBook()) { log('⚠ 다중 파일 원고 — 전체 텍스트 일괄 수정은 지원하지 않습니다. 미리보기에서 문단을 클릭해 수정하세요.'); return currentDTO(); }
+  const fallback = S.scriptPath ? path.basename(S.scriptPath).replace(/\.md$/i, '') : '책';
+  if (S.scriptPath) { try { fs.writeFileSync(S.scriptPath, text, 'utf8'); } catch (e) { log('원고 저장 실패: ' + e.message); } }
+  return rebuildBook();
+}
 function bookScriptText() {
+  // 다중 파일이면 원본들을 파일 배너와 함께 이어붙여 반환(읽기 전용 참고용)
+  if (isMultiBook()) {
+    return S.parsed._files.map((f) => {
+      let t = ''; try { t = fs.readFileSync(f.path, 'utf8'); } catch (_) {}
+      return `<!-- ═══ 파일: ${path.basename(f.path)} (읽기 전용 — 수정은 미리보기 문단 클릭) ═══ -->\n${t}`;
+    }).join('\n\n');
+  }
   try { return fs.readFileSync(S.scriptPath, 'utf8'); } catch { return ''; }
 }
 // 출판 조판 옵션 — 렌더러가 넘긴 layout 을 활성 항목 settings 에 보관(워크스페이스 영속).
@@ -2498,36 +2532,54 @@ function bookLayoutOpts(args = {}) {
   };
 }
 
-// 원고(.md) 열기 — book-parser 로 파싱해 출판 큐에 적재.
+// 원고(.md) 열기 — 다중 선택 가능(필수파일 + 회차 여러 개 = 한 권). book-parser 로 파싱해 출판 큐에 적재.
 ipcMain.handle('open-book-script', async (_e, args = {}) => {
   const preset = args.presetName ? P.getPreset(args.presetName) : (S.preset || null);
   if (preset) S.preset = preset;
-  const opt = { title: '출판 원고(.md) 열기', properties: ['openFile'], filters: [{ name: 'Markdown', extensions: ['md'] }] };
+  const opt = {
+    title: '출판 원고(.md) 열기 — 여러 파일 선택 가능 (필수파일 + 회차들)',
+    properties: ['openFile', 'multiSelections'], filters: [{ name: 'Markdown', extensions: ['md'] }],
+  };
   if (preset && preset.scriptFolder && fs.existsSync(preset.scriptFolder)) opt.defaultPath = preset.scriptFolder;
   const r = await dialog.showOpenDialog(win, opt);
-  if (r.canceled || !r.filePaths[0]) return null;
-  return openBookPath(r.filePaths[0], preset);
+  if (r.canceled || !r.filePaths.length) return null;
+  return openBookPaths(r.filePaths, preset);
 });
-// 경로 지정 열기 — 롱폼 「📖 출판편집」 버튼이 현재 대본을 그대로 넘길 때 사용(무인자=현재 대본).
+// 경로 지정 열기 — 롱폼 「📖 출판편집」 버튼(무인자=현재 대본) 또는 scriptPaths 배열(다중 파일).
 ipcMain.handle('open-book-path', (_e, args = {}) => {
-  const p = (args && args.scriptPath) || S.scriptPath;
-  if (!p || !fs.existsSync(p)) { log('원고 파일이 없습니다 — 대본을 먼저 여세요.'); return null; }
-  return openBookPath(p, S.preset);
+  const arr = (args && Array.isArray(args.scriptPaths) && args.scriptPaths.length) ? args.scriptPaths
+    : [(args && args.scriptPath) || S.scriptPath];
+  const paths = arr.filter((p) => p && fs.existsSync(p));
+  if (!paths.length) { log('원고 파일이 없습니다 — 대본을 먼저 여세요.'); return null; }
+  return openBookPaths(paths, S.preset);
 });
-function openBookPath(scriptPath, preset) {
+function openBookPaths(paths, preset) {
   try {
-    const { parseBookText } = require('./core/parsers/book-parser');
-    const parsed = parseBookText(fs.readFileSync(scriptPath, 'utf8'), path.basename(scriptPath).replace(/\.md$/i, ''));
+    const BK = require('./core/parsers/book-parser');
+    // 정렬: 필수파일(메타·부속물) 먼저 → 나머지 파일명 숫자 인식 정렬(제001회 < 제002회 …)
+    const items = paths.map((p) => ({ p, kind: BK.detectBookFileKind(fs.readFileSync(p, 'utf8')) }));
+    items.sort((a, b) => {
+      if (a.kind === 'essential' && b.kind !== 'essential') return -1;
+      if (b.kind === 'essential' && a.kind !== 'essential') return 1;
+      return path.basename(a.p).localeCompare(path.basename(b.p), 'ko', { numeric: true });
+    });
+    const sorted = items.map((x) => x.p);
+    const files = sorted.map((p) => ({ path: p, text: fs.readFileSync(p, 'utf8') }));
+    const parsed = BK.parseBookFiles(files, path.basename(sorted[0]).replace(/\.md$/i, ''));
     S.mode = 'book';
-    const outRoot = bookOutRoot(scriptPath, preset || S.preset);
+    // 출력 폴더 — 책제목(메타) 우선, 없으면 첫 파일명
+    const folderKey = parsed.meta.title || path.basename(sorted[0]).replace(/\.md$/i, '');
+    const outRoot = bookOutRoot(folderKey + '.md', preset || S.preset);
     try { fs.mkdirSync(outRoot, { recursive: true }); } catch {}
-    const it = addItem(parsed, scriptPath, outRoot);
-    if (it.settings && it.settings.book && it.settings.book.coverImage && fs.existsSync(it.settings.book.coverImage)) {
+    const it = addItem(parsed, sorted[0], outRoot);
+    it.settings = { ...(it.settings || {}), book: { ...((it.settings || {}).book || {}), files: sorted } };
+    if (it.settings.book.coverImage && fs.existsSync(it.settings.book.coverImage)) {
       parsed.coverImagePath = it.settings.book.coverImage;
     }
+    writeWorkspace();
     const chapters = parsed.parts.reduce((n, p) => n + p.chapters.length, 0);
-    log(`📖 출판 원고 열기: ${parsed.fileTitle} — 장 ${chapters}개 · 앞부속 ${parsed.front.length} · 뒷부속 ${parsed.back.length}`);
-    return { dto: currentDTO(), scriptPath, outRoot, queue: queueDTO(), mode: S.mode };
+    log(`📖 출판 원고 열기: ${parsed.fileTitle} — 파일 ${sorted.length}개 · 장 ${chapters}개 · 앞부속 ${parsed.front.length} · 뒷부속 ${parsed.back.length}`);
+    return { dto: currentDTO(), scriptPath: sorted[0], outRoot, queue: queueDTO(), mode: S.mode };
   } catch (e) { log('출판 원고 파싱 실패: ' + e.message); return null; }
 }
 
@@ -2654,6 +2706,15 @@ ipcMain.handle('book-clear-cover', () => {
   return currentDTO();
 });
 
+// 결합 라인 → 원본 파일·로컬 라인 (단일 파일이면 그대로)
+function bookResolveLine(combinedLine) {
+  const BK = require('./core/parsers/book-parser');
+  const src = BK.resolveSourceLine(S.parsed, combinedLine);
+  return src || { path: S.scriptPath, line: combinedLine };
+}
+function readFileLines(p) { try { return fs.readFileSync(p, 'utf8').replace(/\r\n/g, '\n').split('\n'); } catch { return []; } }
+function writeFileLines(p, lines) { fs.writeFileSync(p, lines.join('\n'), 'utf8'); }
+
 // 구조 패널 — 예약 섹션 넣기/빼기 = 원고(.md)에 템플릿 삽입/삭제.
 ipcMain.handle('book-toggle-section', (_e, args = {}) => {
   if (!S.parsed || S.parsed.kind !== 'book' || !S.scriptPath) return currentDTO();
@@ -2661,38 +2722,44 @@ ipcMain.handle('book-toggle-section', (_e, args = {}) => {
   const key = args.key;
   const rs = BK.reservedSections().find((x) => x.key === key);
   if (!rs) return currentDTO();
-  const text = bookScriptText();
-  const lines = text.split(/\r?\n/);
   const exists = [...(S.parsed.front || []), ...(S.parsed.back || [])].find((s) => s.key === key);
   if (args.on && !exists) {
+    // 추가 — 필수(essential) 파일 끝에 템플릿 append (표시 순서는 파서가 관행대로 재배열)
+    const target = bookEssentialPath();
+    const lines = readFileLines(target);
     const tpl = BK.sectionTemplate(key).trimEnd();
-    if (rs.zone === 'back') {
-      lines.push(tpl);
-    } else {
-      // 앞부속 — 첫 본문 장(비대괄호 ## 헤딩) 앞에 삽입. 없으면 파일 끝.
+    if (!isMultiBook() && rs.zone === 'front') {
+      // 단일 파일 앞부속 — 첫 본문 장(비대괄호 ## 헤딩) 앞에 삽입
       let at = lines.length;
       for (let i = 0; i < lines.length; i++) {
         const m = lines[i].match(/^##\s+(.+)$/);
         if (m && !/^\[/.test(m[1].trim())) { at = i; break; }
       }
       lines.splice(at, 0, tpl, '');
+    } else {
+      lines.push(tpl);
     }
-    log(`＋ [${rs.label}] 섹션 추가`);
+    writeFileLines(target, lines);
+    log(`＋ [${rs.label}] 섹션 추가 → ${path.basename(target)}`);
   } else if (!args.on && exists) {
-    // 해당 섹션 헤더부터 다음 ## 헤딩 직전까지 제거
-    const start = exists.lineStart;
+    // 제거 — 섹션 헤더가 있는 원본 파일에서 다음 헤딩 직전까지 삭제
+    const src = bookResolveLine(exists.lineStart);
+    const lines = readFileLines(src.path);
     let end = lines.length;
-    for (let i = start + 1; i < lines.length; i++) { if (/^##\s+/.test(lines[i].trim())) { end = i; break; } }
-    lines.splice(start, end - start);
-    log(`－ [${rs.label}] 섹션 제거`);
+    for (let i = src.line + 1; i < lines.length; i++) {
+      if (/^#{1,6}\s+/.test(lines[i].trim()) || /^===.*===$/.test(lines[i].trim())) { end = i; break; }
+    }
+    lines.splice(src.line, end - src.line);
+    writeFileLines(src.path, lines);
+    log(`－ [${rs.label}] 섹션 제거 (${path.basename(src.path)})`);
   } else { return currentDTO(); }
-  return applyBookText(lines.join('\n'));
+  return rebuildBook();
 });
 
 // 책 정보(메타) 편집 — 원고 상단 `> 라벨: 값` 줄을 갱신(없으면 삽입). title 은 H1.
 const BOOK_META_LABELS = {
   subtitle: '부제', author: '저자', translator: '옮긴이', publisher: '출판사', issuer: '발행인',
-  issueDate: '발행일', isbn: 'ISBN', price: '정가', ebookPrice: '전자책', regNo: '출판등록',
+  issueDate: '발행일', isbn: 'ISBN', isbnAddon: '부가기호', price: '정가', ebookPrice: '전자책', regNo: '출판등록',
   address: '주소', phone: '전화', fax: '팩스', homepage: '홈페이지', email: '이메일',
   copyright: '저작권', trim: '판형', platform: '플랫폼', paper: '용지', flaps: '날개',
   colophonPos: '판권위치', halfTitle: '반표제지', footnoteMode: '각주방식', logo: '로고',
@@ -2701,59 +2768,147 @@ const BOOK_META_LABELS = {
 ipcMain.handle('book-set-meta', (_e, args = {}) => {
   if (!S.parsed || S.parsed.kind !== 'book' || !S.scriptPath) return currentDTO();
   const key = args.key; const value = String(args.value == null ? '' : args.value).trim();
-  const text = bookScriptText();
-  const lines = text.split(/\r?\n/);
-  if (key === 'title') {
+  const target = bookEssentialPath();
+  const lines = readFileLines(target);
+  // title — 단일(우리 형식) 파일은 H1, 필수파일(다중)은 `책제목:` 메타 줄로
+  if (key === 'title' && !isMultiBook()) {
     let done = false;
     for (let i = 0; i < lines.length; i++) {
       if (/^#\s+/.test(lines[i])) { lines[i] = '# ' + value; done = true; break; }
       if (/^##\s+/.test(lines[i])) break;
     }
     if (!done) lines.unshift('# ' + value);
-    return applyBookText(lines.join('\n'));
+    writeFileLines(target, lines);
+    return rebuildBook();
   }
-  const label = BOOK_META_LABELS[key];
+  const label = key === 'title' ? '책제목' : BOOK_META_LABELS[key];
   if (!label) return currentDTO();
-  // 이 표준키에 매핑되는 기존 메타 줄 탐색 (별칭 포함 — book-parser 의 META_KEYS 로 판정)
+  // 이 표준키에 매핑되는 기존 메타 줄 탐색 — `> 라벨:` 과 평문 `라벨:`(필수파일) 둘 다 인식
   const { parseBookText } = require('./core/parsers/book-parser');
-  let bodyStart = lines.findIndex((l) => /^##\s+/.test(l.trim()));
+  let bodyStart = lines.findIndex((l) => /^#{1,6}\s+/.test(l.trim()) || /^===.*===$/.test(l.trim()));
   if (bodyStart < 0) bodyStart = lines.length;
-  let found = -1;
+  let found = -1, hadArrow = false;
   for (let i = 0; i < bodyStart; i++) {
-    const m = lines[i].trim().match(/^>\s*([^:：]{1,12})\s*[:：]/);
+    const m = lines[i].trim().match(/^(>\s*)?([^:：#>\-*\s][^:：]{0,11})\s*[:：]/);
     if (!m) continue;
-    const probe = parseBookText(`# t\n> ${m[1]}: probe`, 't');
-    if (probe.meta[key] === 'probe') { found = i; break; }
+    const probe = parseBookText(`# t\n> ${m[2].trim()}: probe`, 't');
+    if (probe.meta[key] === 'probe') { found = i; hadArrow = !!m[1]; break; }
   }
+  // 파일의 메타 줄 스타일(평문/>)을 따라 기록 — 필수파일은 평문 유지
+  const style = (arrow) => (arrow ? `> ${label}: ${value}` : `${label}: ${value}`);
   if (value === '' && found >= 0) { lines.splice(found, 1); }
-  else if (found >= 0) { lines[found] = `> ${label}: ${value}`; }
+  else if (found >= 0) { lines[found] = style(hadArrow); }
   else if (value !== '') {
-    // H1 뒤 마지막 연속 > 메타 줄 다음에 삽입
-    let at = 0;
+    // 마지막 메타 줄(또는 H1) 다음에 삽입 — 스타일은 기존 메타 줄과 통일
+    let at = 0; let anyArrow = !isMultiBook();
     for (let i = 0; i < bodyStart; i++) {
-      if (/^#\s+/.test(lines[i].trim())) at = i + 1;
-      else if (/^>\s*/.test(lines[i].trim())) at = i + 1;
+      const t = lines[i].trim();
+      if (/^#\s+/.test(t)) at = i + 1;
+      else if (/^(>\s*)?[^:：#>\-*\s][^:：]{0,11}\s*[:：]/.test(t)) { at = i + 1; anyArrow = t.startsWith('>'); }
     }
-    lines.splice(at, 0, `> ${label}: ${value}`);
+    lines.splice(at, 0, style(anyArrow));
   } else return currentDTO();
-  return applyBookText(lines.join('\n'));
+  writeFileLines(target, lines);
+  return rebuildBook();
 });
 
-// 미리보기 클릭-편집 — 원고의 lineStart..lineEnd 를 새 텍스트로 치환.
+// 미리보기 클릭-편집용 원본 조회 — 결합 라인 → 해당 원본 파일의 실제 줄 텍스트.
+ipcMain.handle('book-get-lines', (_e, args = {}) => {
+  if (!S.parsed || S.parsed.kind !== 'book') return null;
+  const start = Number(args.lineStart), end = Number(args.lineEnd);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end < start) return null;
+  const src = bookResolveLine(start);
+  const lines = readFileLines(src.path);
+  const endSrc = bookResolveLine(end);
+  const localEnd = Math.min(endSrc.path === src.path ? endSrc.line : src.line + (end - start), lines.length - 1);
+  if (src.line >= lines.length) return null;
+  return { text: lines.slice(src.line, localEnd + 1).join('\n'), file: path.basename(src.path) };
+});
+
+// 미리보기 클릭-편집 — 결합 라인을 원본 파일·라인으로 역매핑해 그 파일만 수정.
 ipcMain.handle('book-apply-edit', (_e, args = {}) => {
   if (!S.parsed || S.parsed.kind !== 'book' || !S.scriptPath) return currentDTO();
   const start = Number(args.lineStart), end = Number(args.lineEnd);
   if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end < start) return currentDTO();
-  const lines = bookScriptText().split(/\r?\n/);
-  if (end >= lines.length) return currentDTO();
+  const src = bookResolveLine(start);
+  const lines = readFileLines(src.path);
+  if (src.line >= lines.length) return currentDTO();
+  const endSrc = bookResolveLine(end);
+  const localEnd = Math.min(endSrc.path === src.path ? endSrc.line : src.line + (end - start), lines.length - 1);
   const newLines = String(args.text == null ? '' : args.text).replace(/\r\n/g, '\n').split('\n');
-  lines.splice(start, end - start + 1, ...newLines);
-  log(`✏ 본문 수정 (${start + 1}~${end + 1}행 → ${newLines.length}행)`);
-  return applyBookText(lines.join('\n'));
+  lines.splice(src.line, localEnd - src.line + 1, ...newLines);
+  writeFileLines(src.path, lines);
+  log(`✏ 본문 수정 — ${path.basename(src.path)} ${src.line + 1}~${localEnd + 1}행 → ${newLines.length}행`);
+  return rebuildBook();
 });
 
-// 대본 수정 — 편집한 텍스트로 재파싱(+원본 .md 갱신).
+// ePub(전자책) 생성 — 같은 원고로 POD PDF 와 병행 산출.
+ipcMain.handle('book-build-epub', async (_e, args = {}) => {
+  if (!S.parsed || S.parsed.kind !== 'book') { log('열린 출판 원고가 없습니다.'); return { dto: currentDTO() }; }
+  try {
+    const { buildEpub } = require('./core/book/epub-builder');
+    const { metaPlatformId } = require('./core/book/html-builder');
+    const SC = require('./core/book/spine-calc');
+    const PP = require('./core/book/platform-presets');
+    const meta = S.parsed.meta || {};
+    const outRoot = S.outRoot || bookOutRoot('book.md', S.preset);
+    const base = _safeFolder(meta.title || S.parsed.fileTitle || '책');
+    // 전자책 표지 크롭용 스프레드 정보 (인쇄 표지가 첨부돼 있을 때)
+    const platformId = metaPlatformId(meta);
+    const pf = PP.getPlatform(platformId);
+    const trimId = meta.trim && PP.TRIM_SIZES[meta.trim] ? meta.trim : pf.defaultTrim;
+    const paperId = meta.paper && PP.PAPERS[meta.paper] ? meta.paper : pf.defaultPaper;
+    const flaps = !!(meta.flaps && !/^(없음|no|off|false|x)$/i.test(String(meta.flaps).trim()));
+    const spread = SC.coverSpread({ platformId, trimId, paperId, totalPages: S.parsed._lastPages || 0, flaps });
+    const r = await buildEpub(S.parsed, {
+      outPath: path.join(outRoot, `${base}.epub`),
+      baseDir: S.scriptPath ? path.dirname(S.scriptPath) : outRoot,
+      coverImagePath: S.parsed.coverImagePath || null,
+      spread, log,
+    });
+    if (r.success) { try { shell.openPath(outRoot); } catch {} }
+    return { dto: currentDTO(), epubPath: r.epubPath };
+  } catch (e) {
+    log('✗ ePub 오류: ' + e.message);
+    return { dto: currentDTO(), error: e.message };
+  }
+});
+
+// ISBN 바코드(EAN-13 + 부가기호) 생성 — SVG 를 출력폴더에 저장 + 렌더러(PNG 변환용)에 반환.
+ipcMain.handle('book-export-barcode', (_e) => {
+  if (!S.parsed || S.parsed.kind !== 'book') return { error: '출판 원고가 없습니다' };
+  const meta = S.parsed.meta || {};
+  if (!meta.isbn) return { error: 'ISBN 이 없습니다 — 책 정보에서 ISBN 을 입력하세요.' };
+  const { isbnBarcodeSvg } = require('./core/book/isbn-barcode');
+  const r = isbnBarcodeSvg(meta.isbn, meta.isbnAddon || '');
+  if (!r) return { error: 'ISBN 형식 오류(체크 자릿수 불일치): ' + meta.isbn };
+  const outRoot = S.outRoot || bookOutRoot('book.md', S.preset);
+  try { fs.mkdirSync(outRoot, { recursive: true }); } catch {}
+  const svgPath = path.join(outRoot, `ISBN바코드_${r.isbn13}.svg`);
+  try { fs.writeFileSync(svgPath, r.svg, 'utf8'); } catch (e) { return { error: '저장 실패: ' + e.message }; }
+  log(`🏷 ISBN 바코드 생성 — ${r.isbn13}${meta.isbnAddon ? ' + 부가기호 ' + meta.isbnAddon : ''} → ${path.basename(svgPath)} (표지 뒷면 오른쪽 하단에 배치)`);
+  return { svg: r.svg, svgPath, isbn13: r.isbn13, widthPx: r.widthPx, heightPx: r.heightPx };
+});
+
+// 렌더러가 만든 이미지(dataURL — 표지 가이드 PNG·바코드 PNG)를 출력폴더에 저장.
+ipcMain.handle('book-save-asset', (_e, args = {}) => {
+  if (!S.parsed || S.parsed.kind !== 'book') return { error: '출판 원고가 없습니다' };
+  const name = _safeFolder(String(args.name || 'asset.png'));
+  const m = String(args.dataUrl || '').match(/^data:[^;]+;base64,(.+)$/);
+  if (!m) return { error: '잘못된 데이터' };
+  const outRoot = S.outRoot || bookOutRoot('book.md', S.preset);
+  try {
+    fs.mkdirSync(outRoot, { recursive: true });
+    const p = path.join(outRoot, name);
+    fs.writeFileSync(p, Buffer.from(m[1], 'base64'));
+    log(`💾 저장: ${name} → ${outRoot}`);
+    return { path: p };
+  } catch (e) { return { error: '저장 실패: ' + e.message }; }
+});
+
+// 대본 수정 — 편집한 텍스트로 재파싱(+원본 .md 갱신). 출판 다중 파일이면 결합본(읽기 전용 배너 포함).
 ipcMain.handle('get-script-text', () => {
+  if (S.parsed && S.parsed.kind === 'book') return bookScriptText();
   try { return fs.readFileSync(S.scriptPath, 'utf8'); } catch { return ''; }
 });
 ipcMain.handle('apply-script-text', (_e, args = {}) => {
