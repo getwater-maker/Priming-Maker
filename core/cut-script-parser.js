@@ -336,7 +336,12 @@ function parseCutScript(text) {
   const format = isGrouped ? 'grouped' : (hasCut ? 'cut' : (hasProse ? 'prose' : 'cut'));
 
   let fileTitle = '';
-  let meta = { raw: '', voice: null, aspect: '9:16' };
+  let meta = { raw: '', voice: null, aspect: '9:16', bgmMood: null };
+  // 배경음악(BGM) 프롬프트 — `> 🎵 배경음악: <영문 ACE-Step 태그>` (배경음악/배경음/BGM). 파일 전체에서 스캔(3편 공통).
+  //   `·`·`|` 앞에서 멈춤(목소리 줄과 같은 줄에 있어도 분리). `>` 줄이라 낭독에서는 자동 제외.
+  //   ⚠ 아래 루프에서 meta 가 parseMeta 로 재할당되므로 bgmMood 는 별도 변수에 보관.
+  const _bgmM = text.match(/(?:🎵\s*)?(?:배경\s*음악|배경음|bgm)\s*[:：]\s*([^\n·|]+)/i);
+  const bgmMood = (_bgmM && _bgmM[1].trim()) ? _bgmM[1].trim() : null;
   const blocks = [];
   let cur = null;
 
@@ -378,6 +383,7 @@ function parseCutScript(text) {
     if (titleLine2 != null) proj.titleLine2 = titleLine2;
     proj.fileTitle = fileTitle;
     proj.voice = meta.voice;
+    proj.bgmMood = bgmMood; // 대본에 적힌 배경음악 프롬프트(있으면 BGM 무드 최우선)
     proj.format = format;
     proj.bgEnabled = true; // 제목 배경 도형 기본 포함(사용자 요구). 체크 해제로 끌 수 있음.
     return proj;

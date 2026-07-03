@@ -50,7 +50,11 @@ function parseLongform(text, fallbackTitle, thresholds = {}) {
   // 파일 제목 — 첫 H1(# …) 또는 폴백(파일명)
   const h1 = raw.match(H1_RE);
   const fileTitle = (h1 ? h1[1].trim() : '') || fallbackTitle || '롱폼';
-  const meta = { raw: '', voice: null, aspect: '16:9' };
+  const meta = { raw: '', voice: null, aspect: '16:9', bgmMood: null };
+  // 배경음악(BGM) 프롬프트 — 메타 줄 `> 🎵 배경음악: <영문 ACE-Step 태그>` (배경음악/배경음/BGM 허용).
+  //   있으면 BGM 무드로 최우선 사용(대본 자동 분석보다 우선). `>` 줄이라 낭독에서는 자동 제외.
+  const _bgmM = raw.match(/(?:🎵\s*)?(?:배경\s*음악|배경음|bgm)\s*[:：]\s*([^\n·|]+)/i);
+  if (_bgmM && _bgmM[1].trim()) meta.bgmMood = _bgmM[1].trim();
 
   // 문장화 + 그룹화 (헤더/대괄호/도입 하이브리드)
   const { items } = splitHybrid(raw);
@@ -72,6 +76,7 @@ function parseLongform(text, fallbackTitle, thresholds = {}) {
   proj.hookCaption = null;
   proj.fileTitle = fileTitle;
   proj.voice = meta.voice;
+  proj.bgmMood = meta.bgmMood || null; // 대본에 적힌 배경음악 프롬프트(있으면 BGM 무드 최우선)
   proj.format = 'longform';
   proj.bgEnabled = true;
 

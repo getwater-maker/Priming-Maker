@@ -1049,10 +1049,15 @@ async function autoFillPrompts(projects, logger) {
   } catch (e) { logger('프롬프트 자동 생성 실패: ' + e.message + ' (나레이션으로 진행)'); }
 }
 
-// 대본 → ACE-Step BGM 무드 태그. moodOverride(채널 수동값) 우선 → Ollama → Gemini → 기본값.
+// 대본 → ACE-Step BGM 무드 태그. moodOverride(작업바 수동값) → 대본 `배경음악:` 줄 → Ollama → Gemini → 기본값.
 const BGM_DEFAULT_MOOD = 'calm, cinematic, ambient, soft piano, slow tempo, warm, instrumental';
 async function deriveBgmMood(project, moodOverride, logger) {
   if (moodOverride && String(moodOverride).trim()) return String(moodOverride).trim();
+  // 대본에 적힌 배경음악 프롬프트(파서가 proj.bgmMood 로 넣음) — 자동 분석보다 우선.
+  if (project && project.bgmMood && String(project.bgmMood).trim()) {
+    logger('  BGM 무드 = 대본 지정값 사용');
+    return String(project.bgmMood).trim();
+  }
   const PromptIO = require('./core/prompt-io');
   const sample = [project.title || project.fileTitle || '', ...project.sentences.slice(0, 8).map((s) => s.text || '')].join(' ').slice(0, 800);
   const req = [

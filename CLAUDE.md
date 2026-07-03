@@ -224,6 +224,14 @@
   면 영상 트랙 사용(line 844, 비율 무관). 영상 실패 시 이미지 배경으로 폴백. playlist-parser 에 bgPrompt 파싱 추가.
   ⏳ **실측 필요**: Vrew 에서 .vrew 정상 로드(배경 영상 트랙·곡별 길이 매칭)·LTX 480p 배경 화질(필요 시 업스케일 추가).
 
+## 🎵 대본 지정 BGM 프롬프트 + BGM 기본 ON (2026-07-04, v0.1.72)
+- **대본에 배경음악 프롬프트**: 메타 줄 `> 🎵 배경음악: <영문 ACE-Step 태그>`(배경음악/배경음/BGM, `·`·`|`·개행 앞 정지).
+  longform-parser·cut-script-parser 가 파일 전체 스캔 → `proj.bgmMood`. **쇼츠는 3편 공통**(파일 상단 1줄).
+  ⚠ cut 파서는 루프에서 `meta=parseMeta()` 재할당되므로 bgmMood 는 **별도 지역변수**로 보관(meta 에 안 얹음).
+- **우선순위**: `deriveBgmMood` = 작업바 moodOverride → **proj.bgmMood(대본 지정)** → Ollama → Gemini → 기본값.
+- **BGM 기본 ON**: App.jsx `bgmOn` 기본값 false→**true**(저장된 설정에 값 있으면 존중). 음악 서버 미설정이어도 graceful(로그만).
+- 가이드: `docs/대본-작성-가이드.md` 공통원칙 #4 + 롱폼/쇼츠 템플릿에 배경음악 줄 추가.
+
 ## 🎵 롱폼/쇼츠 BGM(ACE-Step 배경음) 자동 삽입 (2026-07-01, v0.1.50)
 - 작업바 「🎵 BGM」 체크 + 무드칸(빈값=대본 자동). ⚡만들기 시 **3.5단계**(비디오 뒤·.vrew 앞, main.js runMakeAllCore)에서
   편별 총길이(=ttsDurationSec 합) 계산 → `deriveBgmMood`(대본 무드 → ACE-Step 태그: **moodOverride 우선 → Ollama → Gemini →

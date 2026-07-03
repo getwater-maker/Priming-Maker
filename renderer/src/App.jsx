@@ -99,7 +99,7 @@ export default function App() {
   const [capChars, setCapChars] = useState(7);
   const [ttsSpeed, setTtsSpeed] = useState('1.15');
   const [aiNotice, setAiNotice] = useState(false); // 쇼츠 AI 고지: 기본 OFF (롱폼은 항상 표시·필수)
-  const [bgmOn, setBgmOn] = useState(false);       // 배경음(BGM, ACE-Step) 삽입
+  const [bgmOn, setBgmOn] = useState(true);        // 배경음(BGM, ACE-Step) 삽입 — 기본 ON
   const [bgmMood, setBgmMood] = useState('');      // BGM 무드 태그(빈값=대본 자동분석)
   const [modeProfiles, setModeProfiles] = useState(null); // mode-profiles.js (음성배속 등 모드 기본값 출처)
   // 롱폼 분할옵션(도입부/본론/짧은/긴) — 프리셋에서 초기화, capbar 패널에서 조절 시 재분할.
