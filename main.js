@@ -44,7 +44,7 @@ function presetThresholds(preset) {
 function grokDurOf(engine) { return engine === 'grok10' ? '10s' : 'auto'; }
 // 영상 엔진별 그룹 캡(초) — renderer _clipMaxSec 와 동일 (flow 8 / comfy 8 / grok 10).
 //   Grok 은 그룹 TTS≤6→6초·>6→10초 자동이므로 캡을 10초로 둬야 6초 초과 그룹이 생긴다.
-function clipMaxOf(videoEngine) { return (videoEngine === 'flow' || videoEngine === 'comfy' || videoEngine === 'wan') ? 8.0 : 10.0; }
+function clipMaxOf(videoEngine) { return 10.0; } // Grok=10초 캡 (그룹 TTS≤6→6초·>6→10초 자동)
 // AI 고지 결정 — 양쪽 모드 모두 사용자 선택(want)을 따른다. 기본값(롱폼 ON / 쇼츠 OFF)은 렌더러가 정함.
 //   롱폼은 켜면 5초 후 5초간 표시(기존 타이밍 유지). 쇼츠는 preset 의 타이밍을 그대로 사용.
 const AI_NOTICE_TEXT = '본 영상의 음성과 이미지는 AI 도구를 활용하여 제작되었습니다.';
@@ -854,8 +854,6 @@ async function runRotatingImages(project, imagesDir, logger, styleId, startEngin
         }
       } else if (engineId === 'flow') {
         await runFlowImages(project, imagesDir, logger, styleId, nums);
-      } else if (engineId === 'comfy') {
-        await runComfyImages(project, imagesDir, logger, styleId);
       } else { logger(`(건너뜀) 알 수 없는 엔진: ${engineId}`); }
     } catch (e) {
       logger(`⚠ ${engineId} 중단(${e.message}) — 다음 엔진으로 이어감`);
@@ -883,81 +881,6 @@ function collectForLora(project, styleId, logger) {
   if (n && logger) logger(`📦 LoRA 수집: ${n}장 적립 (총 ${Lora.count()}장)`);
 }
 
-// ComfyUI 이미지(커스텀 워크플로, 예 Krea2) — HTTP API(브라우저 X). 그룹별 g.imagePrompt 로 텍스트→이미지.
-async function runComfyImages(project, imagesDir, logger, styleId, onlyNums) {
-  fs.mkdirSync(imagesDir, { recursive: true });
-  const cfg = require('./core/comfy-config').load();
-  const { ComfyEngine } = require('./comfy-engine');
-  const eng = new ComfyEngine(cfg, logger);
-  if (!(await eng.health())) throw new Error(`ComfyUI 연결 실패 (${cfg.baseUrl}) — ComfyUI 실행/주소 확인 (⚙ Comfy)`);
-  // 사용 워크플로 이름을 로그에 표시 (이미지=커스텀 워크플로 전용, 예 Krea2).
-  const usingCustomWf = !!(cfg.imageWorkflowPath && fs.existsSync(cfg.imageWorkflowPath));
-  const comfyLabel = usingCustomWf ? path.basename(cfg.imageWorkflowPath).replace(/\.json$/i, '') : '워크플로 미설정';
-  const stylePrompt = styleId ? (require('./core/style-store').getPrompt(styleId) || '') : '';
-  const pfx = stylePrompt ? `${stylePrompt}, ` : '';
-  let done = 0, total = 0;
-  for (const g of project.groups) {
-    if (S.abort) { logger('⏹ 중단됨'); break; }
-    if (onlyNums && !onlyNums.includes(g.num)) continue;     // 범위 지정 시 그 그룹만
-    if (!g.imagePrompt || !g.imagePrompt.trim()) continue; // 프롬프트 없으면 건너뜀(autoFillPrompts 가 먼저 채움)
-    if (hasVisual(g)) continue; // 이미 이미지/영상 있음(첨부·캐시·이전 생성) → 건너뜀
-    total++;
-    const out = path.join(imagesDir, `${String(g.num).padStart(2, '0')}.png`);
-    logger(`🖼 ComfyUI(${comfyLabel}) G${g.num} 생성…`);
-    const r = await eng.textToImage({ prompt: pfx + g.imagePrompt, aspect: project.aspect || '9:16', outputPath: out, abortSignal: () => S.abort });
-    if (r.success) { g.imagePath = out; g.imageStatus = 'done'; g.imageEngine = 'comfy'; done++; pushDtoUpdate(); } // comfy 표시 → LoRA 수집 제외
-    else logger(`✗ G${g.num} 실패: ${r.error}`);
-  }
-  logger(`[ComfyUI] 이미지 ${done}/${total} 완료`);
-  pushDtoUpdate();
-}
-
-// Flow 영상 (i2v) — 앞에서 N개 그룹의 이미지를 프레임/애셋으로 붙여 Veo 영상화. 결과 → group.videoPath.
-async function runFlowVideos(project, mediaDir, logger, opts = {}) {
-  const { model = 'Veo 3.1 - Lite', count = 'x1', onlyNums = null } = opts;
-  // 범위(onlyNums) 그룹만, 없으면 이미지 있는 전체. (랜덤 개수 방식 폐지)
-  const targets = (onlyNums && onlyNums.length)
-    ? project.groups.filter((g) => onlyNums.includes(g.num) && g.imagePath && fs.existsSync(g.imagePath))
-    : project.groups.filter((g) => g.imagePath && fs.existsSync(g.imagePath));
-  if (!targets.length) { logger('Flow 영상: 이미지가 있는 대상 그룹이 없음 (먼저 이미지 생성)'); return; }
-
-  const workDir = path.join(os.tmpdir(), `sm_flowv_${project.shortsNum}_${Date.now().toString(36)}`);
-  fs.mkdirSync(workDir, { recursive: true });
-  const FlowAccounts = require('./core/flow-accounts');
-  const vacc = FlowAccounts.pickActive() || { id: 'default' };
-  const eng = getFlowEng(flowProfileDir(vacc.id));
-
-  const paragraphs = targets.map((g) => (project.getSentencesOfGroup(g)[0] || {}).text || `cut${g.num}`);
-  const customPrompts = targets.map((g) => g.videoPrompt || g.motionNote || 'natural slow motion, cinematic feel');
-  const frameImages = targets.map((g) => g.imagePath);
-  targets.forEach((g) => { g.videoStatus = 'generating'; });
-  pushDtoUpdate();
-  logger(`[Flow] 영상 ${targets.length}개 생성 (모델 ${model}, ${count}, i2v)…`);
-
-  const imgDir = path.join(workDir, 'images');
-  try {
-    await eng.run({
-      paragraphs, customPrompts, mediaType: 'video', model, count,
-      ratio: project.aspect || '9:16', outputDir: workDir,
-      withSubtitle: false, vrewOnly: false, skipVrew: true, frameImages,
-      antiDetect: { enabled: true, preset: '기본' }, profileId: 'default',
-    });
-  } catch (e) { logger('Flow 영상 오류: ' + e.message); }
-
-  // 출력 .mp4 → 대상 그룹 videoPath 매핑 (파일명 앞 2자리 = 순번, 폴백 순서)
-  let files = [];
-  try { files = fs.readdirSync(imgDir).filter((f) => /\.mp4$/i.test(f)).sort(); } catch {}
-  targets.forEach((g, i) => {
-    const num = String(i + 1).padStart(2, '0');
-    const f = files.find((x) => x.startsWith(num)) || files[i];
-    if (!f) { g.videoStatus = 'fail'; return; }
-    const dest = path.join(mediaDir, `${String(g.num).padStart(2, '0')}.mp4`);
-    try { fs.copyFileSync(path.join(imgDir, f), dest); g.videoPath = dest; g.videoStatus = 'done'; logger(`[Flow] G${g.num} 영상 첨부`); }
-    catch (e) { g.videoStatus = 'fail'; logger(`영상 복사 실패 G${g.num}: ${e.message}`); }
-  });
-  pushDtoUpdate();
-  try { fs.rmSync(workDir, { recursive: true, force: true }); } catch {}
-}
 
 // 워크폴더 이미지 → media-N/NN.ext 로 매핑 (이미 매핑된 그룹은 건너뜀, 멱등). 신규 매핑 수 반환.
 function mapFlowImagesOnce(project, imgDir, mediaDir, allowOrder, logger) {
@@ -1051,54 +974,6 @@ async function maybeUpscale(project, logger, enabled) {
       const r = await Upscaler.upscaleVideo(g.videoPath, out, { width: W, height: H, logger, abortSignal: () => S.abort });
       if (r && r.ok) { g.videoPath = out; pushDtoUpdate(); }
     } catch (e) { logger(`업스케일 실패 G${g.num}: ${e.message}`); }
-  }
-}
-
-// ComfyUI(LTX 등) i2v — 대상 그룹의 이미지를 ComfyUI API 로 영상화 → group.videoPath.
-async function runComfyVideos(project, mediaDir, logger, opts = {}) {
-  fs.mkdirSync(mediaDir, { recursive: true });
-  const { onlyNums = null, wan = false } = opts;
-  let cfg = require('./core/comfy-config').load();
-  // Wan 변형 — LTX 와 별도 워크플로 슬롯. 길이는 프레임 단위(초×wanFps)로 주입.
-  //   ⚠ LTX 전용 노드 ID(imageNodeId/promptNodeId/videoWidth·Height·DurationNodeId)는 Wan 그래프엔 없다
-  //   (예: LTX 의 269 가 Wan 엔 없어 "노드 없음" 에러). Wan 은 노드 ID 를 비워 자동탐지에 맡긴다.
-  if (wan) {
-    if (!cfg.wanWorkflowPath) { logger('Wan 영상: 워크플로 미설정 — ⚙ Comfy 의 "Wan 워크플로" 를 지정하세요.'); return; }
-    cfg = { ...cfg,
-      workflowPath: cfg.wanWorkflowPath,
-      videoFps: Number(cfg.wanFps) > 0 ? Number(cfg.wanFps) : 16,
-      videoMaxSec: Number(cfg.wanMaxSec) > 0 ? Number(cfg.wanMaxSec) : cfg.videoMaxSec,
-      timeoutSec: Number(cfg.wanTimeoutSec) > 0 ? Number(cfg.wanTimeoutSec) : cfg.timeoutSec,
-      imageNodeId: '', promptNodeId: '', videoWidthNodeId: '', videoHeightNodeId: '', videoDurationNodeId: '',
-    };
-  }
-  const engTag = wan ? 'comfy-wan' : 'comfy-ltx';
-  const { ComfyEngine } = require('./comfy-engine');
-  // 범위(onlyNums) 그룹만, 없으면 이미지 있는 전체. (랜덤 개수 방식 폐지)
-  const targets = (onlyNums && onlyNums.length)
-    ? project.groups.filter((g) => onlyNums.includes(g.num) && g.imagePath && fs.existsSync(g.imagePath))
-    : project.groups.filter((g) => g.imagePath && fs.existsSync(g.imagePath));
-  if (!targets.length) { logger('Comfy 영상: 이미지가 있는 대상 그룹이 없음 (먼저 이미지 생성)'); return; }
-  const eng = new ComfyEngine(cfg, logger);
-  const MC = require('./core/media-cache');
-  logger(`[Comfy] ${wan ? 'Wan' : 'LTX'} ${targets.length}개 영상 생성 (${cfg.baseUrl})…`);
-  for (const g of targets) {
-    if (S.abort) { logger('⏹ 중단'); break; }
-    if (g.videoPath && fs.existsSync(g.videoPath)) continue;
-    const outputPath = path.join(mediaDir, `${String(g.num).padStart(2, '0')}.mp4`);
-    const ck = MC.videoKey(g.videoPrompt || g.motionNote || '', g.imagePath, project.aspect || '9:16', engTag);
-    const hit = MC.get(ck);
-    if (hit) { try { fs.copyFileSync(hit.file, outputPath); g.videoPath = outputPath; g.videoSourceImage = g.imagePath; g.videoStatus = 'done'; logger(`♻ G${g.num} 영상 재활용(캐시)`); pushDtoUpdate(); continue; } catch {} }
-    g.videoStatus = 'generating'; pushDtoUpdate();
-    // 영상 길이 = 그룹 TTS 음성 길이(문장 합산). videoMaxSec(기본 10초)로 상한은 comfy-engine 이 적용.
-    //   (groupDurationSec 은 모델 그룹에 없음 → 문장에서 직접 계산)
-    const ttsLen = project.getSentencesOfGroup(g).reduce((a, s) => a + (s.ttsDurationSec || 0), 0);
-    const wantDur = cfg.matchVideoToAudio === false ? null : (ttsLen > 0 ? ttsLen : null);
-    if (wantDur) logger(`[Comfy] G${g.num} 영상 길이 = 그룹 TTS ${ttsLen.toFixed(1)}초${cfg.videoMaxSec > 0 ? ` (캡 ${cfg.videoMaxSec}초)` : ' (캡 없음)'}`);
-    const res = await eng.imageToVideo({ imagePath: g.imagePath, prompt: g.videoPrompt || g.motionNote || null, outputPath, abortSignal: () => S.abort, aspect: project.aspect || '9:16', durationSec: wantDur });
-    if (res.success && res.videoPath) { g.videoPath = res.videoPath; g.videoSourceImage = g.imagePath; g.videoStatus = 'done'; MC.put(ck, res.videoPath, 'mp4'); logger(`✓ G${g.num} 영상`); }
-    else { g.videoStatus = 'fail'; logger(`✗ G${g.num} 영상 실패: ${res.error}`); }
-    pushDtoUpdate();
   }
 }
 
@@ -1226,10 +1101,8 @@ ipcMain.handle('image-build', async (_e, args = {}) => {
       prefillImageCache(pr, mediaDir, styleId, engine); // ♻ 캐시에 있는 그룹은 먼저 채움(엔진이 건너뜀)
       if (imagesNeeded(pr) === 0) {
         log(`♻ ${prLabel(pr)} 전부 캐시 재활용 — 생성 생략`);
-      } else if (engine === 'comfy') {
-        await runComfyImages(pr, mediaDir, log, styleId); // ComfyUI 는 단독(순환 제외)
       } else {
-        await runRotatingImages(pr, mediaDir, log, styleId, engine); // genspark/flow → 순환(한도 시 자동 이어감)
+        await runRotatingImages(pr, mediaDir, log, styleId, engine); // Flow+Genspark 순환(한도 시 자동 이어감)
       }
       cacheGeneratedImages(pr, styleId, engine); // 새로 만든 이미지 캐시에 저장
       log(`✓ ${prLabel(pr)} 이미지 완료`);
@@ -1313,20 +1186,13 @@ ipcMain.handle('video-build', async (_e, args = {}) => {
       log(`🖼 영상 전 — 이미지 없는 ${needImg.length}개 그룹 먼저 생성 (그룹 ${needImg.map((g) => g.num).join(',')})`);
       try {
         prefillImageCache(pr, videoDir, styleId, imgEngine);
-        if (imgEngine === 'comfy') await runComfyImages(pr, videoDir, log, styleId, onlyNums);
-        else await runRotatingImages(pr, videoDir, log, styleId, imgEngine, onlyNums);
+        await runRotatingImages(pr, videoDir, log, styleId, imgEngine, onlyNums);
         cacheGeneratedImages(pr, styleId, imgEngine);
       } catch (e) { log(`이미지 선행 생성 오류: ${e.message}`); }
       pushDtoUpdate();
     }
     try {
-      if (engine === 'flow') {
-        log(`🎬 ${prLabel(pr)} 영상 생성 (Flow i2v${rangeLbl})…`);
-        await runFlowVideos(pr, videoDir, log, { model: flowVideoModel, count: flowCount, onlyNums });
-      } else if (engine === 'comfy' || engine === 'wan') {
-        log(`🎬 ${prLabel(pr)} 영상 생성 (ComfyUI ${engine === 'wan' ? 'Wan' : 'LTX'} i2v${rangeLbl})…`);
-        await runComfyVideos(pr, videoDir, log, { onlyNums, wan: engine === 'wan' });
-      } else {
+      {
         log(`🎬 ${prLabel(pr)} 비디오 생성 (Grok ${grokDurOf(engine) === 'auto' ? '자동 6/10초' : grokDurOf(engine)}${rangeLbl})…`);
         const vr = await P.generateHookVideosGrok(pr, videoDir, log, () => S.abort, 0, pushDtoUpdate, onlyNums, grokDurOf(engine));
         if (vr && vr.limitReached) { S.grokLimit = vr.limitReached; S.abort = true; log('⛔ Grok 요청 한도 도달 — 작업을 멈춥니다'); }
@@ -1789,24 +1655,16 @@ async function runMakeAllCore(opts = {}) {
   //   로컬 ComfyUI(로컬 GPU)면 TTS(OmniVoice GPU)와 VRAM 충돌 → '순차'.
   //   또한 cut/prose 처럼 TTS 후 그룹 재구성이 일어나면 이미지가 그룹에 의존 → 안전하게 순차.
   const willRegroup = (pr) => (!dry && clipMaxSec && getModeProfile(currentMode()).grouping.strategy === 'tts-greedy' && pr.format !== 'grouped');
-  const browserImg = (engine === 'genspark' || engine === 'flow' || engine === 'rotate'); // 순환=Genspark/Flow(브라우저), ComfyUI 제외라 로컬 GPU 미사용
-  const comfyCloud = engine === 'comfy' && (() => { try { return !!require('./core/comfy-config').load().cloud; } catch { return false; } })();
-  const noLocalGpuImg = browserImg || comfyCloud;   // 이미지가 로컬 GPU 미사용 → TTS 와 병렬 안전
+  // 이미지 = Flow+Genspark 순환(브라우저) — 로컬 GPU 미사용 → TTS(로컬 GPU)와 병렬 안전.
+  const noLocalGpuImg = true;
   const canParallel = !dry && noLocalGpuImg && !projects.some(willRegroup);
 
   // ── 3단계 파이프라인 조건 ──
-  //   비디오가 ComfyUI '클라우드'(REST·로컬 GPU 미사용)면, 그룹 이미지(+필요 시 그 그룹 TTS)가 준비되는 즉시
-  //   그 그룹 영상을 바로 시작 → TTS∥이미지∥비디오 3단계가 겹친다(이미지 다 끝나길 안 기다림).
-  //   (브라우저 비디오 grok/flow 는 단일 브라우저 인스턴스 충돌·복잡도 때문에 기존 3단계 일괄 유지.)
-  const isComfyVideo = videoEngine === 'comfy' || videoEngine === 'wan'; // 둘 다 ComfyUI REST 경로
-  const useWanVideo = videoEngine === 'wan';
-  const comfyVideoCloud = isComfyVideo && (() => { try { return !!require('./core/comfy-config').load().cloud; } catch { return false; } })();
-  // Grok 비디오도 파이프라인 가능 — Grok 은 별도 크롬 프로필이라 이미지 브라우저(Genspark/Flow)와
-  //   충돌하지 않음(동시 실행 시 grok.com 로딩이 느린 문제는 waitUntil 'load' 로 이미 완화).
-  //   ⚠ Flow 비디오는 이미지와 같은 브라우저(S.flowEng)를 쓰므로 파이프라인 제외(순차 유지).
+  //   Grok 비디오는 별도 크롬 프로필이라 이미지 브라우저(Genspark/Flow)와 충돌하지 않음 → 그룹 이미지(+그룹 TTS)가
+  //   준비되는 즉시 그 그룹 영상을 시작(TTS∥이미지∥비디오 겹침). ('없음'은 파이프라인 대상 아님)
   const grokVideoPipeline = videoEngine === 'grok' || videoEngine === 'grok10';
-  const videoPipeline = canParallel && (comfyVideoCloud || grokVideoPipeline);
-  const needTtsForVideo = (() => { try { return require('./core/comfy-config').load().matchVideoToAudio !== false; } catch { return true; } })(); // comfy 영상 길이=그룹 TTS → 그 그룹 TTS 도 필요
+  const videoPipeline = canParallel && grokVideoPipeline;
+  const needTtsForVideo = true; // 그룹 TTS 길이로 영상 길이를 정함
   let ttsStageDone = false, imageStageDone = false;
 
   const ttsStage = async () => {
@@ -1840,8 +1698,7 @@ async function runMakeAllCore(opts = {}) {
       const t0 = Date.now();
       try {
         if (imagesNeeded(pr) > 0) {
-          if (engine === 'comfy') await runComfyImages(pr, dirs.media, log, styleId); // ComfyUI 단독
-          else await runRotatingImages(pr, dirs.media, log, styleId, engine);          // genspark/flow → 순환
+          await runRotatingImages(pr, dirs.media, log, styleId, engine); // Flow+Genspark 순환
         }
       } catch (e) { log(`${prLabel(pr)} 이미지 오류: ${e.message}`); }
       cacheGeneratedImages(pr, styleId, engine);
@@ -1892,13 +1749,9 @@ async function runMakeAllCore(opts = {}) {
         const dirs = shortsDirs(S.outRoot, pr.shortsNum);
         const t0 = Date.now();
         try {
-          log(`🎬 G${nums.join(',G')} (${prLabel(pr)}) 이미지 준비 — 즉시 비디오 생성(파이프라인${grokVideoPipeline ? '·Grok' : '·Comfy'})…`);
-          if (grokVideoPipeline) {
-            const vr = await P.generateHookVideosGrok(pr, dirs.media, log, () => S.abort, 0, pushDtoUpdate, nums, grokDurOf(videoEngine));
-            if (vr && vr.limitReached) { S.grokLimit = vr.limitReached; S.abort = true; log('⛔ Grok 요청 한도 도달 — 작업을 멈춥니다 (한도 풀린 뒤 다시 만들기)'); }
-          } else {
-            await runComfyVideos(pr, dirs.media, log, { onlyNums: nums, wan: useWanVideo });
-          }
+          log(`🎬 G${nums.join(',G')} (${prLabel(pr)}) 이미지 준비 — 즉시 비디오 생성(파이프라인·Grok)…`);
+          const vr = await P.generateHookVideosGrok(pr, dirs.media, log, () => S.abort, 0, pushDtoUpdate, nums, grokDurOf(videoEngine));
+          if (vr && vr.limitReached) { S.grokLimit = vr.limitReached; S.abort = true; log('⛔ Grok 요청 한도 도달 — 작업을 멈춥니다 (한도 풀린 뒤 다시 만들기)'); }
           if (!S.abort) await maybeUpscale(pr, log, true);
         } catch (e) { log(`G${nums.join(',G')} 영상 실패: ${e.message}`); }
         S.timings.video += (Date.now() - t0) / 1000;
@@ -1911,14 +1764,11 @@ async function runMakeAllCore(opts = {}) {
     log(`⚡ 1·2·3단계 파이프라인 — TTS ∥ 이미지 ∥ 비디오(그룹 이미지 준비 즉시, ${grokVideoPipeline ? 'Grok' : 'Comfy 클라우드'})`);
     await Promise.all([ttsStage(), imageStage(), videoStage()]);
   } else if (canParallel) {
-    log(`⚡ 1·2단계 병렬 — TTS ∥ 이미지(${engine}${comfyCloud ? ' 클라우드' : ''}, 로컬 GPU 비충돌)`);
+    log(`⚡ 1·2단계 병렬 — TTS ∥ 이미지(순환, 로컬 GPU 비충돌)`);
     await Promise.all([ttsStage(), imageStage()]);
   } else {
     await ttsStage();
-    if (!dry && !S.abort) {
-      if (engine === 'comfy') log('🖼 2단계 — 이미지(로컬 ComfyUI, GPU) — TTS 후 순차 진행');
-      await imageStage();
-    }
+    if (!dry && !S.abort) await imageStage();
   }
 
   // ── 3단계: 비디오 — 전 쇼츠 (videoEngine='none'이면 비디오 없이 이미지만 사용) ──
@@ -1934,12 +1784,8 @@ async function runMakeAllCore(opts = {}) {
       const vOnly = rangeNums(pr, fromNum, toNum); // I2V 범위(미지정=전체)
       const t0 = Date.now();
       try {
-        if (videoEngine === 'flow') await runFlowVideos(pr, dirs.media, log, { model: flowVideoModel, count: flowCount, onlyNums: vOnly });
-        else if (isComfyVideo) await runComfyVideos(pr, dirs.media, log, { onlyNums: vOnly, wan: useWanVideo });
-        else {
-          const vr = await P.generateHookVideosGrok(pr, dirs.media, log, () => S.abort, 0, pushDtoUpdate, vOnly, grokDurOf(videoEngine));
-          if (vr && vr.limitReached) { S.grokLimit = vr.limitReached; S.abort = true; log('⛔ Grok 요청 한도 도달 — 작업을 멈춥니다 (한도 풀린 뒤 다시 만들기)'); }
-        }
+        const vr = await P.generateHookVideosGrok(pr, dirs.media, log, () => S.abort, 0, pushDtoUpdate, vOnly, grokDurOf(videoEngine));
+        if (vr && vr.limitReached) { S.grokLimit = vr.limitReached; S.abort = true; log('⛔ Grok 요청 한도 도달 — 작업을 멈춥니다 (한도 풀린 뒤 다시 만들기)'); }
         if (!S.abort) await maybeUpscale(pr, log, true); // 모든 영상 1080p 업스케일 (중단 시 생략)
       } catch (e) { log(`${prLabel(pr)} 영상 실패: ${e.message}`); }
       S.timings.video += (Date.now() - t0) / 1000;
@@ -2165,8 +2011,7 @@ ipcMain.handle('video-group', async (_e, args = {}) => {
     log(`🖼 G${groupNum} 이미지 없음 — 먼저 생성 후 영상`);
     try {
       prefillImageCache(pr, videoDir, styleId, imgEngine);
-      if (imgEngine === 'comfy') await runComfyImages(pr, videoDir, log, styleId, [groupNum]);
-      else await runRotatingImages(pr, videoDir, log, styleId, imgEngine, [groupNum]);
+      await runRotatingImages(pr, videoDir, log, styleId, imgEngine, [groupNum]);
       cacheGeneratedImages(pr, styleId, imgEngine);
     } catch (e) { log(`이미지 선행 생성 오류: ${e.message}`); }
     pushDtoUpdate();
@@ -2176,18 +2021,11 @@ ipcMain.handle('video-group', async (_e, args = {}) => {
   // 단일 그룹 재생성 = 강제 새로 만들기 → 기존 영상·캐시 비우기.
   try {
     const MC = require('./core/media-cache');
-    const engTag = engine === 'wan' ? 'comfy-wan' : engine === 'comfy' ? 'comfy-ltx' : 'grok';
-    MC.del(MC.videoKey(g.videoPrompt || g.motionNote || '', g.imagePath, pr.aspect || '9:16', engTag));
+    MC.del(MC.videoKey(g.videoPrompt || g.motionNote || '', g.imagePath, pr.aspect || '9:16', 'grok'));
     g.videoPath = null; g.videoStatus = 'generating'; pushDtoUpdate();
   } catch {}
   try {
-    if (engine === 'flow') {
-      await runFlowVideos(pr, videoDir, log, { model: flowVideoModel, count: flowCount, onlyNums: [groupNum] });
-    } else if (engine === 'comfy' || engine === 'wan') {
-      await runComfyVideos(pr, videoDir, log, { onlyNums: [groupNum], wan: engine === 'wan' });
-    } else {
-      await P.generateHookVideosGrok(pr, videoDir, log, () => S.abort, 0, pushDtoUpdate, [groupNum], grokDurOf(engine));
-    }
+    await P.generateHookVideosGrok(pr, videoDir, log, () => S.abort, 0, pushDtoUpdate, [groupNum], grokDurOf(engine));
     await maybeUpscale(pr, log, true);
     log(`✓ G${groupNum} 영상 완료`);
   } catch (e) { log(`✗ G${groupNum} 영상 실패: ${e.message}`); }
@@ -2208,9 +2046,7 @@ ipcMain.handle('regen-group', async (_e, args = {}) => {
   log(`🔄 ${prLabel(pr)} G${groupNum} 이미지 재생성 (${engine})…`);
   try {
     g.imagePath = null; g.imageStatus = 'generating'; g.imageEngine = null; pushDtoUpdate(); // 강제 재생성(기존/캐시 우회)
-    // 헤더에서 선택한 엔진을 그대로 사용 — comfy(Krea2)면 ComfyUI, 아니면 순환(genspark/flow). 이 그룹만.
-    if (engine === 'comfy') await runComfyImages(pr, mediaDir, log, styleId, [groupNum]);
-    else await runRotatingImages(pr, mediaDir, log, styleId, engine, [groupNum]);
+    await runRotatingImages(pr, mediaDir, log, styleId, engine, [groupNum]); // Flow+Genspark 순환, 이 그룹만
     cacheGeneratedImages(pr, styleId, engine); // 새 결과 캐시 갱신(엔진 태그 맞춤)
     log(`✓ G${groupNum} 재생성 완료`);
   } catch (e) { log(`✗ G${groupNum} 재생성 실패: ${e.message}`); }

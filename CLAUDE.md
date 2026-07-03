@@ -7,6 +7,17 @@
 **편별 Vrew 4.0.1 .vrew 파일**을 자동 생성하는 Electron 앱. PrimingFlow(D:\PrimingFlow)의 엔진을
 복사·재활용한 독립 클론.
 
+## 🧹 엔진 단순화 — Krea2·LTX·Wan·Flow영상 제거 (2026-07-04, v0.1.71)
+> 사용자 요청: 이미지·영상 엔진을 브라우저 기반만 남기고 ComfyUI 이미지/영상 엔진 제거. **ACE-Step 오디오(플리·BGM)는 유지.**
+- **이미지 엔진** = `순환(Flow+Genspark)` 하나만. `comfy`(Krea2_Turbo) 옵션·`runComfyImages`·순환 루프의 comfy 슬롯 제거.
+  UI 드롭다운 → 「이미지: 순환」 라벨 + ⚙ 순환 버튼만.
+- **영상 엔진** = `Grok` / `없음` 만. `flow`(runFlowVideos)·`comfy`(LTX)·`wan`(runComfyVideos) 옵션·함수·디스패치 전부 제거.
+  make-all 파이프라인/3단계·video-build·video-group 모두 Grok 단일 경로로 단순화. `clipMaxOf`=10 고정, `noLocalGpuImg`=true,
+  `videoPipeline`=canParallel&&grok. 레거시 마이그레이션: 저장된 comfy/wan/flow 영상 → grok, comfy 이미지 → rotate.
+- **유지**: `comfy-engine.js`·`comfy-config.js`·⚙ Comfy 모달(서버/클라우드/오디오 섹션만) — ACE-Step 음악(플리)·BGM 이 씀.
+  comfy-engine 의 imageToVideo/textToImage 는 이제 미사용(무해한 dead 메서드, 나중 정리 가능). comfy-config 의 wan*·video* 필드도 무해하게 잔존.
+- ⚠ 이번 세션에서 붙였던 Wan i2v(아래 v0.1.68 항목)는 이 릴리스로 **제거됨**(설명은 이력용으로 남김).
+
 ## 📖 출판 독립화·표지 안내 페이지·구조 체크박스 개편·작성 가이드 (2026-07-03, v0.1.69)
 > 사용자 리뷰 2차 반영 — 출판을 영상과 완전 분리된 개별 기능으로.
 - **롱폼↔출판 분리**: 롱폼 헤더 「📖 출판편집」 버튼·openBookFromLongform 제거. 출판은

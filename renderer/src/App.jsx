@@ -80,9 +80,9 @@ export default function App() {
   // 헤더 컨트롤
   const [presetName, setPresetName] = useState('');
   const [styleId, setStyleId] = useState('chibi');
-  const [imgEngine, setImgEngine] = useState('comfy'); // 기본 'comfy'(Krea2_Turbo) | 'rotate'(Flow+Genspark 순환)
+  const [imgEngine, setImgEngine] = useState('rotate'); // 'rotate'(Flow+Genspark 순환) — 유일 이미지 엔진
   const [aspect, setAspect] = useState('16:9');
-  const [videoEngine, setVideoEngine] = useState('comfy'); // 기본 'comfy'(LTX2.3)
+  const [videoEngine, setVideoEngine] = useState('grok'); // 'grok' | 'none' — Grok i2v 또는 이미지만
   const [vidFrom, setVidFrom] = useState(1);   // I2V 범위 시작 그룹
   const [vidTo, setVidTo] = useState(1);        // I2V 범위 끝 그룹 (롱폼 기본=도입부 끝)
   const [timings, setTimings] = useState({ tts: 0, image: 0, video: 0, make: 0 }); // 작업 소요시간(초)
@@ -131,7 +131,6 @@ export default function App() {
   const [comfy, setComfy] = useState(null);
   const [styleEditOpen, setStyleEditOpen] = useState(false); // 이미지 스타일 편집 모달
   const [newStyle, setNewStyle] = useState({ name: '', prompt: '' }); // 새 스타일 입력 버퍼
-  const [comfyImgWf, setComfyImgWf] = useState(''); // ComfyUI 이미지 커스텀 워크플로 경로(있으면 라벨=커스텀)
   const [ollamaOpen, setOllamaOpen] = useState(false);
   const [ollama, setOllama] = useState(null);           // { baseUrl, model }
   const [ollamaModels, setOllamaModels] = useState([]); // 서버에 설치된 모델 목록
@@ -165,7 +164,7 @@ export default function App() {
     }
     return { ttsD, ttsT, imgD, imgT, vidD, vidT };
   })();
-  const _clipMaxSec = () => ((videoEngine === 'flow' || videoEngine === 'comfy' || videoEngine === 'wan') ? 8.0 : 10.0); // Grok=10초 캡(그룹 TTS≤6→6초·>6→10초 자동)
+  const _clipMaxSec = () => 10.0; // Grok=10초 캡(그룹 TTS≤6→6초·>6→10초 자동)
   const capOverride = useCallback(() => {
     const baseY = parseFloat(capPos) || 0;
     const fine = parseFloat(capFine) || 0;
@@ -181,7 +180,6 @@ export default function App() {
     api.onDtoUpdate((d) => { if (d) { setDto(d); if (d.timings) setTimings(d.timings); if (d.queue) setQueue(d.queue); } });
     api.onAutosaved((info) => setAutoSavedAt((info && info.at) || Date.now()));
     api.getAppVersion().then((v) => { if (v) setAppVersion(v); }).catch(() => {});
-    api.getComfyConfig().then((c) => setComfyImgWf((c && c.imageWorkflowPath) || '')).catch(() => {});
     loadPresets().then(loadStyles);
     // 시작/재로드 시 큐 복원 — 지난 세션 큐 + 활성 대본 화면 복구
     api.listQueue().then((r) => {
@@ -304,8 +302,10 @@ export default function App() {
     if (s.presetName != null) setPresetName(s.presetName);
     if (s.styleId != null) setStyleId(s.styleId);
     if (s.ttsSpeed != null) setTtsSpeed(s.ttsSpeed);
-    if (s.imgEngine != null) setImgEngine(s.imgEngine);
-    if (s.videoEngine != null) setVideoEngine(s.videoEngine === 'grok10' ? 'grok' : s.videoEngine); // 레거시 grok10 → grok(자동)
+    // 제거된 엔진(comfy 이미지) → 순환으로 마이그레이션.
+    if (s.imgEngine != null) setImgEngine(s.imgEngine === 'comfy' ? 'rotate' : s.imgEngine);
+    // 제거된 영상 엔진(flow/comfy/wan)·레거시(grok10) → grok 으로 마이그레이션.
+    if (s.videoEngine != null) setVideoEngine(['flow', 'comfy', 'wan', 'grok10'].includes(s.videoEngine) ? 'grok' : s.videoEngine);
     if (s.vidFrom != null) setVidFrom(s.vidFrom);
     if (s.vidTo != null) setVidTo(s.vidTo);
     if (s.flowVideoModel != null) setFlowVideoModel(s.flowVideoModel);
@@ -598,7 +598,7 @@ export default function App() {
     catch (e) { logline('Comfy 설정 읽기 오류: ' + e.message); }
   }
   async function saveComfy() {
-    try { await api.setComfyConfig(comfy); setComfyImgWf((comfy && comfy.imageWorkflowPath) || ''); setComfyOpen(false); setStatus('ComfyUI 설정 저장됨'); }
+    try { await api.setComfyConfig(comfy); setComfyOpen(false); setStatus('ComfyUI 설정 저장됨'); }
     catch (e) { logline('저장 오류: ' + e.message); }
   }
   async function testComfyConn() {
@@ -606,10 +606,7 @@ export default function App() {
     try { const r = await api.testComfy(); setStatus(r.ok ? `✓ 연결 OK (${r.baseUrl})` : `✗ 연결 실패 (${r.baseUrl})`); }
     catch (e) { logline('테스트 오류: ' + e.message); setStatus('테스트 오류'); }
   }
-  async function pickWorkflow() { const f = await api.pickFile({ filters: [{ name: 'ComfyUI 워크플로(API json)', extensions: ['json'] }] }); if (f) setComfy((c) => ({ ...c, workflowPath: f })); }
-  async function pickWanWorkflow() { const f = await api.pickFile({ filters: [{ name: 'ComfyUI 워크플로(API json)', extensions: ['json'] }] }); if (f) setComfy((c) => ({ ...c, wanWorkflowPath: f })); }
   async function pickAudioWorkflow() { const f = await api.pickFile({ filters: [{ name: 'ComfyUI 워크플로(API json)', extensions: ['json'] }] }); if (f) setComfy((c) => ({ ...c, audioWorkflowPath: f })); }
-  async function pickImageWorkflow() { const f = await api.pickFile({ filters: [{ name: 'ComfyUI 워크플로(API json)', extensions: ['json'] }] }); if (f) setComfy((c) => ({ ...c, imageWorkflowPath: f })); }
   function showPrompt(c, label) {
     // 실제 생성에 쓰이는 최종 이미지 프롬프트 = 선택한 스타일 + 대본 프롬프트.
     const st = styles.find((x) => x.id === styleId);
@@ -1059,29 +1056,14 @@ export default function App() {
               {styles.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
             <button className="ghost" title="이미지 스타일 편집(추가·수정·삭제·프롬프트 복사)" style={{ padding: '6px 9px' }} onClick={() => setStyleEditOpen(true)}>✎ 스타일</button>
-            <select title="이미지 생성툴" value={imgEngine === 'comfy' ? 'comfy' : 'rotate'} onChange={(e) => setImgEngine(e.target.value)}>
-              <option value="rotate">순환 (Flow+Genspark)</option>
-              <option value="comfy">{comfyImgWf ? 'Krea2_Turbo' : 'Krea2_Turbo (워크플로 미설정)'}</option>
-            </select>
-            {imgEngine !== 'comfy' && <button className="ghost" title="순환 엔진/순서·계정 설정" style={{ padding: '6px 9px' }} onClick={openImgRotation}>⚙ 순환</button>}
-            {imgEngine === 'comfy' && <button className="ghost" title="ComfyUI 서버·이미지(Krea2)/영상 설정" style={{ padding: '6px 9px' }} onClick={openComfy}>⚙ Comfy</button>}
+            <span className="meta" title="이미지 생성 = Flow+Genspark 순환">이미지: 순환</span>
+            <button className="ghost" title="순환 엔진/순서·계정 설정" style={{ padding: '6px 9px' }} onClick={openImgRotation}>⚙ 순환</button>
             <button className="ghost" disabled={!loaded} onClick={() => runImg(null)}>🖼 이미지</button>
             <span className="hdiv" />
             <select title="i2v 비디오 엔진" value={videoEngine} onChange={(e) => setVideoEngine(e.target.value)}>
-              <option value="grok">Grok</option><option value="flow">Flow(8초)</option><option value="comfy">LTX2.3</option><option value="wan">Wan (i2v)</option><option value="none">없음 (이미지만)</option>
+              <option value="grok">Grok</option><option value="none">없음 (이미지만)</option>
             </select>
-            {(videoEngine === 'comfy' || videoEngine === 'wan') && <button className="ghost" title="ComfyUI i2v 설정" style={{ padding: '6px 9px' }} onClick={openComfy}>⚙ Comfy</button>}
             {videoEngine === 'grok' && <button className="ghost" title="Grok(X) 멀티계정 등록·로그인·한도" style={{ padding: '6px 9px' }} onClick={openGrokAcc}>⚙ 계정</button>}
-            {videoEngine === 'flow' && (
-              <span title="Flow 영상 옵션">
-                <select style={{ width: 'auto' }} value={flowVideoModel} onChange={(e) => setFlowVideoModel(e.target.value)}>
-                  <option>Veo 3.1 - Lite</option><option>Veo 3.1 - Fast</option><option>Veo 3.1</option>
-                </select>
-                <select style={{ width: 54 }} value={flowCount} onChange={(e) => setFlowCount(e.target.value)}>
-                  <option>1x</option><option>x2</option><option>x3</option><option>x4</option>
-                </select>
-              </span>
-            )}
             {videoEngine === 'none'
               ? <span className="meta" title="비디오 없이 이미지만으로 .vrew 생성 (켄번스)">비디오 없음 — 이미지만</span>
               : (<>
@@ -1306,36 +1288,14 @@ export default function App() {
       {comfyOpen && comfy && (
         <div className="modal-bg show" onClick={(e) => { if (e.target.classList.contains('modal-bg')) setComfyOpen(false); }}>
           <div className="modal-card comfymodal">
-            <h3>⚙ ComfyUI 설정 (이미지 · LTX 영상 · ACE-Step 음악)</h3>
-            <div className="meta" style={{ marginBottom: 8 }}>로컬 PC / RunPod / <b>ComfyUI 클라우드(comfy.org)</b>. 클라우드는 GPU·설치 불필요 — 체크 후 API 키만. <b>음악만 로컬</b>로 분리 가능(아래 음악 서버).</div>
+            <h3>⚙ ComfyUI 설정 (ACE-Step 음악 — '플리' · BGM)</h3>
+            <div className="meta" style={{ marginBottom: 8 }}>로컬 PC / RunPod / <b>ComfyUI 클라우드(comfy.org)</b>. 음악(ACE-Step) 생성 전용. <b>음악만 로컬</b>로 분리 가능(아래 음악 서버).</div>
             <div className="cgrid">
               <div className="frow full"><label>클라우드 모드</label><label style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1 }}><input type="checkbox" style={{ width: 'auto' }} checked={!!comfy.cloud} onChange={(e) => setComfy({ ...comfy, cloud: e.target.checked, baseUrl: e.target.checked && /127\.0\.0\.1|localhost/.test(comfy.baseUrl || '') ? 'https://cloud.comfy.org' : comfy.baseUrl })} /><span className="meta">comfy.org 공식 클라우드 사용 (Standard 이상 구독 필요)</span></label></div>
               {comfy.cloud && (
                 <div className="frow full"><label>API 키</label><input type="password" placeholder="X-API-Key (계정 대시보드에서 발급)" value={comfy.apiKey || ''} onChange={(e) => setComfy({ ...comfy, apiKey: e.target.value })} /></div>
               )}
               <div className="frow full"><label>서버 주소</label><input placeholder={comfy.cloud ? 'https://cloud.comfy.org' : 'http://127.0.0.1:8188'} value={comfy.baseUrl} onChange={(e) => setComfy({ ...comfy, baseUrl: e.target.value })} /><button className="ghost" style={{ flex: '0 0 auto' }} onClick={testComfyConn}>연결테스트</button></div>
-
-              <div className="subhead">🖼 이미지 (t2i)</div>
-              <div className="frow full"><label>이미지 워크플로</label><input placeholder="ComfyUI '저장(API 포맷)' JSON 경로 (예: Krea2 Turbo)" value={comfy.imageWorkflowPath || ''} onChange={(e) => setComfy({ ...comfy, imageWorkflowPath: e.target.value })} /><button className="ghost" style={{ flex: '0 0 auto' }} onClick={pickImageWorkflow}>찾기</button></div>
-              <div className="frow full"><label>프롬프트 노드</label><input placeholder="비우면 CLIPTextEncode 자동탐지 (Krea2 등 다른 인코더면 그 긍정 프롬프트 노드 ID 입력)" value={comfy.imagePromptNodeId || ''} onChange={(e) => setComfy({ ...comfy, imagePromptNodeId: e.target.value })} /></div>
-              <div className="meta" style={{ marginBottom: 4 }}>워크플로는 <b>저장(API 포맷)</b>으로 내보내 지정(필수). <b>해상도는 비율(롱폼 16:9 / 쇼츠 9:16)에 맞춰 자동 주입</b>.</div>
-
-              <div className="subhead">📹 영상 (i2v · LTX)</div>
-              <div className="frow full"><label>워크플로</label><input placeholder="ComfyUI '저장(API 포맷)' JSON 경로 (LTX)" value={comfy.workflowPath} onChange={(e) => setComfy({ ...comfy, workflowPath: e.target.value })} /><button className="ghost" style={{ flex: '0 0 auto' }} onClick={pickWorkflow}>찾기</button></div>
-              <div className="frow"><label>이미지 노드</label><input placeholder="비우면 LoadImage 자동탐지" value={comfy.imageNodeId} onChange={(e) => setComfy({ ...comfy, imageNodeId: e.target.value })} /></div>
-              <div className="frow"><label>프롬프트 노드</label><input placeholder="비우면 CLIPTextEncode 자동탐지" value={comfy.promptNodeId} onChange={(e) => setComfy({ ...comfy, promptNodeId: e.target.value })} /></div>
-              <div className="frow full"><label>너비/높이 노드</label><input placeholder="너비 노드ID(비우면 자동)" value={comfy.videoWidthNodeId || ''} onChange={(e) => setComfy({ ...comfy, videoWidthNodeId: e.target.value })} /><input placeholder="높이 노드ID" value={comfy.videoHeightNodeId || ''} onChange={(e) => setComfy({ ...comfy, videoHeightNodeId: e.target.value })} /></div>
-              <div className="frow"><label>길이 노드</label><input placeholder="길이/프레임 노드ID(비우면 자동)" value={comfy.videoDurationNodeId || ''} onChange={(e) => setComfy({ ...comfy, videoDurationNodeId: e.target.value })} /></div>
-              <div className="frow"><label>최대 길이(초)</label><input className="n" type="number" style={{ width: 60 }} value={comfy.videoMaxSec || 0} onChange={(e) => setComfy({ ...comfy, videoMaxSec: e.target.value })} /><span className="meta">0=캡 없음</span></div>
-              <div className="frow"><label>영상 타임아웃(초)</label><input type="number" value={comfy.timeoutSec} onChange={(e) => setComfy({ ...comfy, timeoutSec: e.target.value })} /></div>
-              <div className="meta">⚠ 영상 출력은 <b>SaveVideo/VHS(mp4)</b> 노드 필요. 길이는 LTX Duration(초) 노드에 자동 기록.</div>
-
-              <div className="subhead">📹 영상 (i2v · Wan 2.x)</div>
-              <div className="meta" style={{ marginTop: -2, marginBottom: 4 }}>영상 엔진을 <b>Wan (i2v)</b> 로 고르면 이 워크플로를 씀. 노드는 <b>자동탐지</b>(위 LTX 노드 ID 는 Wan 에 적용 안 함 — LoadImage·model.prompt·model.duration 자동 인식). 로컬 Wan(프레임 단위 length)이면 아래 fps 로 초→프레임 변환.</div>
-              <div className="frow full"><label>Wan 워크플로</label><input placeholder="ComfyUI '저장(API 포맷)' JSON 경로 (Wan i2v)" value={comfy.wanWorkflowPath || ''} onChange={(e) => setComfy({ ...comfy, wanWorkflowPath: e.target.value })} /><button className="ghost" style={{ flex: '0 0 auto' }} onClick={pickWanWorkflow}>찾기</button></div>
-              <div className="frow"><label>fps</label><input className="n" type="number" style={{ width: 60 }} placeholder="16" value={comfy.wanFps ?? 16} onChange={(e) => setComfy({ ...comfy, wanFps: e.target.value })} /><span className="meta">프레임 = 초 × fps (Wan2.2/2.7 기본 16)</span></div>
-              <div className="frow"><label>최대 길이(초)</label><input className="n" type="number" style={{ width: 60 }} value={comfy.wanMaxSec || 0} onChange={(e) => setComfy({ ...comfy, wanMaxSec: e.target.value })} /><span className="meta">0=위 LTX 최대치 사용</span></div>
-              <div className="frow"><label>영상 타임아웃(초)</label><input type="number" placeholder="0=위 영상 타임아웃" value={comfy.wanTimeoutSec || 0} onChange={(e) => setComfy({ ...comfy, wanTimeoutSec: e.target.value })} /></div>
 
               <div className="subhead">🎵 음악 (ACE-Step · '플리' 모드)</div>
               <div className="frow full"><label>음악 서버</label><input placeholder="음악만 로컬로 돌리려면 여기에 (예: http://127.0.0.1:8188). 비우면 위 공통 서버 사용" value={comfy.audioBaseUrl || ''} onChange={(e) => setComfy({ ...comfy, audioBaseUrl: e.target.value })} /></div>
