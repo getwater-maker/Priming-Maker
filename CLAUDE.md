@@ -7,6 +7,26 @@
 **편별 Vrew 4.0.1 .vrew 파일**을 자동 생성하는 Electron 앱. PrimingFlow(D:\PrimingFlow)의 엔진을
 복사·재활용한 독립 클론.
 
+## 🍌 Nano Banana 2 Lite — Flow 이미지 모델 선택 추가 (2026-07-03, v0.1.68)
+- **배경**: 2026-06-30 Google 이 신모델 `gemini-3.1-flash-lite-image`(Nano Banana 2 Lite) 정식 출시
+  — Nano Banana 2 대비 절반 가격·약 2.7배 빠름(공식 발표). Genspark/Flow 양쪽 다 지원 가능성 있으나,
+  **Genspark 는 코드에 "Nano Banana 2"가 하드코딩**(검증만, 선택 로직 없음)돼 있어 변경 위험이 크고,
+  **Flow 는 이미 `_selectModel()` 로 모델을 텍스트 매칭 선택하는 인프라가 있어** 이쪽으로 추가.
+- **구현**: `core/image-rotation.js` DEFAULTS 에 `flowImageModel`(기본 'Nano Banana 2') 추가(load/save
+  이미 patch 를 그대로 병합하는 제네릭 구조라 IPC 변경 불필요) → `main.js runFlowImages()` 가
+  `Rot.load().flowImageModel` 을 읽어 `eng.run({..., model})` 로 전달(flow-engine.js 는 이미
+  `opts.model` 을 image/video 공통으로 처리 — **엔진 코드 변경 없음**). UI: 「⚙ 순환」 모달의 Flow 행에
+  select(Nano Banana 2 / Nano Banana 2 Lite) 추가.
+- **안전장치**: `_selectModel()` 이 드롭다운에 해당 텍스트가 없으면 **조용히 무시하고 기존 모델 유지**
+  (에러 없음) — Flow 웹 UI 에 아직 이 옵션이 안 떴어도 앱이 깨지지 않음.
+- ⏳ **실측 필요(중요)**: Google 공식 발표는 Flow 를 롤아웃 대상으로 명시했으나, **Flow 웹 UI 드롭다운에
+  "Nano Banana 2 Lite" 라는 정확한 라벨이 떠 있는지는 미확인**(genspark.ai/Flow 상세 UI가 자동 조사에서
+  차단됨). 사용자가 Flow 로 이미지 1장 만들 때 로그의 "모델 Nano Banana 2 Lite" 표시 후 실제로 다른
+  모델이 적용됐는지(속도·화질 차이) 1회 확인 필요. 라벨이 다르면(예: "Nano Banana 2 Flash Lite") select
+  의 value 문자열만 그에 맞게 고치면 됨.
+- Genspark 는 이번 범위 제외(하드코딩된 모델 검증 로직을 실제 선택 로직으로 바꿔야 해서 더 위험) —
+  Flow 경로가 실측으로 확인되면 다음으로 고려.
+
 ## 🎬 Grok 새 UI 대응·비디오 파이프라인·프리미어 XML + 📖 행간 관행 (2026-07-03, v0.1.67)
 - **Grok 새 UI(2026-07) 대응**: 제출 후 "이미지" 화면에 머물고 생성물은 **사이드바 진행률(N%)
   썸네일**로만 표시 → video 요소 못 찾아 5분 타임아웃 → 실패 → 재시도(크레딧 추가 차감)되던 문제.

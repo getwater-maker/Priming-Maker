@@ -575,7 +575,7 @@ export default function App() {
   // 이미지 순환 설정
   async function openImgRotation() {
     try {
-      const c = await api.getImageRotation(); setImgRot(c || { order: ['genspark', 'flow'], enabled: { genspark: true, flow: true } });
+      const c = await api.getImageRotation(); setImgRot(c || { order: ['genspark', 'flow'], enabled: { genspark: true, flow: true }, flowImageModel: 'Nano Banana 2' });
       try { setLora(await api.getLoraCollect()); } catch (_) {}
       setImgRotOpen(true);
     } catch (e) { logline('순환 설정 읽기 오류: ' + e.message); }
@@ -1333,6 +1333,14 @@ export default function App() {
                     <input type="checkbox" checked={imgRot.enabled ? imgRot.enabled[id] !== false : true} onChange={() => toggleRotEngine(id)} />
                     <b>{i + 1}. {ENGINE_META[id] ? ENGINE_META[id].name : id}</b>
                   </label>
+                  {id === 'flow' && (
+                    <select style={{ flex: '0 0 auto', width: 'auto' }} value={imgRot.flowImageModel || 'Nano Banana 2'}
+                      title="Flow 이미지 생성 모델 — Lite는 더 빠르고 저렴한 경량 모델(2026-06-30 출시). Flow 화면에 옵션이 없으면 자동으로 기본 모델 유지."
+                      onChange={(e) => saveImgRot({ ...imgRot, flowImageModel: e.target.value })}>
+                      <option value="Nano Banana 2">Nano Banana 2</option>
+                      <option value="Nano Banana 2 Lite">Nano Banana 2 Lite (빠름·저렴)</option>
+                    </select>
+                  )}
                   {id === 'flow' && <button className="ghost" style={{ flex: '0 0 auto' }} onClick={() => { setImgRotOpen(false); openFlowAcc(); }}>🔑 Flow 계정</button>}
                   {id === 'genspark' && <button className="ghost" style={{ flex: '0 0 auto' }} onClick={() => { setImgRotOpen(false); openGsAcc(); }}>🔑 Genspark 계정</button>}
                 </div>

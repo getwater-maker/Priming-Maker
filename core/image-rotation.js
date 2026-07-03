@@ -18,16 +18,25 @@ const CONFIG_PATH = path.join(STORE_DIR, 'image-rotation.json');
 const DEFAULTS = {
   order: ['genspark', 'flow'],           // 기본 순서: Genspark → Flow
   enabled: { genspark: true, flow: true },
+  // Flow 이미지 생성 모델 — flow-engine.js run()이 opts.model 로 그대로 받아 드롭다운 선택(_selectModel).
+  //   'Nano Banana 2 Lite'(2026-06-30 출시, gemini-3.1-flash-lite-image) 추가 — 더 빠르고 저렴한 경량 모델.
+  //   ⚠ Flow 웹 UI 드롭다운에 이 라벨이 실제로 존재하는지 실측 필요 — 없으면 _selectModel 이 조용히
+  //   무시하고 기존 기본 모델로 진행(안전, 에러 없음).
+  flowImageModel: 'Nano Banana 2',
 };
 
 function load() {
   try {
     if (fs.existsSync(CONFIG_PATH)) {
       const j = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
-      return { order: j.order || DEFAULTS.order, enabled: { ...DEFAULTS.enabled, ...(j.enabled || {}) } };
+      return {
+        order: j.order || DEFAULTS.order,
+        enabled: { ...DEFAULTS.enabled, ...(j.enabled || {}) },
+        flowImageModel: j.flowImageModel || DEFAULTS.flowImageModel,
+      };
     }
   } catch (e) { /* ignore */ }
-  return { order: [...DEFAULTS.order], enabled: { ...DEFAULTS.enabled } };
+  return { order: [...DEFAULTS.order], enabled: { ...DEFAULTS.enabled }, flowImageModel: DEFAULTS.flowImageModel };
 }
 
 function save(patch) {

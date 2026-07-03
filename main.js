@@ -733,6 +733,8 @@ async function closeFlowEng() {
 async function runFlowImages(project, imagesDir, logger, styleId, onlyNums) {
   fs.mkdirSync(imagesDir, { recursive: true });
   const FlowAccounts = require('./core/flow-accounts');
+  // 이미지 모델(기본 Nano Banana 2 / 선택 시 Nano Banana 2 Lite 등) — ⚙ 순환 설정에 저장.
+  const flowImageModel = require('./core/image-rotation').load().flowImageModel;
   const stylePrompt = styleId ? (require('./core/style-store').getPrompt(styleId) || '') : '';
   const cap = FlowAccounts.load().dailyCap;
   const acctTotal = FlowAccounts.list().accounts.length;
@@ -750,7 +752,7 @@ async function runFlowImages(project, imagesDir, logger, styleId, onlyNums) {
     if (!acc) { logger('⚠ 모든 Flow 계정 시도/소진 — 남은 이미지는 순환의 다음 엔진으로'); break; }
     tried.add(acc.id);
     if (++loopGuard > acctTotal + 2) { logger('⚠ Flow 계정 순환 안전장치 작동 — 중단'); break; }
-    logger(`🔑 Flow 계정: ${acc.label} (오늘 ${acc.used}/${cap}) · 대상 ${targets.length}장`);
+    logger(`🔑 Flow 계정: ${acc.label} (오늘 ${acc.used}/${cap}) · 대상 ${targets.length}장 · 모델 ${flowImageModel}`);
 
     const workDir = path.join(os.tmpdir(), `sm_flow_${project.shortsNum}_${acc.id}_${Date.now().toString(36)}`);
     const imgDir = path.join(workDir, 'images');
@@ -779,7 +781,7 @@ async function runFlowImages(project, imagesDir, logger, styleId, onlyNums) {
     let res = null;
     try {
       res = await eng.run({
-        paragraphs, customPrompts, mediaType: 'image',
+        paragraphs, customPrompts, mediaType: 'image', model: flowImageModel,
         ratio: project.aspect || '9:16', outputDir: workDir, style: styleId || 'cinematic',
         withSubtitle: false, vrewOnly: false, skipVrew: true,
         antiDetect: { enabled: true, preset: '기본' }, profileId: acc.id,
