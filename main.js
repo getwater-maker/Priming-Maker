@@ -2611,6 +2611,8 @@ function bookLayoutOpts(args = {}) {
     // 판권·표지
     colophonFields: l.colophonFields, coverOverlay: l.coverOverlay, coverBarcode: l.coverBarcode,
     coverTextColor: l.coverTextColor,
+    // 특별 섹션(반복 코너) 키워드 + 출력 제외 섹션(구조 패널 체크 해제 — 원고 보존)
+    specialKeyword: l.specialKeyword, excluded: Array.isArray(l.excluded) ? l.excluded : [],
   };
 }
 
@@ -2665,6 +2667,24 @@ function openBookPaths(paths, preset) {
   } catch (e) { log('출판 원고 파싱 실패: ' + e.message); return null; }
 }
 
+// 원고 작성 가이드(.md) 저장 — 규약 설명이 주석으로 들어 있는 "살아있는 예시" 파일.
+ipcMain.handle('book-save-guide', async () => {
+  const src = path.join(__dirname, 'docs', '출판-원고-가이드.md');
+  if (!fs.existsSync(src)) { log('가이드 파일이 없습니다: ' + src); return null; }
+  const r = await dialog.showSaveDialog(win, {
+    title: '원고 작성 가이드 저장 — 이 파일을 복사해 내용을 바꾸면 바로 책이 됩니다',
+    defaultPath: '출판원고_가이드.md',
+    filters: [{ name: 'Markdown', extensions: ['md'] }],
+  });
+  if (r.canceled || !r.filePath) return null;
+  try {
+    fs.copyFileSync(src, r.filePath);
+    log('📄 원고 작성 가이드 저장: ' + r.filePath);
+    try { shell.showItemInFolder(r.filePath); } catch {}
+    return { path: r.filePath };
+  } catch (e) { log('가이드 저장 실패: ' + e.message); return null; }
+});
+
 // 실제 페이지 미리보기 — 조판 HTML 을 출력폴더에 쓰고 media:// URL 반환(렌더러 vivliostyle 이 로드).
 ipcMain.handle('book-preview', (_e, args = {}) => {
   if (!S.parsed || S.parsed.kind !== 'book') return null;
@@ -2673,12 +2693,24 @@ ipcMain.handle('book-preview', (_e, args = {}) => {
     const { bundledFontCss } = require('./core/book/pdf-builder');
     rememberBookLayout(args.layout);
     const mediaUrl = (abs) => 'media://' + encodeURIComponent(abs);
+    // 표지 안내 페이지(미리보기 전용) — 스프레드 치수 + 첨부 표지 이미지 정합 확인
+    const d0 = bookDTO(S.parsed);
+    const PP = require('./core/book/platform-presets');
+    const coverInfo = {
+      spread: d0.spread,
+      pages: d0.lastPages || 0,
+      flaps: d0.flaps,
+      paperLabel: (PP.getPaper(d0.paperId) || {}).label || d0.paperId,
+      coverImageUrl: (S.parsed.coverImagePath && fs.existsSync(S.parsed.coverImagePath)) ? mediaUrl(S.parsed.coverImagePath) : null,
+      coverName: S.parsed.coverImagePath ? path.basename(S.parsed.coverImagePath) : null,
+    };
     const { html } = buildBookHtml(S.parsed, {
       ...bookLayoutOpts(args),
       baseDir: S.scriptPath ? path.dirname(S.scriptPath) : undefined,
       imageUrl: mediaUrl,
       fontCss: bundledFontCss(mediaUrl),
       sourceMap: true,
+      coverInfo,
     });
     const dir = path.join(S.outRoot || bookOutRoot(S.scriptPath || 'book.md', S.preset), '_preview');
     fs.mkdirSync(dir, { recursive: true });
@@ -2736,7 +2768,8 @@ ipcMain.handle('book-build-pdf', async (_e, args = {}) => {
     let coverResult = null;
     const layoutOpts = bookLayoutOpts(args);
     const coverHasImg = S.parsed.coverImagePath && fs.existsSync(S.parsed.coverImagePath);
-    const coverHasText = (S.parsed.covers || []).some((s) => (s.blocks || []).length) || layoutOpts.coverOverlay;
+    const coverSecsAll = (S.parsed.covers || []).filter((s) => !(layoutOpts.excluded || []).includes(s.key));
+    const coverHasText = coverSecsAll.some((s) => (s.blocks || []).length) || layoutOpts.coverOverlay;
     if (coverHasImg || coverHasText) {
       let barcode = null;
       if (layoutOpts.coverBarcode !== false && meta.isbn) {
@@ -2746,7 +2779,7 @@ ipcMain.handle('book-build-pdf', async (_e, args = {}) => {
       coverResult = await PB.buildCoverPdf({
         imagePath: coverHasImg ? S.parsed.coverImagePath : null,
         spread, outPdf: coverPdf, workDir, log,
-        compose: { meta, covers: S.parsed.covers || [], overlay: !!layoutOpts.coverOverlay, textColor: layoutOpts.coverTextColor, barcode },
+        compose: { meta, covers: coverSecsAll, overlay: !!layoutOpts.coverOverlay, textColor: layoutOpts.coverTextColor, barcode },
       });
       if (!coverResult.success) log('✗ 표지 PDF 실패: ' + coverResult.error);
     } else {

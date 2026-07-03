@@ -37,15 +37,32 @@ function svgToPngDataUrl(svg, w, h) {
 // 조판 옵션 기본값 — 구 Book Publishing 앱에서 사용자가 쓰던 값 그대로
 const LAYOUT_DEFAULTS = {
   fontKey: 'kopub', fontSizePt: 10, lineHeight: 1.8, fontWeight: 300,
-  letterSpacingPt: -0.4, indentPt: 15, paragraphSpacingPt: 10,
+  letterSpacingPt: -0.4, indentPt: 15, paragraphSpacingPt: 0, // 관행 = 들여쓰기만, 문단 간격 0
   marginsMm: { top: 20, bottom: 15, inner: 20, outer: 17 },
   chapterStart: 'recto',
   headerEven: 'title', headerOdd: 'chapter', headerEvenAlign: 'left', headerOddAlign: 'right',
   headerLine: true, pageNum: 'outer',
   h2SizePt: 10.5, h2Gothic: true, h2Weight: 700, h2Align: 'left', h2Prefix: '❖',
-  h2MarginTopPt: 25, h2MarginBottomPt: 10,
+  h2MarginTopPt: 25, h2MarginBottomPt: 8,
   colophonFields: null, coverOverlay: false, coverBarcode: true, coverTextColor: '#111111',
+  specialKeyword: '', // 반복 코너(예: '역사 노트') — 일치하는 소제목 구간을 노트 박스로
+  excluded: [],       // 출력 제외 섹션 key 목록 (원고는 보존)
 };
+
+// 구조 패널 체크박스 한 줄 — 원고에 있으면 포함/제외 토글(비파괴), 없으면 체크 시 템플릿 삽입.
+function SectionChk({ r, presentKeys, layout, toggleSection, cover }) {
+  const present = presentKeys.has(r.key);
+  const checked = present && !(layout.excluded || []).includes(r.key);
+  return (
+    <label className="chk" style={present ? undefined : { opacity: 0.55 }}
+      title={present
+        ? (cover ? '체크 해제 = 표지 PDF 에서 제외 (원고 보존)' : '체크 해제 = 책에서 제외 (원고 보존 — 다시 체크하면 복원)')
+        : '체크 = 원고에 이 섹션 템플릿을 추가'}>
+      <input type="checkbox" checked={checked} onChange={(e) => toggleSection(r.key, e.target.checked, present)} /> {r.label}
+      {!present && <span className="meta"> (원고에 없음)</span>}
+    </label>
+  );
+}
 
 export default function BookView({ dto, setDto, setStatus, logline }) {
   const [layout, setLayout] = useState(LAYOUT_DEFAULTS);
@@ -134,9 +151,10 @@ html,body{margin:0;padding:0;background:#8a8177}
     });
     viewer.addListener('readystatechange', () => {
       if (viewer.readyState === 'complete') {
-        const total = (viewer.getPageSizes() || []).length;
+        // 첫 페이지 = 표지 안내(미리보기 전용, 내지 아님) → 내지 쪽수는 -1
+        const total = Math.max(0, (viewer.getPageSizes() || []).length - 1);
         setPageInfo((pi) => ({ ...pi, total }));
-        setPreviewBusy(false); setStatus(`조판 완료 — ${total}쪽`);
+        setPreviewBusy(false); setStatus(`조판 완료 — 내지 ${total}쪽`);
         // 쪽수가 실제로 바뀔 때만 dto 갱신(책등·규격 재계산). 같은 값이면 불필요한 재렌더 회피.
         if (total > 0 && total !== lastPagesRef.current) {
           lastPagesRef.current = total;
@@ -192,9 +210,20 @@ html,body{margin:0;padding:0;background:#8a8177}
     } catch (e) { logline('ePub 오류: ' + e.message); }
     setBuilding(false);
   }
-  async function toggleSection(key, on) {
-    const d = await api.bookToggleSection({ key, on });
-    if (d) setDto(d);
+  // 구조 패널 체크박스 — 원고에 있는 섹션은 "포함/제외"만 토글(원고 보존),
+  //   원고에 없는 섹션을 체크하면 템플릿을 원고에 삽입.
+  async function toggleSection(key, on, present) {
+    if (present) {
+      const ex = new Set(layout.excluded || []);
+      if (on) ex.delete(key); else ex.add(key);
+      L('excluded', [...ex]); // layout 변경 → contentSig 로 자동 재조판
+      setStatus(on ? '섹션 포함' : '섹션 제외 (원고에는 남아 있음 — 다시 체크하면 복원)');
+      return;
+    }
+    if (on) {
+      const d = await api.bookToggleSection({ key, on: true });
+      if (d) setDto(d);
+    }
   }
   async function setMeta(key, value) {
     if ((meta[key] || '') === value) return;
@@ -262,10 +291,11 @@ html,body{margin:0;padding:0;background:#8a8177}
     return (
       <div className="plempty">
         <h2>📖 출판 — MD 원고 → POD 출판용 PDF</h2>
-        <p>상단 <b>「📖 원고 열기」</b>로 원고(.md)를 불러오세요. 롱폼 대본과 같은 파일을 써도 됩니다.</p>
+        <p>상단 <b>「📖 원고 열기」</b>로 원고(.md)를 불러오세요 (여러 파일 선택 가능).</p>
+        <p>처음이라면 <b>「📄 작성 가이드」</b>로 샘플 원고를 저장하세요 — 규약 설명이 주석으로 들어 있는 살아있는 예시라, 복사해서 내용만 바꾸면 바로 책이 됩니다.</p>
         <p className="meta">
-          형식: <code># 책제목</code> + <code>&gt; 저자: …</code> 메타 + <code>## [헌사] [서문] [목차] [프롤로그] [에필로그] [판권]</code> 예약 섹션 +
-          일반 <code>## 1장. 제목</code> = 본문 장. 부크크·교보POD·작가와 규격의 내지/표지 PDF 를 만듭니다.
+          핵심 규칙: <code># 책제목</code>(맨 위 한 번) + <code>&gt; 저자: …</code> 책 정보 + <code>## [서문]</code> 같은 대괄호 = 부속물(헌사·목차·판권·뒷표지 글…) +
+          대괄호 없는 <code>## 1장. 제목</code> = 본문 장. 부크크·교보POD·작가와 규격의 내지/표지 PDF 와 ePub 을 만듭니다.
         </p>
       </div>
     );
@@ -285,11 +315,7 @@ html,body{margin:0;padding:0;background:#8a8177}
         <label className="chk"><input type="checkbox" checked={!/^(off|no|없음|아니오|false|0|x)$/i.test(String(meta.halfTitle || 'on'))}
           onChange={(e) => setMeta('halfTitle', e.target.checked ? '' : '없음')} /> 반표제지 <span className="meta">(자동)</span></label>
         <label className="chk"><input type="checkbox" checked disabled /> 속표지 <span className="meta">(자동)</span></label>
-        {(dto.reserved || []).filter((r) => r.zone === 'front').map((r) => (
-          <label key={r.key} className="chk">
-            <input type="checkbox" checked={presentKeys.has(r.key)} onChange={(e) => toggleSection(r.key, e.target.checked)} /> {r.label}
-          </label>
-        ))}
+        {(dto.reserved || []).filter((r) => r.zone === 'front').map((r) => <SectionChk key={r.key} r={r} presentKeys={presentKeys} layout={layout} toggleSection={toggleSection} />)}
         <div className="bkzone">본문 — 장 {chapters.length}개</div>
         <div className="bkchapters">
           {(dto.parts || []).map((p, pi) => (
@@ -303,17 +329,10 @@ html,body{margin:0;padding:0;background:#8a8177}
           {!chapters.length && <div className="meta">본문 장이 없습니다 — 원고에 <code>## 1장. 제목</code>을 추가하세요.</div>}
         </div>
         <div className="bkzone">뒷부속</div>
-        {(dto.reserved || []).filter((r) => r.zone === 'back').map((r) => (
-          <label key={r.key} className="chk">
-            <input type="checkbox" checked={presentKeys.has(r.key)} onChange={(e) => toggleSection(r.key, e.target.checked)} /> {r.label}
-          </label>
-        ))}
+        {(dto.reserved || []).filter((r) => r.zone === 'back').map((r) => <SectionChk key={r.key} r={r} presentKeys={presentKeys} layout={layout} toggleSection={toggleSection} />)}
         <div className="bkzone">표지 구성 (표지 PDF)</div>
-        {(dto.reserved || []).filter((r) => r.zone === 'cover').map((r) => (
-          <label key={r.key} className="chk" title="체크하면 원고에 섹션이 추가되고, 내용이 표지 PDF 의 해당 영역에 조판됩니다 (내지에는 안 들어감)">
-            <input type="checkbox" checked={presentKeys.has(r.key)} onChange={(e) => toggleSection(r.key, e.target.checked)} /> {r.label}
-          </label>
-        ))}
+        {(dto.reserved || []).filter((r) => r.zone === 'cover').map((r) => <SectionChk key={r.key} r={r} presentKeys={presentKeys} layout={layout} toggleSection={toggleSection} cover />)}
+        <div className="meta" style={{ marginTop: 8 }}>원고에 쓴 섹션은 자동으로 체크됩니다. 체크를 해제하면 <b>원고는 그대로 두고 책에서만 제외</b>합니다.</div>
         {dto.footnoteCount > 0 && <div className="meta" style={{ marginTop: 8 }}>각주 {dto.footnoteCount}개 — {meta.footnoteMode === '미주' ? '미주(책 끝 모음)' : '각주(페이지 하단)'}</div>}
       </div>
 
@@ -322,7 +341,7 @@ html,body{margin:0;padding:0;background:#8a8177}
         <div className="bkbar">
           <button className="ghost" onClick={() => nav(Navigation.FIRST)} title="첫 페이지">⏮</button>
           <button className="ghost" onClick={() => nav(Navigation.PREVIOUS)} title="이전 펼침면">◀</button>
-          <span className="bkpage">{pageInfo.cur || '–'} / {pageInfo.total || '–'}쪽</span>
+          <span className="bkpage" title="1번째 화면은 표지 안내(내지 아님)">{pageInfo.cur === 1 ? '표지' : (pageInfo.cur > 1 ? pageInfo.cur - 1 : '–')} / {pageInfo.total || '–'}쪽</span>
           <button className="ghost" onClick={() => nav(Navigation.NEXT)} title="다음 펼침면">▶</button>
           <button className="ghost" onClick={() => nav(Navigation.LAST)} title="마지막 페이지">⏭</button>
           <span className="grow" />
@@ -373,7 +392,7 @@ html,body{margin:0;padding:0;background:#8a8177}
               </select>
             </label>
             <label className="chk"><input type="checkbox" checked={dto.flaps} onChange={(e) => setMeta('flaps', e.target.checked ? '있음' : '없음')} /> 표지 날개 (100mm)</label>
-            <label>판권 위치
+            <label title="판권 내용은 원고의 [판권] 섹션에 쓴 문구가 그대로 조판됩니다 (내용 없이 마커만 있으면 책 정보 메타로 자동 생성)">판권 위치
               <select value={/앞/.test(String(meta.colophonPos || '')) ? '앞' : '뒤'} onChange={(e) => setMeta('colophonPos', e.target.value === '앞' ? '앞(속표지 뒷면)' : '')}>
                 <option value="뒤">맨 뒤 (한국 관행)</option><option value="앞">앞 (속표지 뒷면)</option>
               </select>
@@ -402,7 +421,7 @@ html,body{margin:0;padding:0;background:#8a8177}
             </div>
             <div className="bkrow">
               <label title="문단 첫 줄 들여쓰기">들여쓰기(pt) <input type="number" step="1" min="0" max="40" value={layout.indentPt} onChange={(e) => L('indentPt', Math.max(0, Number(e.target.value) || 0))} /></label>
-              <label title="문단과 문단 사이 간격">문단 간격(pt) <input type="number" step="1" min="0" max="40" value={layout.paragraphSpacingPt} onChange={(e) => L('paragraphSpacingPt', Math.max(0, Number(e.target.value) || 0))} /></label>
+              <label title="문단과 문단 사이 간격 — 한국 단행본 관행은 0 (들여쓰기로만 문단 구분)">문단 간격(pt) <input type="number" step="1" min="0" max="40" value={layout.paragraphSpacingPt} onChange={(e) => L('paragraphSpacingPt', Math.max(0, Number(e.target.value) || 0))} /></label>
             </div>
             <label>장 시작
               <select value={layout.chapterStart} onChange={(e) => L('chapterStart', e.target.value)}>
@@ -413,6 +432,11 @@ html,body{margin:0;padding:0;background:#8a8177}
               <select value={meta.footnoteMode === '미주' ? '미주' : '각주'} onChange={(e) => setMeta('footnoteMode', e.target.value === '미주' ? '미주' : '')}>
                 <option value="각주">각주 (페이지 하단)</option><option value="미주">미주 (책 끝 모음)</option>
               </select>
+            </label>
+            <label title="장마다 반복되는 코너의 소제목을 쉼표로 구분해 입력하면 그 구간을 옅은 배경 노트 박스로 본문과 다르게 조판합니다">
+              특별 섹션 (예: 역사 노트)
+              <input type="text" value={layout.specialKeyword || ''} placeholder="반복 코너 소제목 (쉼표로 여러 개)"
+                onChange={(e) => L('specialKeyword', e.target.value)} />
             </label>
           </div>
         </details>
@@ -494,35 +518,6 @@ html,body{margin:0;padding:0;background:#8a8177}
               <label>아래 여백(pt) <input type="number" step="1" min="0" max="40" value={layout.h2MarginBottomPt} onChange={(e) => L('h2MarginBottomPt', Math.max(0, Number(e.target.value) || 0))} /></label>
             </div>
             <label className="chk"><input type="checkbox" checked={layout.h2Gothic} onChange={(e) => L('h2Gothic', e.target.checked)} /> 고딕체 사용 (해제 시 본문 폰트)</label>
-          </div>
-        </details>
-        <details>
-          <summary>판권 구성</summary>
-          <div className="bkform">
-            <label>판권 위치
-              <select value={/앞/.test(String(meta.colophonPos || '')) ? '앞' : '뒤'} onChange={(e) => setMeta('colophonPos', e.target.value === '앞' ? '앞(속표지 뒷면)' : '')}>
-                <option value="뒤">맨 뒤 (한국 관행)</option><option value="앞">앞 (속표지 뒷면)</option>
-              </select>
-            </label>
-            {(() => {
-              const colSec = (dto.back || []).find((s) => s.key === 'colophon');
-              if (colSec && colSec.blocks > 0) return <div className="meta">✏ [판권] 섹션에 직접 쓴 문구가 있어 그대로 조판됩니다 — 아래 항목 선택은 자동 생성 모드에서만 적용.</div>;
-              return null;
-            })()}
-            <div className="meta">자동 생성 시 넣을 항목 (값이 입력된 항목만 표시됨):</div>
-            {(dto.colophonFieldDefs || []).map(([k, label]) => {
-              const checked = !Array.isArray(layout.colophonFields) || layout.colophonFields.includes(k);
-              return (
-                <label key={k} className="chk">
-                  <input type="checkbox" checked={checked} onChange={(e) => {
-                    const all = (dto.colophonFieldDefs || []).map(([kk]) => kk);
-                    const cur = Array.isArray(layout.colophonFields) ? layout.colophonFields : all;
-                    const next = e.target.checked ? [...new Set([...cur, k])] : cur.filter((x) => x !== k);
-                    L('colophonFields', next.length === all.length ? null : next);
-                  }} /> {label}
-                </label>
-              );
-            })}
           </div>
         </details>
         <details open>

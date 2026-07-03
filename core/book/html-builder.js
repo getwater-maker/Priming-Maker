@@ -81,15 +81,37 @@ function blocksHtml(blocks, book, ctx, srcAttr) {
   return (blocks || []).map((b) => blockHtml(b, book, ctx, srcAttr)).join('\n');
 }
 
-// ── 자동 생성 페이지 ──
-function halfTitleHtml(meta) {
-  return `<section class="halftitle"><div class="ht-title">${esc(meta.title || '')}</div></section>`;
+// 장 본문 렌더 — 특별 섹션 키워드(예: '역사 노트')와 일치하는 소제목 구간을
+// 노트 박스(<div class="special-sec">)로 감싸 본문과 다르게 조판. 구간 = 그 소제목부터 다음 소제목(또는 장 끝).
+function chapterBlocksHtml(blocks, book, ctx, srcAttr, specials) {
+  if (!specials || !specials.length) return blocksHtml(blocks, book, ctx, srcAttr);
+  const out = [];
+  let buf = [];
+  let sbuf = null;
+  const flushBuf = () => { if (buf.length) { out.push(blocksHtml(buf, book, ctx, srcAttr)); buf = []; } };
+  const flushSpecial = () => { if (sbuf) { out.push(`<div class="special-sec">\n${blocksHtml(sbuf, book, ctx, srcAttr)}\n</div>`); sbuf = null; } };
+  for (const b of blocks || []) {
+    if (b.type === 'h3' || b.type === 'h4') {
+      const hit = specials.some((k) => (b.text || '').trim().includes(k));
+      if (hit) { flushBuf(); flushSpecial(); sbuf = [b]; continue; }
+      flushSpecial(); buf.push(b); continue;
+    }
+    if (sbuf) sbuf.push(b); else buf.push(b);
+  }
+  flushBuf(); flushSpecial();
+  return out.join('\n');
 }
-function titlePageHtml(meta, ctx) {
+
+// ── 자동 생성 페이지 ──
+function halfTitleHtml(meta, fallbackTitle) {
+  // 제목 폴백 — 메타에 책제목이 없으면 파일 제목으로(반표제지가 빈 페이지로 나오던 문제)
+  return `<section class="halftitle"><div class="ht-title">${esc(meta.title || fallbackTitle || '')}</div></section>`;
+}
+function titlePageHtml(meta, ctx, fallbackTitle) {
   const logo = meta.logo ? `<img class="tp-logo" src="${esc(ctx.resolveImage(meta.logo))}" alt="logo" />` : '';
   return `<section class="titlepage">
   <div class="tp-main">
-    <h1 class="tp-title">${esc(meta.title || '')}</h1>
+    <h1 class="tp-title">${esc(meta.title || fallbackTitle || '')}</h1>
     ${meta.subtitle ? `<div class="tp-subtitle">${esc(meta.subtitle)}</div>` : ''}
     <div class="tp-author">${esc(meta.author || '')}${meta.author ? ' 지음' : ''}</div>
     ${meta.translator ? `<div class="tp-translator">${esc(meta.translator)} 옮김</div>` : ''}
@@ -157,10 +179,11 @@ ${blocksHtml(section.blocks, book, ctx, srcAttr)}
   </div>
 </section>`;
 }
-function tocHtml(book, tocTitle) {
+function tocHtml(book, tocTitle, excluded = []) {
   const items = [];
   for (const s of book.front) {
     if (s.key === 'toc' || s.key === 'dedication' || s.key === 'epigraph') continue;
+    if (excluded.includes(s.key)) continue;
     items.push(`<li class="toc-front"><a href="#sec-${s.key}">${esc(s.title)}</a></li>`);
   }
   for (const p of book.parts) {
@@ -169,10 +192,57 @@ function tocHtml(book, tocTitle) {
   }
   for (const s of book.back) {
     if (s.key === 'colophon') continue;
+    if (excluded.includes(s.key)) continue;
     items.push(`<li class="toc-back"><a href="#sec-${s.key}">${esc(s.title)}</a></li>`);
   }
   return `<nav class="toc"><h2>${esc(tocTitle || '차례')}</h2><ol>${items.join('\n')}</ol></nav>`;
 }
+// 표지 안내 페이지 — 미리보기 전용 1쪽(내지 PDF 에는 넣지 않음).
+//   스프레드 치수 전부 + 축소 다이어그램(재단선·안전선·책등·날개 구획). 표지 이미지가 첨부돼 있으면
+//   다이어그램 배경에 깔아 "치수가 맞게 만들어졌는지"를 눈으로 확인.
+function coverInfoHtml(ci, meta, o) {
+  const sp = ci.spread;
+  if (!sp) return '';
+  // 판면 폭에 맞춰 스케일(mm 기준) — 다이어그램이 페이지를 넘지 않게
+  const bodyWmm = o.trimW - o.marginsMm.inner - o.marginsMm.outer;
+  const scale = Math.min(1, bodyWmm / sp.widthMm);
+  const W = sp.widthMm * scale, H = sp.heightMm * scale;
+  const bleed = 3 * scale, safe = (3 + (sp.safeMm || 5)) * scale;
+  // 구획 상자들
+  let x = 0;
+  const partDivs = sp.parts.map((p) => {
+    const left = x * scale; x += p.mm;
+    if (p.name === 'bleed') return '';
+    return `<div style="position:absolute; left:${left.toFixed(2)}mm; top:0; width:${(p.mm * scale).toFixed(2)}mm; height:${H.toFixed(2)}mm; border-left:0.3pt dashed #2a6fb0; box-sizing:border-box;">
+      <div style="position:absolute; left:0; right:0; top:42%; text-align:center; font-size:6.5pt; color:#2a6fb0; background:rgba(255,255,255,.55);">${esc(p.name)}<br/>${p.mm}mm</div>
+    </div>`;
+  }).join('');
+  const bg = ci.coverImageUrl
+    ? `<img src="${esc(ci.coverImageUrl)}" style="position:absolute; left:0; top:0; width:${W.toFixed(2)}mm; height:${H.toFixed(2)}mm; object-fit:fill;" />`
+    : '';
+  const row = (k, v) => `<tr><td style="padding:1pt 8pt 1pt 0; color:#555; white-space:nowrap;">${esc(k)}</td><td>${esc(v)}</td></tr>`;
+  return `<section class="cover-info">
+  <h2 style="font-size:12pt; margin:0 0 6pt;">📐 표지 스프레드 안내</h2>
+  <p class="noindent" style="font-size:8pt; color:#777; margin:0 0 8pt;">이 페이지는 미리보기 전용입니다 — 내지 PDF 에는 포함되지 않습니다. 표지 이미지를 첨부하면 아래 다이어그램에 겹쳐 표시되어 치수 정합을 확인할 수 있습니다.</p>
+  <table style="font-size:8.5pt; border-collapse:collapse; margin-bottom:8pt;">
+    ${row('판형(내지)', `${o.trimW} × ${o.trimH} mm`)}
+    ${row('스프레드 전체', `${sp.widthMm} × ${sp.heightMm} mm  =  ${sp.widthPx} × ${sp.heightPx} px @${sp.dpi}dpi`)}
+    ${row('책등', `${sp.spineMm} mm (총 ${ci.pages || '?'}쪽 · ${esc(ci.paperLabel || '')} 기준)`)}
+    ${row('날개', ci.flaps ? '있음 — 앞뒤 각 100 mm' : '없음')}
+    ${row('재단여백', '사방 3 mm — 배경을 끝까지 채우세요 (재단 시 잘림)')}
+    ${row('안전여백', `재단선 안쪽 ${sp.safeMm || 5} mm — 글자·로고는 이 안에`)}
+    ${ci.coverImageUrl ? row('첨부 표지', ci.coverName || '') : row('첨부 표지', '없음 — 우측 패널에서 이미지를 첨부하세요')}
+  </table>
+  <div style="position:relative; width:${W.toFixed(2)}mm; height:${H.toFixed(2)}mm; background:#eee; outline:0.5pt solid #999; overflow:hidden;">
+    ${bg}
+    ${partDivs}
+    <div style="position:absolute; left:${bleed.toFixed(2)}mm; top:${bleed.toFixed(2)}mm; right:${bleed.toFixed(2)}mm; bottom:${bleed.toFixed(2)}mm; border:0.5pt solid #d32f2f;"></div>
+    <div style="position:absolute; left:${safe.toFixed(2)}mm; top:${safe.toFixed(2)}mm; right:${safe.toFixed(2)}mm; bottom:${safe.toFixed(2)}mm; border:0.4pt dotted #2e7d32;"></div>
+  </div>
+  <p class="noindent" style="font-size:7.5pt; color:#777; margin-top:5pt;">🔴 빨간 실선=재단선 · 🟢 초록 점선=안전선 · 파란 점선=책등/날개 구획 (축척 ${(scale * 100).toFixed(0)}%)</p>
+</section>`;
+}
+
 function endnotesHtml(ctx) {
   if (!ctx.endnotes.length) return '';
   const lis = ctx.endnotes.map((e, i) =>
@@ -270,6 +340,16 @@ section.chapter h3 {
   letter-spacing: 0;
 }
 ${o.h2Prefix ? `section.chapter h3::before { content: "${o.h2Prefix.replace(/"/g, '\\"')} "; }` : ''}
+/* 특별 섹션(반복 코너 — 예: 역사 노트) — 옅은 배경 노트 박스, 본문보다 한 단계 작게 */
+div.special-sec {
+  background: #f4f1ea;
+  padding: 10pt 12pt;
+  margin: 16pt 0 10pt;
+  font-size: 0.93em;
+  line-height: ${Math.max(1.5, o.lineHeight - 0.15)};
+}
+div.special-sec h3 { margin: 0 0 8pt !important; }
+div.special-sec p { text-indent: 0; margin-bottom: 5pt; }
 /* 목차 쪽번호 — 우측 고정(absolute). leader()는 미리보기(코어)와 CLI 지원이 달라
    양쪽 동일하게 나오는 방식으로 통일. */
 nav.toc li { position: relative; padding-right: 2.2em; }
@@ -301,7 +381,8 @@ function buildBookHtml(book, opts = {}) {
     fontWeight: num(opts.fontWeight, 300),
     letterSpacingPt: numAllowNeg(opts.letterSpacingPt, -0.4),
     indentPt: numAllowZero(opts.indentPt, 15),
-    paragraphSpacingPt: numAllowZero(opts.paragraphSpacingPt, 10),
+    // 문단 간격 — 한국 단행본 관행 = 들여쓰기만 하고 문단 간격 0 (간격은 장면 전환 등 의도적 구분에만).
+    paragraphSpacingPt: numAllowZero(opts.paragraphSpacingPt, 0),
     // ── 여백(mm) — 구 앱: 위20 / 아래15 / 안쪽20 / 바깥17 ──
     marginsMm: Object.assign({ top: 20, bottom: 15, inner: 20, outer: 17 }, opts.marginsMm || {}),
     chapterStart: opts.chapterStart === 'page' ? 'page' : 'recto',
@@ -320,10 +401,15 @@ function buildBookHtml(book, opts = {}) {
     h2Weight: num(opts.h2Weight, 700),
     h2Align: pick(opts.h2Align, ['left', 'center', 'right'], 'left'),
     h2Prefix: opts.h2Prefix != null ? String(opts.h2Prefix) : '❖',
+    // 소제목 여백 관행 — 위(넉넉히) : 아래(본문과 가깝게) ≈ 3:1. 아래를 크게 주지 않는다.
     h2MarginTopPt: numAllowZero(opts.h2MarginTopPt, 25),
-    h2MarginBottomPt: numAllowZero(opts.h2MarginBottomPt, 10),
+    h2MarginBottomPt: numAllowZero(opts.h2MarginBottomPt, 8),
     // ── 판권 자동 항목 선택 (null = 전부) ──
     colophonFields: Array.isArray(opts.colophonFields) ? opts.colophonFields : null,
+    // ── 특별 섹션 키워드(쉼표 구분) — 일치하는 소제목 구간을 노트 박스로 (예: '역사 노트') ──
+    specialKeywords: String(opts.specialKeyword || '').split(',').map((s) => s.trim()).filter(Boolean),
+    // ── 출력 제외 섹션(구조 패널 체크 해제 — 원고는 보존) ──
+    excluded: Array.isArray(opts.excluded) ? opts.excluded : [],
     sourceMap: opts.sourceMap !== false,
   };
   o.fontStack = FONT_STACKS[o.fontKey];
@@ -346,14 +432,19 @@ function buildBookHtml(book, opts = {}) {
   bodyParts.push(`<span class="book-title-anchor">${esc(meta.title || book.fileTitle || '')}</span>`);
   bodyParts.push(`<span class="book-subtitle-anchor">${esc(meta.subtitle || meta.title || book.fileTitle || '')}</span>`);
 
+  // 표지 안내 페이지 — 미리보기 전용(opts.coverInfo 전달 시에만). 내지 PDF 빌드에서는 전달 안 함.
+  if (opts.coverInfo) bodyParts.push(coverInfoHtml(opts.coverInfo, meta, o));
+
   // 앞부속 — 반표제지(기본 on) → 속표지 → (앞판권) → 예약섹션들(목차는 자동 생성)
-  if (truthyDefault(meta.halfTitle, true)) bodyParts.push(halfTitleHtml(meta));
-  bodyParts.push(titlePageHtml(meta, ctx));
+  if (truthyDefault(meta.halfTitle, true)) bodyParts.push(halfTitleHtml(meta, book.fileTitle));
+  bodyParts.push(titlePageHtml(meta, ctx, book.fileTitle));
   const colFront = /앞/.test(String(meta.colophonPos || ''));
   const colSection = book.back.find((s) => s.key === 'colophon');
-  if (colFront && colSection) bodyParts.push(colophonHtml(meta, ctx, true, colSection, book, srcAttr, o.colophonFields));
+  const colIncluded = colSection && !o.excluded.includes('colophon');
+  if (colFront && colIncluded) bodyParts.push(colophonHtml(meta, ctx, true, colSection, book, srcAttr, o.colophonFields));
   for (const s of book.front) {
-    if (s.key === 'toc') { bodyParts.push(tocHtml(book, s.title)); continue; }
+    if (o.excluded.includes(s.key)) continue; // 구조 패널에서 체크 해제(원고는 보존)
+    if (s.key === 'toc') { bodyParts.push(tocHtml(book, s.title, o.excluded)); continue; }
     bodyParts.push(`<section class="front-section sec-${s.key}" id="sec-${s.key}">
 <h2${o.sourceMap ? ` data-src-line="${s.lineStart}" data-src-end="${s.lineStart}"` : ''}>${esc(s.title)}</h2>
 ${blocksHtml(s.blocks, book, ctx, srcAttr)}
@@ -369,7 +460,7 @@ ${blocksHtml(s.blocks, book, ctx, srcAttr)}
     for (const c of p.chapters) {
       bodyParts.push(`<section class="chapter" id="ch-${c.num}">
 ${c.title ? `<h2 class="chapter-title"${o.sourceMap ? ` data-src-line="${c.lineStart}" data-src-end="${c.lineStart}"` : ''}>${esc(c.title)}</h2>` : ''}
-${blocksHtml(c.blocks, book, ctx, srcAttr)}
+${chapterBlocksHtml(c.blocks, book, ctx, srcAttr, o.specialKeywords)}
 </section>`);
     }
   }
@@ -377,6 +468,7 @@ ${blocksHtml(c.blocks, book, ctx, srcAttr)}
   // 뒷부속 — 예약섹션들 → (미주) → 판권(뒤 기본)
   for (const s of book.back) {
     if (s.key === 'colophon') continue;
+    if (o.excluded.includes(s.key)) continue; // 구조 패널에서 체크 해제(원고는 보존)
     bodyParts.push(`<section class="back-section sec-${s.key}" id="sec-${s.key}">
 <h2${o.sourceMap ? ` data-src-line="${s.lineStart}" data-src-end="${s.lineStart}"` : ''}>${esc(s.title)}</h2>
 ${blocksHtml(s.blocks, book, ctx, srcAttr)}
@@ -387,7 +479,7 @@ ${blocksHtml(s.blocks, book, ctx, srcAttr)}
     }
   }
   if (o.footnoteMode === 'endnote' && ctx.endnotes.length && !ctx._endnotesDone) bodyParts.push(endnotesHtml(ctx));
-  if (colSection && !colFront) bodyParts.push(colophonHtml(meta, ctx, false, colSection, book, srcAttr, o.colophonFields));
+  if (colIncluded && !colFront) bodyParts.push(colophonHtml(meta, ctx, false, colSection, book, srcAttr, o.colophonFields));
 
   // ⚠ CSS 변수(:root + var()) 를 쓰지 않고 값을 직접 치환 — vivliostyle core(브라우저 미리보기)가
   //   var() 를 CLI 와 다르게 해석해 본문 크기가 16px 로 폴백 → 쪽수가 ~2.5배로 뻥튀기되던 문제.

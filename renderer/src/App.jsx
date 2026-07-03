@@ -978,8 +978,8 @@ export default function App() {
             {!isPl && !isBk && <button onClick={openScript}>📂 대본 열기</button>}
             {isPl && <button onClick={openPlaylist}>🎵 플리 스펙 열기</button>}
             {isBk && <button onClick={openBook}>📖 원고 열기</button>}
+            {isBk && <button className="ghost" title="원고를 어떻게 작성하는지 규약 설명이 담긴 샘플 .md 저장 — 복사해서 내용만 바꾸면 바로 책이 됩니다" onClick={async () => { try { const r = await api.bookSaveGuide(); if (r) setStatus('가이드 저장: ' + r.path); } catch (e) { logline(e.message); } }}>📄 작성 가이드</button>}
             {!isPl && <button className="ghost" disabled={!loaded} title="대본 내용 수정 → 재파싱(원본 .md 갱신)" onClick={openScriptEdit}>✏ 대본수정</button>}
-            {isLf && <button className="ghost" disabled={!loaded} title="이 대본을 출판(POD) 원고로 열기 — 같은 .md 를 공유하며, 출판에서 수정하면 롱폼에도 반영됩니다" onClick={openBookFromLongform}>📖 출판편집</button>}
             {!isPl && !isBk && <button className="ghost" disabled={!loaded} title="수동 저장(자동저장도 항상 켜져 있음)" onClick={saveProject}>💾 작업저장</button>}
             {!isPl && !isBk && <button className="ghost" title="저장한 프로젝트 불러오기" onClick={loadProject}>📂 불러오기</button>}
             <button className="ghost" title="새 작업 — 현재 화면 비우기" onClick={resetProject}>🆕 초기화</button>
@@ -1489,18 +1489,6 @@ export default function App() {
       setStatus('출판 원고 로드');
     } catch (e) { logline('원고 열기 오류: ' + e.message); }
   }
-  // 롱폼 → 출판편집 — 현재 롱폼 대본(.md)을 그대로 출판 모드로 연다(파일 공유).
-  async function openBookFromLongform() {
-    try {
-      const r = await api.openBookPath({});
-      if (!r) { logline('출판 전환 실패 — 대본 파일을 확인하세요'); return; }
-      setMode('book'); setAspect('16:9');
-      setDto(r.dto); if (r.queue) setQueue(r.queue);
-      setFtitle(r.dto ? (r.dto.fileTitle || '') : '');
-      setStatus('출판 편집 — 롱폼과 같은 원고(.md)를 공유합니다');
-    } catch (e) { logline('출판 전환 오류: ' + e.message); }
-  }
-
   // 플리 스펙(.md) 열기 — 클로드가 채팅에서 만든 곡 목록 파일.
   async function openPlaylist() {
     try {

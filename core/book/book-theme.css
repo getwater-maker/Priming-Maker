@@ -20,6 +20,10 @@ p.noindent { text-indent: 0; }
 em { font-style: italic; }
 strong { font-weight: 700; }
 
+/* ── 표지 안내 페이지(미리보기 전용 — 내지 PDF 미포함) ── */
+section.cover-info { page: display; text-align: left; font-family: sans-serif; }
+section.cover-info p, section.cover-info td { text-indent: 0; }
+
 /* ── 표제지류(디스플레이 페이지) ── */
 section.halftitle, section.titlepage {
   page: display;
