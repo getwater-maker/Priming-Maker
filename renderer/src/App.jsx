@@ -40,6 +40,33 @@ function phaseBadge(p, isLf) {
 const QSTATUS = { idle: '대기', running: '진행중', done: '완료', failed: '실패' };
 const ENGINE_META = { genspark: { name: 'Genspark (Nano Banana 2)' }, flow: { name: 'Google Flow' }, comfy: { name: 'ComfyUI (Krea2 Turbo)' } };
 
+// 스타일 편집 모달의 한 행 — 기본 스타일은 읽기전용(복사만), 사용자 스타일은 이름·프롬프트 수정/삭제.
+function StyleRow({ s, index, total, onCopy, onSave, onDelete, onMove }) {
+  const [name, setName] = useState(s.name);
+  const [prompt, setPrompt] = useState(s.prompt);
+  useEffect(() => { setName(s.name); setPrompt(s.prompt); }, [s.id]);
+  const dirty = name !== s.name || prompt !== s.prompt;
+  return (
+    <div style={{ border: '1px solid var(--border,#ddd)', borderRadius: 8, padding: 8, marginBottom: 8 }}>
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 4 }}>
+        <span style={{ display: 'flex', flexDirection: 'column' }}>
+          <button className="ghost" title="위로" style={{ padding: '0 5px', lineHeight: 1.1 }} disabled={index === 0} onClick={() => onMove(s.id, 'up')}>▲</button>
+          <button className="ghost" title="아래로" style={{ padding: '0 5px', lineHeight: 1.1 }} disabled={index === total - 1} onClick={() => onMove(s.id, 'down')}>▼</button>
+        </span>
+        {s.isBuiltIn
+          ? <b style={{ flex: 1 }}>{s.name} <span className="meta" style={{ fontWeight: 400 }}>(기본 · 읽기전용)</span></b>
+          : <input style={{ flex: 1 }} value={name} onChange={(e) => setName(e.target.value)} placeholder="스타일 이름" />}
+        <button className="ghost" title="이 스타일의 프롬프트 복사" onClick={() => onCopy(prompt)}>📋 복사</button>
+        {!s.isBuiltIn && <button title="저장" disabled={!dirty} onClick={() => onSave(s.id, name, prompt)}>저장</button>}
+        {!s.isBuiltIn && <button className="ghost" title="삭제" onClick={() => onDelete(s.id, s.name)}>🗑</button>}
+      </div>
+      {s.isBuiltIn
+        ? <textarea readOnly value={prompt} rows={2} style={{ width: '100%', resize: 'vertical', opacity: 0.85 }} />
+        : <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={2} style={{ width: '100%', resize: 'vertical' }} placeholder="영문 스타일 프롬프트" />}
+    </div>
+  );
+}
+
 export default function App() {
   const [mode, setMode] = useState('longform'); // 'longform'(주 사용) | 'shorts' | 'playlist'(플리) | 'book'(출판)
   const isLf = mode === 'longform';
@@ -102,6 +129,8 @@ export default function App() {
   const [scriptText, setScriptText] = useState('');
   const [comfyOpen, setComfyOpen] = useState(false);
   const [comfy, setComfy] = useState(null);
+  const [styleEditOpen, setStyleEditOpen] = useState(false); // 이미지 스타일 편집 모달
+  const [newStyle, setNewStyle] = useState({ name: '', prompt: '' }); // 새 스타일 입력 버퍼
   const [comfyImgWf, setComfyImgWf] = useState(''); // ComfyUI 이미지 커스텀 워크플로 경로(있으면 라벨=커스텀)
   const [ollamaOpen, setOllamaOpen] = useState(false);
   const [ollama, setOllama] = useState(null);           // { baseUrl, model }
@@ -539,6 +568,31 @@ export default function App() {
     try { await api.setQueueSettings(currentSettings()); } catch (_) {} // 불러온 항목 설정 캡처
     setStatus(`${r.dto.projects.length}편 불러옴`);
   }
+  // ── 이미지 스타일 편집 ─────────────────────────────
+  async function refreshStyles() { try { const ss = await api.listStyles(); setStyles(ss || []); return ss || []; } catch { return []; } }
+  async function copyStylePrompt(p) {
+    try { await navigator.clipboard.writeText(p || ''); }
+    catch (_) { try { const ta = document.createElement('textarea'); ta.value = p || ''; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); } catch (__) {} }
+    setStatus('스타일 프롬프트 복사됨');
+  }
+  async function addStyle() {
+    const name = (newStyle.name || '').trim(), prompt = (newStyle.prompt || '').trim();
+    if (!name || !prompt) { setStatus('스타일 이름과 프롬프트를 모두 입력하세요'); return; }
+    const r = await api.addStyle({ name, prompt });
+    if (r) { setNewStyle({ name: '', prompt: '' }); await refreshStyles(); setStatus(`스타일 「${name}」 추가됨`); }
+    else setStatus('스타일 추가 실패');
+  }
+  async function saveStyle(id, name, prompt) {
+    const r = await api.updateStyle({ id, name: (name || '').trim(), prompt: (prompt || '').trim() });
+    if (r) { await refreshStyles(); setStatus('스타일 저장됨'); } else setStatus('스타일 저장 실패');
+  }
+  async function deleteStyle(id, name) {
+    if (!window.confirm(`스타일 「${name}」 삭제할까요?`)) return;
+    const ok = await api.removeStyle(id);
+    if (ok) { if (styleId === id) setStyleId(''); await refreshStyles(); setStatus('스타일 삭제됨'); }
+    else setStatus('스타일 삭제 실패');
+  }
+  async function moveStyle(id, direction) { const ok = await api.moveStyle({ id, direction }); if (ok) await refreshStyles(); }
   async function openComfy() {
     try { const c = await api.getComfyConfig(); setComfy(c || {}); setComfyOpen(true); }
     catch (e) { logline('Comfy 설정 읽기 오류: ' + e.message); }
@@ -1004,6 +1058,7 @@ export default function App() {
               <option value="">스타일 없음</option>
               {styles.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
+            <button className="ghost" title="이미지 스타일 편집(추가·수정·삭제·프롬프트 복사)" style={{ padding: '6px 9px' }} onClick={() => setStyleEditOpen(true)}>✎ 스타일</button>
             <select title="이미지 생성툴" value={imgEngine === 'comfy' ? 'comfy' : 'rotate'} onChange={(e) => setImgEngine(e.target.value)}>
               <option value="rotate">순환 (Flow+Genspark)</option>
               <option value="comfy">{comfyImgWf ? 'Krea2_Turbo' : 'Krea2_Turbo (워크플로 미설정)'}</option>
@@ -1225,6 +1280,29 @@ export default function App() {
         </div>
       )}
 
+      {styleEditOpen && (
+        <div className="modal-bg show" onClick={(e) => { if (e.target.classList.contains('modal-bg')) setStyleEditOpen(false); }}>
+          <div className="modal-card wide" style={{ maxHeight: '82vh', display: 'flex', flexDirection: 'column' }}>
+            <h3>🎨 이미지 스타일 편집</h3>
+            <div className="meta" style={{ marginBottom: 8 }}>기본 스타일은 <b>읽기전용</b>(프롬프트 복사만 가능). 사용자 스타일은 이름·프롬프트 수정·삭제·순서변경 가능. 최종 이미지 프롬프트 = <b>선택한 스타일 + 대본 프롬프트</b>.</div>
+            <div style={{ overflowY: 'auto', flex: 1, paddingRight: 4 }}>
+              {styles.map((s, i) => (
+                <StyleRow key={s.id} s={s} index={i} total={styles.length}
+                  onCopy={copyStylePrompt} onSave={saveStyle} onDelete={deleteStyle} onMove={moveStyle} />
+              ))}
+            </div>
+            <div style={{ borderTop: '1px solid var(--border,#ddd)', paddingTop: 8, marginTop: 4 }}>
+              <div className="subhead">➕ 새 스타일 추가</div>
+              <div style={{ display: 'flex', gap: 6, marginBottom: 4 }}>
+                <input style={{ flex: '0 0 180px' }} placeholder="이름 (예: 나만의 수묵화)" value={newStyle.name} onChange={(e) => setNewStyle({ ...newStyle, name: e.target.value })} />
+                <input style={{ flex: 1 }} placeholder="영문 스타일 프롬프트" value={newStyle.prompt} onChange={(e) => setNewStyle({ ...newStyle, prompt: e.target.value })} />
+                <button onClick={addStyle}>추가</button>
+              </div>
+            </div>
+            <div className="mbtns"><button className="ghost" onClick={() => setStyleEditOpen(false)}>닫기</button></div>
+          </div>
+        </div>
+      )}
       {comfyOpen && comfy && (
         <div className="modal-bg show" onClick={(e) => { if (e.target.classList.contains('modal-bg')) setComfyOpen(false); }}>
           <div className="modal-card comfymodal">

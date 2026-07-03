@@ -293,8 +293,21 @@ ipcMain.handle('get-mode-profiles', () => {
   return MODE_PROFILES;
 });
 ipcMain.handle('list-styles', () => {
-  try { return require('./core/style-store').loadAll().map((s) => ({ id: s.id, name: s.name, prompt: s.prompt || '' })); }
+  try { return require('./core/style-store').loadAll().map((s) => ({ id: s.id, name: s.name, prompt: s.prompt || '', isBuiltIn: !!s.isBuiltIn })); }
   catch (e) { return []; }
+});
+// 이미지 스타일 편집(사용자 스타일만 추가/수정/삭제/순서 — 기본 스타일은 스토어가 보호)
+ipcMain.handle('add-style', (_e, style = {}) => {
+  try { return require('./core/style-store').add(style || {}); } catch (e) { return null; }
+});
+ipcMain.handle('update-style', (_e, args = {}) => {
+  try { return require('./core/style-store').update(args.id, { name: args.name, prompt: args.prompt }); } catch (e) { return null; }
+});
+ipcMain.handle('remove-style', (_e, id) => {
+  try { return require('./core/style-store').remove(id); } catch (e) { return false; }
+});
+ipcMain.handle('move-style', (_e, args = {}) => {
+  try { return require('./core/style-store').moveStyle(args.id, args.direction); } catch (e) { return false; }
 });
 // ComfyUI(i2v) 설정 get/set + 연결 테스트
 ipcMain.handle('get-comfy-config', () => require('./core/comfy-config').load());
