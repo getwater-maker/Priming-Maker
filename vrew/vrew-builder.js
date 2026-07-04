@@ -656,9 +656,11 @@ function validateOutput(pj, sentenceCount, imageGroupCount) {
   }
   const tts = pj.files.filter(f => f.sourceFileType === 'TTS').length;
   const img = pj.files.filter(f => f.type === 'Image').length;
+  const vid = pj.files.filter(f => f.sourceFileType === 'ASSET_VIDEO').length; // 영상으로 대체된 그룹
   if (tts !== sentenceCount) errs.push(`TTS file 수 ${tts} ≠ sentence 수 ${sentenceCount}`);
-  // Image 는 그룹 + (선택) 로고 → 부족하면 검은 배경으로 대체됨 (경고만)
-  if (img < imageGroupCount) warns.push(`Image file 수 ${img} < 이미지 그룹 수 ${imageGroupCount} (부족분은 검은 배경)`);
+  // 시각자료 = 이미지 + 영상. 영상이 있는 그룹은 이미지가 없어도 화면이 있으므로 함께 센다(거짓 경보 방지).
+  //   (로고는 이미지 트랙이라 img 에 포함될 수 있어 여유가 생김 — 부족할 때만 경고)
+  if (img + vid < imageGroupCount) warns.push(`시각자료(이미지 ${img}+영상 ${vid}) < 그룹 수 ${imageGroupCount} (부족분은 검은 배경)`);
 
   let imgMissingClips = 0;
   for (const c of pj.transcript.clips) {
