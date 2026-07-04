@@ -12,6 +12,8 @@ contextBridge.exposeInMainWorld('api', {
   updateStyle: (args) => ipcRenderer.invoke('update-style', args),
   removeStyle: (id) => ipcRenderer.invoke('remove-style', id),
   moveStyle: (args) => ipcRenderer.invoke('move-style', args),
+  dictList: () => ipcRenderer.invoke('dict-list'),
+  dictSave: (entries) => ipcRenderer.invoke('dict-save', entries),
   listRefAudio: () => ipcRenderer.invoke('list-ref-audio'),
   openRefFolder: (p) => ipcRenderer.invoke('open-ref-folder', p),
   getComfyConfig: () => ipcRenderer.invoke('get-comfy-config'),

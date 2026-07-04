@@ -131,6 +131,8 @@ export default function App() {
   const [comfy, setComfy] = useState(null);
   const [styleEditOpen, setStyleEditOpen] = useState(false); // 이미지 스타일 편집 모달
   const [newStyle, setNewStyle] = useState({ name: '', prompt: '' }); // 새 스타일 입력 버퍼
+  const [dictOpen, setDictOpen] = useState(false);   // 발음사전 모달
+  const [dictRows, setDictRows] = useState([]);       // [{source, pron, enabled}]
   const [ollamaOpen, setOllamaOpen] = useState(false);
   const [ollama, setOllama] = useState(null);           // { baseUrl, model }
   const [ollamaModels, setOllamaModels] = useState([]); // 서버에 설치된 모델 목록
@@ -593,6 +595,16 @@ export default function App() {
     else setStatus('스타일 삭제 실패');
   }
   async function moveStyle(id, direction) { const ok = await api.moveStyle({ id, direction }); if (ok) await refreshStyles(); }
+  // ── 발음사전(TTS 교정) ─────────────────────────────
+  async function openDict() { try { const d = await api.dictList(); setDictRows(Array.isArray(d) ? d : []); setDictOpen(true); } catch (e) { logline('발음사전 읽기 오류: ' + e.message); } }
+  async function saveDict() {
+    const clean = dictRows.map((r) => ({ source: (r.source || '').trim(), pron: (r.pron || '').trim(), enabled: r.enabled !== false })).filter((r) => r.source && r.pron);
+    const r = await api.dictSave(clean);
+    if (r) { setDictRows(r); setDictOpen(false); setStatus('발음사전 저장됨 — 다음 TTS 변환부터 적용'); } else setStatus('발음사전 저장 실패');
+  }
+  function addDictRow() { setDictRows((rs) => [...rs, { source: '', pron: '', enabled: true }]); }
+  function setDictRow(i, patch) { setDictRows((rs) => rs.map((r, j) => (j === i ? { ...r, ...patch } : r))); }
+  function delDictRow(i) { setDictRows((rs) => rs.filter((_, j) => j !== i)); }
   async function openComfy() {
     try { const c = await api.getComfyConfig(); setComfy(c || {}); setComfyOpen(true); }
     catch (e) { logline('Comfy 설정 읽기 오류: ' + e.message); }
@@ -1050,6 +1062,7 @@ export default function App() {
             <span title="음성 배속 (합성 1.0 → atempo 변환)">🎤 배속 <input type="number" value={ttsSpeed} step="0.05" min="0.5" max="2" style={{ width: 52 }} onChange={(e) => setTtsSpeed(e.target.value)} /></span>
             <button className="ghost" disabled={!loaded} onClick={() => runTts(null)}>🎤 TTS</button>
             <button className="ghost" disabled={!loaded} title="기존 음성·캐시를 무시하고 현재 대본 전체 음성을 새로 합성" onClick={() => runTts(null, true)}>🔁 다시 변환</button>
+            <button className="ghost" title="발음사전 — TTS가 잘못 읽는 단어를 발음대로 교정(자막은 대본 그대로)" style={{ padding: '6px 9px' }} onClick={openDict}>📖 발음사전</button>
             <span className="hdiv" />
             <select title="이미지 스타일" value={styleId} onChange={(e) => setStyleId(e.target.value)}>
               <option value="">스타일 없음</option>
@@ -1282,6 +1295,35 @@ export default function App() {
               </div>
             </div>
             <div className="mbtns"><button className="ghost" onClick={() => setStyleEditOpen(false)}>닫기</button></div>
+          </div>
+        </div>
+      )}
+      {dictOpen && (
+        <div className="modal-bg show" onClick={(e) => { if (e.target.classList.contains('modal-bg')) setDictOpen(false); }}>
+          <div className="modal-card wide" style={{ maxHeight: '82vh', display: 'flex', flexDirection: 'column' }}>
+            <h3>📖 발음사전 (TTS 교정)</h3>
+            <div className="meta" style={{ marginBottom: 8 }}>TTS가 잘못 읽는 단어를 <b>발음대로</b> 교정합니다. <b>자막·대본은 그대로</b>이고 <b>음성 합성에만</b> 적용됩니다.
+              예) 대본표기 <b>정약용</b> → 발음표기 <b>정냐굥</b> 으로 등록하면, 자막엔 "정약용"이 뜨고 음성만 "정냐굥"으로 읽습니다.</div>
+            <div style={{ display: 'flex', gap: 6, fontSize: 12, fontWeight: 600, padding: '0 4px 4px' }}>
+              <span style={{ flex: '0 0 30px' }}>사용</span><span style={{ flex: 1 }}>대본 표기 (자막에 나오는 말)</span><span style={{ flex: 1 }}>발음 표기 (TTS가 읽을 말)</span><span style={{ flex: '0 0 30px' }} />
+            </div>
+            <div style={{ overflowY: 'auto', flex: 1, paddingRight: 4 }}>
+              {dictRows.length === 0 && <div className="meta" style={{ padding: 8 }}>등록된 단어가 없습니다. 아래 「＋ 추가」로 시작하세요.</div>}
+              {dictRows.map((r, i) => (
+                <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 4 }}>
+                  <input type="checkbox" style={{ flex: '0 0 30px', width: 'auto' }} checked={r.enabled !== false} onChange={(e) => setDictRow(i, { enabled: e.target.checked })} title="이 교정 사용/해제" />
+                  <input style={{ flex: 1 }} placeholder="예: 정약용" value={r.source || ''} onChange={(e) => setDictRow(i, { source: e.target.value })} />
+                  <span>→</span>
+                  <input style={{ flex: 1 }} placeholder="예: 정냐굥" value={r.pron || ''} onChange={(e) => setDictRow(i, { pron: e.target.value })} />
+                  <button className="ghost" title="삭제" style={{ flex: '0 0 auto' }} onClick={() => delDictRow(i)}>🗑</button>
+                </div>
+              ))}
+            </div>
+            <div style={{ borderTop: '1px solid var(--border,#ddd)', paddingTop: 8, marginTop: 4 }}>
+              <button className="ghost" onClick={addDictRow}>＋ 추가</button>
+              <span className="meta" style={{ marginLeft: 8 }}>저장 후 <b>TTS를 다시 변환</b>해야 반영됩니다.</span>
+            </div>
+            <div className="mbtns"><button onClick={saveDict}>저장</button><button className="ghost" onClick={() => setDictOpen(false)}>취소</button></div>
           </div>
         </div>
       )}
@@ -1652,8 +1694,9 @@ function Cards({ dto, isLf, capCharsN, onTts, onImg, onVid, onBulk, onPlayShorts
             </h2>
             {!isLf && <TitleEditor pr={pr} onTitleField={onTitleField} />}
             <div className={'cuts-grid' + (isLf ? ' lf' : '')}>
-              {pr.cuts.map((c) => {
+              {pr.cuts.map((c, ci) => {
                 const ph = phaseBadge(c.phase, isLf);
+                const bgmText = pr.bgmUsed || pr.bgmMood || ''; // 실제 사용/대본 지정 BGM 프롬프트
                 const lineEls = [];
                 (c.sentences || []).forEach((s) => {
                   for (const t of splitLines(s.text, capCharsN)) {
@@ -1681,6 +1724,13 @@ function Cards({ dto, isLf, capCharsN, onTts, onImg, onVid, onBulk, onPlayShorts
                           </div>
                         </div>
                         <div className="narr-text"><span className={'badge ' + ph[0]}>{ph[1]}</span></div>
+                        {ci === 0 && bgmOn && (
+                          <div className="bgm-line" title="배경음악(BGM) 프롬프트 — 대본 `> 🎵 배경음악:` 또는 자동분석 결과" style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4, fontSize: 12 }}>
+                            <span>🎵 BGM:</span>
+                            <span style={{ flex: 1, opacity: bgmText ? 1 : 0.6, wordBreak: 'break-word' }}>{bgmText || '자동 (대본 분석 — 만들기 후 표시)'}</span>
+                            {bgmText && <button className="gprev" title="BGM 프롬프트 복사" onClick={() => copyStylePrompt(bgmText)}>📋</button>}
+                          </div>
+                        )}
                       </div>
                       <div className="sents">{lineEls}</div>
                     </div>

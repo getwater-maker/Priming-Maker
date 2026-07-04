@@ -309,6 +309,22 @@ ipcMain.handle('remove-style', (_e, id) => {
 ipcMain.handle('move-style', (_e, args = {}) => {
   try { return require('./core/style-store').moveStyle(args.id, args.direction); } catch (e) { return false; }
 });
+
+// 발음사전 — 자막은 대본 그대로 두고 TTS 만 교정. entry = { source, pron, enabled }.
+//   source(대본 표기)를 pron(발음 표기)로 치환해 합성(text-pronouncer.applyOmniVoiceDict). 자막엔 미반영.
+ipcMain.handle('dict-list', () => {
+  try { return require('./tts/omnivoice-dict-store').loadAll(); } catch (e) { return []; }
+});
+ipcMain.handle('dict-save', (_e, entries = []) => {
+  try {
+    const clean = (Array.isArray(entries) ? entries : [])
+      .map((x) => ({ source: String(x.source || '').trim(), pron: String(x.pron || '').trim(), enabled: x.enabled !== false }))
+      .filter((x) => x.source && x.pron);
+    require('./tts/omnivoice-dict-store').saveAll(clean);
+    try { require('./tts/tts-manager').getInstance().invalidateDict(); } catch {} // 메모리 캐시 즉시 갱신
+    return clean;
+  } catch (e) { return null; }
+});
 // ComfyUI(i2v) 설정 get/set + 연결 테스트
 ipcMain.handle('get-comfy-config', () => require('./core/comfy-config').load());
 ipcMain.handle('set-comfy-config', (_e, patch = {}) => require('./core/comfy-config').save(patch || {}));
@@ -1817,6 +1833,7 @@ async function runMakeAllCore(opts = {}) {
           const totalSec = pr.sentences.reduce((a, s) => a + (s.ttsDurationSec || 0), 0);
           if (!totalSec) continue;
           const tags = await deriveBgmMood(pr, bgm.moodOverride, log);
+          pr._bgmUsedMood = tags; // UI 표시용 — 실제 사용된 BGM 무드
           const dirs = shortsDirs(S.outRoot, pr.shortsNum);
           const raw = path.join(dirs.media, `bgm_${vrewBaseName(pr)}.mp3`);
           log(`  ▶ ${prLabel(pr)} BGM (${Math.round(totalSec)}초 분량, 무드: ${tags.slice(0, 50)})`);
@@ -1993,8 +2010,11 @@ ipcMain.handle('tts-group', async (_e, args = {}) => {
   const ttsDir = shortsDirs(S.outRoot, shortsNum).tts;
   const sents = pr.getSentencesOfGroup(g);
   S.abort = false;
-  log(`🎤 G${groupNum} TTS (${sents.length}문장)…`);
-  await P.fillTtsList(sents, preset, mgr, ttsDir, log, () => S.abort, (speed && Number(speed) > 0) ? Number(speed) : 1.0, `G${groupNum}`, pushDtoUpdate);
+  // 이 그룹만 재변환 = 사용자가 결과가 마음에 안 들어 '새로 뽑기'. 기존 음성·캐시를 무시(force=true)하고,
+  //   seed 를 매 클릭 랜덤화해 같은 문장이라도 매번 다른 take 가 나오게 한다(같은 seed 면 결정적=동일 결과).
+  const rollPreset = { ...preset, seed: Math.floor(Math.random() * 1e9) };
+  log(`🎤 G${groupNum} TTS 새로 뽑기 (${sents.length}문장, 기존 삭제·seed 랜덤)…`);
+  await P.fillTtsList(sents, rollPreset, mgr, ttsDir, log, () => S.abort, (speed && Number(speed) > 0) ? Number(speed) : 1.0, `G${groupNum}`, pushDtoUpdate, true);
   try { await mgr.stop(); } catch {}
   pushDtoUpdate();
   return P.toDTO(S.parsed);

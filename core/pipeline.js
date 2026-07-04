@@ -98,6 +98,8 @@ function toDTO(parseResult) {
         bgStroke: pr.bgStroke || '#000000', bgStrokeOp: pr.bgStrokeOp != null ? pr.bgStrokeOp : 0,
         bgStrokeW: pr.bgStrokeW || 0, bgRound: pr.bgRound || 0, bgDashed: !!pr.bgDashed,
         voice: pr.voice,
+        bgmMood: pr.bgmMood || null,        // 대본에 적힌 배경음악 프롬프트(> 🎵 배경음악:)
+        bgmUsed: pr._bgmUsedMood || null,   // 실제 BGM 생성에 쓰인 무드(자동분석 결과 포함, 생성 후 채워짐)
         cuts: pr.groups.map((g) => {
           const sents = pr.getSentencesOfGroup(g);
           return {

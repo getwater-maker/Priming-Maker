@@ -709,10 +709,11 @@ function validateOutput(pj, sentenceCount, imageGroupCount) {
 }
 
 // ── 배경음(BGM) 트랙 — 영상 전체 길이에 걸쳐 나레이션 아래 낮은 볼륨으로 재생 ──
-//   ⏳ 실측 검증 필요: Vrew 가 독립 오디오 트랙에 기대하는 정확한 JSON 미확정.
-//   확인된 패턴(videoAudio 트랙 :917-921 · TTS AVMedia 등록 :1034-1042 · AI고지 startDelay 절대배치)으로 구성.
-//   Vrew 에서 BGM 이 안 뜨면, BGM 을 수동으로 넣은 .vrew 샘플을 받아 files/tracks/assets 필드를 확정한다.
-//   bgm = { audioPath, volume(0..1), loop, startDelayMs(=0) }
+//   ✅ 수동 BGM 삽입 .vrew 샘플 분석으로 확정한 형식(2026-07-04):
+//     - files[] 에 sourceFileType:'BGM' 파일 엔트리 (type AVMedia)
+//     - props.tracks[tid] 에 type:'bgm' 전역 트랙 (fade in/out, loop, sourceOut=파일길이)
+//     - ⚠ 어떤 clip 에도 안 묶임(전역). asset·clip.assetIds 링크 없음 — 있으면 Vrew 가 BGM 으로 인식 못함.
+//   bgm = { audioPath, volume(0..1), loop }
 async function addBgmTrack(pj, bgm, totalDurationSec, mediaZip, log) {
   if (!bgm || !bgm.audioPath || !fs.existsSync(bgm.audioPath)) return null;
   let fileDur = totalDurationSec;
@@ -728,28 +729,23 @@ async function addBgmTrack(pj, bgm, totalDurationSec, mediaZip, log) {
       duration: fileDur,
       audioInfo: { sampleRate: 44100, codec: ext === 'mp3' ? 'mp3' : ext, channelCount: 2 },
     },
-    sourceFileType: 'ASSET_AUDIO', fileLocation: 'IN_MEMORY',
+    sourceFileType: 'BGM', fileLocation: 'IN_MEMORY',
   });
   mediaZip.push({ src: bgm.audioPath, name: fn });
 
+  // 전역 BGM 트랙 — props.tracks 에 type:'bgm'. clip 링크·asset 없음(전역), loop 로 전체 타임라인 재생.
   const tid = sid();
-  const aid = uid();
   const vol = (typeof bgm.volume === 'number' && bgm.volume >= 0) ? bgm.volume : 0.15;
   pj.props.tracks[tid] = {
     trackId: tid, mediaId: mid,
-    // sourceIn/Out = 소스 파일 내 구간 — 파일 길이를 넘으면 안 됨(루프가 짧게 만들어졌을 때 방어)
-    volume: vol, sourceIn: 0, sourceOut: Math.min(totalDurationSec, fileDur),
-    loop: bgm.loop !== false, playbackRate: 1, type: 'videoAudio',
-    // 🔴 assetEffectInfo 는 넣지 않는다 — type:'none' 이라도 트랙에 있으면 Vrew 내보내기가
-    //    실패했던 전례(제목 web 트랙 :585). 시작 지연이 필요할 때만 검증된 fade-in 패턴 사용.
-    ...(bgm.startDelayMs > 0 ? { assetEffectInfo: { type: 'fade-in', duration: 1, startDelay: bgm.startDelayMs } } : {}),
+    volume: vol,
+    fade: { in: true, out: true },
+    sourceIn: 0, sourceOut: fileDur,
+    loop: bgm.loop !== false, playbackRate: 1,
+    type: 'bgm',
   };
-  pj.props.assets[aid] = { trackIds: [tid], role: 'sub' };
-  // 절대시간(startDelay 0) + loop → clip[0] 에만 링크해도 전체 타임라인 재생(AI고지와 동일 메커니즘).
-  const c0 = pj.transcript.clips[0];
-  if (c0) { if (!Array.isArray(c0.assetIds)) c0.assetIds = []; if (!c0.assetIds.includes(aid)) c0.assetIds.push(aid); }
-  log(`[Vrew] BGM 트랙 추가: vol=${vol} loop=${bgm.loop !== false} dur=${totalDurationSec.toFixed(0)}s (⏳ Vrew 실측 검증 필요)`);
-  return { mid, tid, aid };
+  log(`[Vrew] BGM 트랙 추가(type:bgm, 전역): vol=${vol} loop=${bgm.loop !== false} dur=${fileDur.toFixed(0)}s`);
+  return { mid, tid };
 }
 
 async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {

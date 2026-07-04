@@ -7,6 +7,20 @@
 **편별 Vrew 4.0.1 .vrew 파일**을 자동 생성하는 Electron 앱. PrimingFlow(D:\PrimingFlow)의 엔진을
 복사·재활용한 독립 클론.
 
+## 🎵📖 BGM .vrew 삽입 확정 + 발음사전 UI + 그룹TTS 재변환 + BGM표시 (2026-07-04, v0.1.73)
+- 🐞 **BGM 이 .vrew 에 안 들어가던 문제 해결 — 수동 삽입 .vrew 샘플 분석으로 형식 확정**:
+  Vrew BGM = ① `files[]` 에 `sourceFileType:'BGM'` 파일 + ② `props.tracks[tid]` 에 **`type:'bgm'`** 전역 트랙
+  (`fade:{in,out}`, `loop:true`, `sourceOut=파일길이`) + ③ **어떤 clip 에도 안 묶임(asset·clip.assetIds 링크 없음)**.
+  기존 코드는 `type:'videoAudio'`+`sourceFileType:'ASSET_AUDIO'`+clip[0] 링크(오진)라 Vrew 가 BGM 으로 인식 못 함.
+  `vrew-builder.addBgmTrack` 재작성(전역 bgm 트랙). zip 오디오는 `.mp3` 그대로(우리 TTS 와 동일, Vrew 로드 OK).
+- 🎤 **그룹 TTS 재변환("🎤")이 같은 음성 나오던 문제**: `tts-group` 이 force 없이 호출→기존 음성 건너뜀 + seed 고정.
+  → `fillTtsList(...force=true)` + **seed 매 클릭 랜덤화**(같은 seed=결정적 동일). 매번 새 take 로 뽑힘.
+- 📖 **발음사전 UI 추가**(백엔드 omnivoice-dict-store 는 이미 있음, UI 만 없었음): IPC `dict-list`/`dict-save`(+
+  tts-manager.invalidateDict) + preload + 「📖 발음사전」 모달. entry `{source,pron,enabled}` — **자막은 대본 그대로,
+  TTS 만 교정**(applyOmniVoiceDict 가 synthesize 전 치환). 예: 정약용→정냐굥. 저장 후 TTS 재변환해야 반영.
+- 🎵 **BGM 프롬프트 표시**: toDTO 에 `bgmMood`(대본 지정) + `bgmUsed`(실제 사용 무드, 생성 후) → 첫 그룹 카드에
+  「🎵 BGM:」 줄 + 복사 버튼(bgmOn 일 때).
+
 ## 🧹 엔진 단순화 — Krea2·LTX·Wan·Flow영상 제거 (2026-07-04, v0.1.71)
 > 사용자 요청: 이미지·영상 엔진을 브라우저 기반만 남기고 ComfyUI 이미지/영상 엔진 제거. **ACE-Step 오디오(플리·BGM)는 유지.**
 - **이미지 엔진** = `순환(Flow+Genspark)` 하나만. `comfy`(Krea2_Turbo) 옵션·`runComfyImages`·순환 루프의 comfy 슬롯 제거.
