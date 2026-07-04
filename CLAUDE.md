@@ -9,10 +9,11 @@
 
 ## 🎵📖 BGM .vrew 삽입 확정 + 발음사전 UI + 그룹TTS 재변환 + BGM표시 (2026-07-04, v0.1.73)
 - 🐞 **BGM 이 .vrew 에 안 들어가던 문제 해결 — 수동 삽입 .vrew 샘플 분석으로 형식 확정**:
-  Vrew BGM = ① `files[]` 에 `sourceFileType:'BGM'` 파일 + ② `props.tracks[tid]` 에 **`type:'bgm'`** 전역 트랙
-  (`fade:{in,out}`, `loop:true`, `sourceOut=파일길이`) + ③ **어떤 clip 에도 안 묶임(asset·clip.assetIds 링크 없음)**.
-  기존 코드는 `type:'videoAudio'`+`sourceFileType:'ASSET_AUDIO'`+clip[0] 링크(오진)라 Vrew 가 BGM 으로 인식 못 함.
-  `vrew-builder.addBgmTrack` 재작성(전역 bgm 트랙). zip 오디오는 `.mp3` 그대로(우리 TTS 와 동일, Vrew 로드 OK).
+  Vrew BGM = ① `files[]` 에 `sourceFileType:'BGM'` 파일 + ② `props.tracks[tid]` 에 **`type:'bgm'`** 트랙
+  (`fade:{in,out}`, `loop:true`, `sourceOut=파일길이`) + ③ `props.assets[aid]={trackIds:[tid],role:'sub'}` +
+  ④ **그 aid 를 전 clip 의 assetIds 에 추가**(수동샘플 실측: 731 clip 전부 참조). ①②③④ 다 있어야 Vrew 가 BGM 렌더.
+  ⚠ v0.1.73 에서 ③④(asset·clip링크)를 "전역이라 불필요"로 오판해 제거 → 트랙만 있고 asset 없어 **안 들림**.
+  v0.1.77 에서 asset + 전 clip 링크 복원(zip 오디오는 `.mp3` 그대로, TTS 와 동일해 Vrew 로드 OK). 볼륨 0.15.
 - 🎤 **그룹 TTS 재변환("🎤")이 같은 음성 나오던 문제**: `tts-group` 이 force 없이 호출→기존 음성 건너뜀 + seed 고정.
   → `fillTtsList(...force=true)` + **seed 매 클릭 랜덤화**(같은 seed=결정적 동일). 매번 새 take 로 뽑힘.
 - 📖 **발음사전 UI 추가**(백엔드 omnivoice-dict-store 는 이미 있음, UI 만 없었음): IPC `dict-list`/`dict-save`(+

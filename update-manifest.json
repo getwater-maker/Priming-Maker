@@ -1,5 +1,5 @@
 {
-  "version": "0.1.76",
+  "version": "0.1.77",
   "deps": "0a1409dd7b6c37e6b850a8223ac05d93b0380d94",
   "files": {
     "AGENTS.md": "1a0fd73c104ff40f5cce110a3ffac07a7aa77205",
@@ -9,7 +9,7 @@
     "auto-updater.js": "7f0d3a183a25f3c9150002dc3c45d89257358384",
     "bootstrap.js": "6cbd41b3842151ac184808cec1280d547b649600",
     "build-shorts.js": "9dfbb4dfee70ffb9105148b9744081e2bb287957",
-    "CLAUDE.md": "c8f5a6f0abae3656df067df629b489d44381f379",
+    "CLAUDE.md": "d98507058a5cb173ffc53256f216202ae2b4aaa2",
     "comfy-engine.js": "8c996abee0f09f010330ecf4c4fdaaa07b8f5787",
     "core/accounts.js": "e36e07bbbf9eec4d56b584c3add8a1077fbe0cec",
     "core/book/book-theme.css": "8b3345c9004092d1a07713b37755344beabea91a",
@@ -59,7 +59,7 @@
     "light-updater.js": "c9be26807112942a9cf4a88dfcd14a1004634762",
     "main.js": "203577586454bb1b95a59a9853184e961ec5bed0",
     "package-lock.json": "7c46c6c7a08739e1e28df9c9286a860c70cd6760",
-    "package.json": "d104e94f826e3c978f8b1bc6a0570385941bb7a3",
+    "package.json": "eeb86324d9983c0d259f9d73874ff94aebde08d6",
     "preload.js": "a02b97a566f343ee4fbb89085ba905da9d8c73cf",
     "renderer/dist/assets/index-CA-E3jEq.css": "8ee55c3eea9c830a45e7353b9140df0b90f5f33a",
     "renderer/dist/assets/index-nopzqkct.js": "3d31f0d2780761bcd23b1d8bf8f8c330fd8892ae",
@@ -93,7 +93,7 @@
     "vrew/dummy/shape-square.vbin": "7915d4dcdcd7572c4a988ef773ea5bd0a927dc8e",
     "vrew/dummy/uc-0010-simple-textbox.bin": "24d897751b391f868b8bcfb5159a0da4f2abc9b7",
     "vrew/dummy/uc-0010-simple-textbox.meta.json": "ba3a41513c2bb7efff3802d219c754ce9b181e43",
-    "vrew/vrew-builder.js": "fead5b39f21d08a73a7f22ffb22553a9f37c4b33",
+    "vrew/vrew-builder.js": "311992db8bf02f0f06e4689fc6c0c2e9f2ff972f",
     "vrew-template.json": "7df033330328143fbc9211ca92eb2063c6cace65",
     "Wan2.2 I2V/video_wan2_2_14B_i2v.json": "dd98d01d3119f22846c118334e4819f46eaf56ad"
   }

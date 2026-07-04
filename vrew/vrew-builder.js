@@ -713,8 +713,10 @@ function validateOutput(pj, sentenceCount, imageGroupCount) {
 // ── 배경음(BGM) 트랙 — 영상 전체 길이에 걸쳐 나레이션 아래 낮은 볼륨으로 재생 ──
 //   ✅ 수동 BGM 삽입 .vrew 샘플 분석으로 확정한 형식(2026-07-04):
 //     - files[] 에 sourceFileType:'BGM' 파일 엔트리 (type AVMedia)
-//     - props.tracks[tid] 에 type:'bgm' 전역 트랙 (fade in/out, loop, sourceOut=파일길이)
-//     - ⚠ 어떤 clip 에도 안 묶임(전역). asset·clip.assetIds 링크 없음 — 있으면 Vrew 가 BGM 으로 인식 못함.
+//     - props.tracks[tid] 에 type:'bgm' 트랙 (fade in/out, loop, sourceOut=파일길이)
+//     - props.assets[aid] = { trackIds:[tid], role:'sub' }
+//     - ⚠ 그 aid 를 **모든 clip 의 assetIds** 에 추가 (수동삽입 .vrew 실측: 전 clip 이 bgm asset 참조).
+//       (v0.1.73 에서 asset·clip링크를 지웠던 게 원인 — 트랙만 있고 asset 없으면 Vrew 가 BGM 렌더 안 함)
 //   bgm = { audioPath, volume(0..1), loop }
 async function addBgmTrack(pj, bgm, totalDurationSec, mediaZip, log) {
   if (!bgm || !bgm.audioPath || !fs.existsSync(bgm.audioPath)) return null;
@@ -735,8 +737,8 @@ async function addBgmTrack(pj, bgm, totalDurationSec, mediaZip, log) {
   });
   mediaZip.push({ src: bgm.audioPath, name: fn });
 
-  // 전역 BGM 트랙 — props.tracks 에 type:'bgm'. clip 링크·asset 없음(전역), loop 로 전체 타임라인 재생.
   const tid = sid();
+  const aid = uid();
   const vol = (typeof bgm.volume === 'number' && bgm.volume >= 0) ? bgm.volume : 0.15;
   pj.props.tracks[tid] = {
     trackId: tid, mediaId: mid,
@@ -746,8 +748,12 @@ async function addBgmTrack(pj, bgm, totalDurationSec, mediaZip, log) {
     loop: bgm.loop !== false, playbackRate: 1,
     type: 'bgm',
   };
-  log(`[Vrew] BGM 트랙 추가(type:bgm, 전역): vol=${vol} loop=${bgm.loop !== false} dur=${fileDur.toFixed(0)}s`);
-  return { mid, tid };
+  // BGM asset(role:'sub', trackIds:[tid]) 을 만들고 **모든 clip** 의 assetIds 에 링크 → 전 타임라인 재생.
+  pj.props.assets[aid] = { trackIds: [tid], role: 'sub' };
+  const clips = (pj.transcript && pj.transcript.clips) || [];
+  for (const c of clips) { if (!Array.isArray(c.assetIds)) c.assetIds = []; c.assetIds.push(aid); }
+  log(`[Vrew] BGM 트랙 추가(type:bgm · asset 전 clip(${clips.length}) 링크): vol=${vol} loop=${bgm.loop !== false} dur=${fileDur.toFixed(0)}s`);
+  return { mid, tid, aid };
 }
 
 async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
