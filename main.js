@@ -670,6 +670,18 @@ ipcMain.handle('export-premiere', async (_e, args = {}) => {
   return { outs };
 });
 
+// BGM 오디오 경로 해석 — 메모리(pr._bgmPath) 우선, 없으면 media 폴더의 bgm_*.mp3 재사용
+//   (다른 실행·재시작·💾재export 에서도 이미 만든 BGM 을 자동으로 찾아 .vrew 에 포함).
+function resolveBgmPath(pr) {
+  if (pr._bgmPath && fs.existsSync(pr._bgmPath)) return pr._bgmPath;
+  try {
+    const mediaDir = shortsDirs(S.outRoot, pr.shortsNum).media;
+    const files = fs.readdirSync(mediaDir).filter((f) => /^bgm_.*\.mp3$/i.test(f));
+    const pick = files.find((f) => /_loop\.mp3$/i.test(f)) || files[0]; // 루프(전체 길이) 우선
+    if (pick) return path.join(mediaDir, pick);
+  } catch {}
+  return null;
+}
 ipcMain.handle('export-vrew', async (_e, args = {}) => {
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
   const { shortsNum = null, presetName = null, captionStyle = null, captionMaxChars = 7, aiNotice = false } = args;
@@ -692,10 +704,12 @@ ipcMain.handle('export-vrew', async (_e, args = {}) => {
     const dirs = shortsDirs(S.outRoot, pr.shortsNum);
     const baseName = vrewBaseName(pr);
     const vrewPath = path.join(S.outRoot, `${baseName}.vrew`);
-    // ⚡만들기에서 생성한 BGM 이 있으면 재export(.vrew)에도 포함 — 없으면 그대로.
+    // ⚡만들기에서 생성한 BGM(또는 media 폴더에 이미 있는 bgm mp3)이 있으면 재export(.vrew)에도 포함.
     let ep = preset;
-    if (pr._bgmPath && fs.existsSync(pr._bgmPath)) {
-      ep = { ...ep, bgm: { enabled: true, audioPath: pr._bgmPath, volume: (pr._bgmVolume != null ? pr._bgmVolume : 0.15), loop: true } };
+    const _bgmPath = resolveBgmPath(pr);
+    if (_bgmPath) {
+      ep = { ...ep, bgm: { enabled: true, audioPath: _bgmPath, volume: (pr._bgmVolume != null ? pr._bgmVolume : 0.15), loop: true } };
+      log(`🎵 ${prLabel(pr)} .vrew 에 BGM 포함: ${path.basename(_bgmPath)}`);
     }
     try {
       const res = await P.buildProjectVrew(pr, vrewPath, ep, log, captionMaxChars); // 배속은 음성에 이미 반영
@@ -1862,7 +1876,8 @@ async function runMakeAllCore(opts = {}) {
       let ep = preset;
       if (ep && captionStyle) ep = { ...ep, captionStyle: { ...(ep.captionStyle || {}), ...captionStyle } };
       ep = resolveAiNotice(ep, aiNotice); // 롱폼=항상 / 쇼츠=사용자 선택
-      if (bgmOn && pr._bgmPath) ep = { ...ep, bgm: { enabled: true, audioPath: pr._bgmPath, volume: (bgm.volume != null ? bgm.volume : 0.15), loop: true } };
+      const _bgmPath4 = bgmOn ? resolveBgmPath(pr) : null; // 메모리 없으면 media 폴더 bgm mp3 재사용
+      if (_bgmPath4) { ep = { ...ep, bgm: { enabled: true, audioPath: _bgmPath4, volume: (bgm.volume != null ? bgm.volume : 0.15), loop: true } }; log(`🎵 ${prLabel(pr)} .vrew 에 BGM 포함: ${path.basename(_bgmPath4)}`); }
       const dirs = shortsDirs(S.outRoot, pr.shortsNum);
       const baseName = vrewBaseName(pr);
       const vrewPath = path.join(S.outRoot, `${baseName}.vrew`);
