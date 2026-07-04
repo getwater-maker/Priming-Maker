@@ -1156,7 +1156,7 @@ export default function App() {
               ))}
             </div>
           )}
-          <Cards dto={dto} isLf={isLf} capCharsN={effCap}
+          <Cards dto={dto} isLf={isLf} capCharsN={effCap} bgmOn={bgmOn}
             onTts={runTts} onImg={runImg} onVid={runVid} onBulk={runBulk}
             onPlayShorts={playShorts} onPlayGroup={playGroup} onRegen={runRegen}
             onMake={runMake} onVrew={runVrew} onPremiere={runPremiere} onAttach={attachAsset} onClear={clearAsset}
@@ -1663,7 +1663,7 @@ function PlaylistView({ dto, onMakeOne, onPreview, onPreviewMedia, onAttachBg, o
 }
 
 // ── 카드 목록 (편별 그룹/컷) ──────────────────────────────
-function Cards({ dto, isLf, capCharsN, onTts, onImg, onVid, onBulk, onPlayShorts, onPlayGroup, onRegen, onMake, onVrew, onPremiere, onAttach, onClear, onTitleField, onPreview, onPlayFrom, onGroupTts, onGroupVid, onShowPrompt, onSplit }) {
+function Cards({ dto, isLf, capCharsN, bgmOn, onTts, onImg, onVid, onBulk, onPlayShorts, onPlayGroup, onRegen, onMake, onVrew, onPremiere, onAttach, onClear, onTitleField, onPreview, onPlayFrom, onGroupTts, onGroupVid, onShowPrompt, onSplit }) {
   // dto.projects 부재 가드 — 출판/플리 dto 가 모드 전환 직후 한 프레임 남아 들어올 수 있음(크래시 방지)
   if (!dto || !dto.projects || !dto.projects.length) {
     return <div id="cards"><div className="empty">대본(.md)을 열면 편별 그룹과 컷이 여기에 표시됩니다.</div></div>;
@@ -1728,7 +1728,7 @@ function Cards({ dto, isLf, capCharsN, onTts, onImg, onVid, onBulk, onPlayShorts
                           <div className="bgm-line" title="배경음악(BGM) 프롬프트 — 대본 `> 🎵 배경음악:` 또는 자동분석 결과" style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4, fontSize: 12 }}>
                             <span>🎵 BGM:</span>
                             <span style={{ flex: 1, opacity: bgmText ? 1 : 0.6, wordBreak: 'break-word' }}>{bgmText || '자동 (대본 분석 — 만들기 후 표시)'}</span>
-                            {bgmText && <button className="gprev" title="BGM 프롬프트 복사" onClick={() => copyStylePrompt(bgmText)}>📋</button>}
+                            {bgmText && <button className="gprev" title="BGM 프롬프트 복사" onClick={() => { try { navigator.clipboard.writeText(bgmText); } catch (_) {} }}>📋</button>}
                           </div>
                         )}
                       </div>
