@@ -2035,6 +2035,21 @@ ipcMain.handle('tts-group', async (_e, args = {}) => {
   return P.toDTO(S.parsed);
 });
 
+// 그룹 프롬프트 직접 수정 — 대본 이미지/비디오 프롬프트를 사용자가 모달에서 고쳐 저장.
+//   저장 후 regen-group(이미지)·video-group(비디오)을 호출하면 이 프롬프트로 재생성됨.
+ipcMain.handle('set-group-prompt', (_e, args = {}) => {
+  if (!S.parsed) return null;
+  const { shortsNum, groupNum, imagePrompt, videoPrompt } = args;
+  const pr = S.parsed.projects.find((p) => p.shortsNum === shortsNum);
+  const g = pr && pr.groups.find((x) => x.num === groupNum);
+  if (!g) return P.toDTO(S.parsed);
+  if (imagePrompt != null) g.imagePrompt = String(imagePrompt).trim();
+  if (videoPrompt != null) { g.videoPrompt = String(videoPrompt).trim(); g.isI2V = !!g.videoPrompt; }
+  scheduleAutoSave();
+  pushDtoUpdate();
+  return P.toDTO(S.parsed);
+});
+
 // 그룹 1개만 영상 변환 (이미지 → i2v)
 ipcMain.handle('video-group', async (_e, args = {}) => {
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');

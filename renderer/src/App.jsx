@@ -619,17 +619,26 @@ export default function App() {
     catch (e) { logline('테스트 오류: ' + e.message); setStatus('테스트 오류'); }
   }
   async function pickAudioWorkflow() { const f = await api.pickFile({ filters: [{ name: 'ComfyUI 워크플로(API json)', extensions: ['json'] }] }); if (f) setComfy((c) => ({ ...c, audioWorkflowPath: f })); }
-  function showPrompt(c, label) {
-    // 실제 생성에 쓰이는 최종 이미지 프롬프트 = 선택한 스타일 + 대본 프롬프트.
+  function showPrompt(shortsNum, c, label) {
+    // 편집 대상 = 대본 이미지/비디오 프롬프트(raw). 스타일은 생성 시 앞에 자동으로 붙는다(stylePfx 는 안내용).
     const st = styles.find((x) => x.id === styleId);
     const stylePfx = st && st.prompt ? st.prompt + ', ' : '';
     setPromptView({
-      label,
-      styleName: st ? st.name : '없음',
-      image: c.imagePrompt ? (stylePfx + c.imagePrompt) : '', // 최종(스타일 포함)
-      video: c.videoPrompt || '',
+      label, shortsNum, groupNum: c.num,
+      styleName: st ? st.name : '없음', stylePfx,
+      image: c.imagePrompt || '',   // 대본 이미지 프롬프트(편집)
+      video: c.videoPrompt || '',   // 대본 비디오 프롬프트(편집)
       motion: c.motionNote || '',
     });
+  }
+  // 수정한 프롬프트 저장(+선택적으로 이미지/비디오 재생성). regen: 'image' | 'video' | null(저장만)
+  async function savePromptView(regen) {
+    if (!promptView) return;
+    const { shortsNum, groupNum, image, video } = promptView;
+    try { const d = await api.setGroupPrompt({ shortsNum, groupNum, imagePrompt: image, videoPrompt: video }); if (d) setDto(d); setStatus('프롬프트 저장됨'); }
+    catch (e) { logline('프롬프트 저장 오류: ' + e.message); return; }
+    if (regen === 'image') { setPromptView(null); await runRegen(shortsNum, groupNum); }
+    else if (regen === 'video') { setPromptView(null); await runGroupVid(shortsNum, groupNum); }
   }
   async function openFlowAcc() {
     try { const d = await api.getFlowAccounts(); setFlowAcc(d || { dailyCap: 45, accounts: [] }); setFlowAccOpen(true); }
@@ -1524,25 +1533,24 @@ export default function App() {
       {promptView && (
         <div className="modal-bg show" onClick={(e) => { if (e.target.classList.contains('modal-bg')) setPromptView(null); }}>
           <div className="modal-card" style={{ maxWidth: 620 }}>
-            <h3>📝 {promptView.label} — 이미지 프롬프트</h3>
-            {promptView.image ? (
-              <>
-                <div className="meta" style={{ marginBottom: 4 }}>🖼️ 이미지 프롬프트 <b>(최종 = 스타일 「{promptView.styleName}」 + 대본)</b> — 실제 생성에 쓰이는 그대로</div>
-                <textarea readOnly rows="6" style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'monospace', fontSize: 12 }} value={promptView.image} />
-                <div style={{ textAlign: 'right', marginTop: 4 }}><button className="ghost" onClick={() => { try { navigator.clipboard.writeText(promptView.image); } catch (_) {} setStatus('이미지 프롬프트 복사됨'); }}>📋 복사</button></div>
-              </>
-            ) : (
-              <div className="meta" style={{ padding: '12px 0' }}>아직 이미지 프롬프트가 없습니다. <b>✍ 프롬프트작성</b> 또는 🖼 이미지 생성 시 대본 내용에 맞게 자동 생성됩니다.</div>
-            )}
-            {promptView.video ? (
-              <>
-                <div className="meta" style={{ margin: '8px 0 4px' }}>🎬 영상(I2V) 프롬프트 <span style={{ fontWeight: 400 }}>— 모션만 (스타일은 원본 이미지가 이미 가지므로 불필요)</span></div>
-                <textarea readOnly rows="3" style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'monospace', fontSize: 12 }} value={promptView.video} />
-                <div style={{ textAlign: 'right', marginTop: 4 }}><button className="ghost" onClick={() => { try { navigator.clipboard.writeText(promptView.video); } catch (_) {} setStatus('영상 프롬프트 복사됨'); }}>📋 복사</button></div>
-              </>
-            ) : null}
-            {promptView.motion ? <div className="meta" style={{ marginTop: 6 }}>🎞 모션: {promptView.motion}</div> : null}
-            <div className="mbtns"><button className="ghost" onClick={() => setPromptView(null)}>닫기</button></div>
+            <h3>📝 {promptView.label} — 프롬프트 수정</h3>
+            <div className="meta" style={{ marginBottom: 6 }}>대본 프롬프트를 직접 고쳐 이미지·비디오를 다시 만들 수 있습니다. 수정 후 아래 <b>생성</b> 버튼을 누르면 이 그룹만 새로 생성됩니다.</div>
+            {/* 🖼 이미지 프롬프트 (편집) */}
+            <div className="meta" style={{ marginBottom: 4 }}>🖼️ 이미지 프롬프트 <span style={{ fontWeight: 400 }}>— 생성 시 앞에 <b>스타일 「{promptView.styleName}」</b> 이 자동으로 붙습니다</span></div>
+            <textarea rows="6" style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'monospace', fontSize: 12 }} value={promptView.image} onChange={(e) => setPromptView({ ...promptView, image: e.target.value })} placeholder="영문 이미지 프롬프트" />
+            <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', marginTop: 4 }}>
+              <button className="ghost" onClick={() => { try { navigator.clipboard.writeText((promptView.stylePfx || '') + promptView.image); } catch (_) {} setStatus('이미지 프롬프트 복사됨(스타일 포함)'); }}>📋 복사</button>
+              <button disabled={!loaded} title="이 프롬프트를 저장하고 이 그룹 이미지를 새로 생성" onClick={() => savePromptView('image')}>🖼 이미지 생성</button>
+            </div>
+            {/* 🎬 비디오 프롬프트 (편집) */}
+            <div className="meta" style={{ margin: '10px 0 4px' }}>🎬 영상(I2V) 프롬프트 <span style={{ fontWeight: 400 }}>— 모션만 (스타일은 원본 이미지가 이미 가짐)</span></div>
+            <textarea rows="3" style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'monospace', fontSize: 12 }} value={promptView.video} onChange={(e) => setPromptView({ ...promptView, video: e.target.value })} placeholder="영문 모션 프롬프트 (비우면 기본 모션)" />
+            <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', marginTop: 4 }}>
+              <button className="ghost" onClick={() => { try { navigator.clipboard.writeText(promptView.video); } catch (_) {} setStatus('영상 프롬프트 복사됨'); }}>📋 복사</button>
+              <button disabled={!loaded} title="이 프롬프트를 저장하고 이 그룹 비디오를 새로 생성 (이미지 있어야 함)" onClick={() => savePromptView('video')}>🎬 비디오 생성</button>
+            </div>
+            {promptView.motion ? <div className="meta" style={{ marginTop: 6 }}>🎞 모션 노트: {promptView.motion}</div> : null}
+            <div className="mbtns"><button onClick={() => savePromptView(null)}>💾 저장만</button><button className="ghost" onClick={() => setPromptView(null)}>닫기</button></div>
           </div>
         </div>
       )}
@@ -1720,7 +1728,7 @@ function Cards({ dto, isLf, capCharsN, bgmOn, onTts, onImg, onVid, onBulk, onPla
                             <button className="gprev" title="여기부터 재생" onClick={() => onPlayFrom(pr.shortsNum, c.num)}>⏭</button>
                             <button className="gprev" title="이 그룹만 TTS 변환" onClick={() => onGroupTts(pr.shortsNum, c.num)}>🎤</button>
                             <button className="gprev" title="이 그룹만 비디오 변환" onClick={() => onGroupVid(pr.shortsNum, c.num)}>🎬</button>
-                            <button className="gprev" title="이 그룹 이미지 프롬프트 보기" onClick={() => onShowPrompt(c, `${pr.title} · G${c.num}`)}>📝</button>
+                            <button className="gprev" title="이 그룹 프롬프트 보기·수정" onClick={() => onShowPrompt(pr.shortsNum, c, `${pr.title} · G${c.num}`)}>📝</button>
                           </div>
                         </div>
                         <div className="narr-text"><span className={'badge ' + ph[0]}>{ph[1]}</span></div>
