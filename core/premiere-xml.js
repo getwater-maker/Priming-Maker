@@ -30,7 +30,8 @@ function pathUrl(abs) {
   ).join('/');
   return 'file://localhost/' + enc;
 }
-const toFrames = (sec) => Math.max(1, Math.round((Number(sec) || 0) * FPS));
+const toFrames = (sec) => Math.max(1, Math.round((Number(sec) || 0) * FPS)); // 길이(최소 1프레임)
+const posFrames = (sec) => Math.max(0, Math.round((Number(sec) || 0) * FPS)); // 타임라인 위치(0 허용)
 
 // 미디어(mp4) 실측 길이 — ffmpeg. 실패 시 null.
 async function mediaDurationSec(p) {
@@ -95,11 +96,13 @@ async function buildPremiereXml(project, a) {
       const img = g.imagePath && fs.existsSync(g.imagePath) ? g.imagePath : null;
       if (vid) {
         const md = (await mediaDurationSec(vid)) || gDur;
-        // 비디오가 그룹보다 짧으면 남는 구간은 이미지(있으면)로 채움 — 미디어 범위 초과 방지
-        const vDur = Math.min(md, gDur);
-        videoClips.push({ id: ++fileSeq, path: vid, name: `G${g.num}`, start: gStart, dur: vDur, mediaDur: md, isVideo: true });
-        if (vDur < gDur - 0.05 && img) {
-          videoClips.push({ id: ++fileSeq, path: img, name: `G${g.num}_img`, start: gStart + vDur, dur: gDur - vDur, isVideo: false, kb: g.num });
+        // 비디오가 그룹(음성)보다 짧으면 **반복 재생(루프)** 으로 그룹 전체를 채움 (예: 음성 14s, 영상 10s → 10+4).
+        let off = 0, rep = 0;
+        while (off < gDur - 0.05) {
+          const vDur = Math.min(md, gDur - off);
+          videoClips.push({ id: ++fileSeq, path: vid, name: rep === 0 ? `G${g.num}` : `G${g.num}_loop${rep}`, start: gStart + off, dur: vDur, mediaDur: md, isVideo: true });
+          off += vDur; rep += 1;
+          if (rep > 50) break; // 안전 상한
         }
       } else if (img) {
         videoClips.push({ id: ++fileSeq, path: img, name: `G${g.num}`, start: gStart, dur: gDur, isVideo: false, kb: g.num });
@@ -131,10 +134,11 @@ async function buildPremiereXml(project, a) {
 </file>`;
 
     // 이미지 스틸용 Basic Motion(Scale) — cover 배율 + 켄번스(그룹 번호 홀짝으로 줌인/줌아웃 교차).
-    //   Premiere 가 xmeml 의 Basic Motion scale 키프레임을 Motion>Scale 로 읽는다.
+    //   ⚠ 키프레임 <when> 은 클립 상대(0..dur)가 아니라 **시퀀스(타임라인) 절대 프레임** — Premiere 가
+    //   0..dur 로 주면 첫 키프레임 값(정지 스케일)만 읽고 애니메이션을 무시한다(실측). <value> = 폴백 정지값.
     const kenBurnsFilter = (c) => {
       if (c.isVideo !== false || !c.fillScale) return '';
-      const durF = toFrames(c.dur);
+      const f0 = posFrames(c.start), f1 = posFrames(c.start + c.dur);
       const s0 = c.fillScale, s1 = c.fillScale * 1.1; // 10% 줌
       const zoomIn = (Number(c.kb) || 0) % 2 === 1;   // G홀수=줌인, G짝수=줌아웃
       const from = (zoomIn ? s0 : s1).toFixed(2), to = (zoomIn ? s1 : s0).toFixed(2);
@@ -145,8 +149,9 @@ async function buildPremiereXml(project, a) {
     <parameter>
       <parameterid>scale</parameterid><name>Scale</name>
       <valuemin>0</valuemin><valuemax>10000</valuemax>
-      <keyframe><when>0</when><value>${from}</value></keyframe>
-      <keyframe><when>${durF}</when><value>${to}</value></keyframe>
+      <value>${from}</value>
+      <keyframe><when>${f0}</when><value>${from}</value></keyframe>
+      <keyframe><when>${f1}</when><value>${to}</value></keyframe>
     </parameter>
   </effect></filter>`;
     };
@@ -154,7 +159,7 @@ async function buildPremiereXml(project, a) {
     const vItems = videoClips.map((c) => `<clipitem id="clip-${c.id}">
   <name>${esc(c.name)}</name>
   ${rate}
-  <start>${toFrames(c.start)}</start><end>${toFrames(c.start + c.dur)}</end>
+  <start>${posFrames(c.start)}</start><end>${posFrames(c.start + c.dur)}</end>
   <in>0</in><out>${toFrames(c.dur)}</out>
   ${fileXml(c)}${kenBurnsFilter(c)}
 </clipitem>`).join('\n');
@@ -162,7 +167,7 @@ async function buildPremiereXml(project, a) {
     const aItems = audioClips.map((c) => `<clipitem id="clip-${c.id}">
   <name>${esc(c.name)}</name>
   ${rate}
-  <start>${toFrames(c.start)}</start><end>${toFrames(c.start + c.dur)}</end>
+  <start>${posFrames(c.start)}</start><end>${posFrames(c.start + c.dur)}</end>
   <in>0</in><out>${toFrames(c.dur)}</out>
   ${fileXml(c)}
   <sourcetrack><mediatype>audio</mediatype><trackindex>1</trackindex></sourcetrack>

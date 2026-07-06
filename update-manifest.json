@@ -1,5 +1,5 @@
 {
-  "version": "0.1.79",
+  "version": "0.1.80",
   "deps": "0a1409dd7b6c37e6b850a8223ac05d93b0380d94",
   "files": {
     "AGENTS.md": "1a0fd73c104ff40f5cce110a3ffac07a7aa77205",
@@ -9,7 +9,7 @@
     "auto-updater.js": "7f0d3a183a25f3c9150002dc3c45d89257358384",
     "bootstrap.js": "6cbd41b3842151ac184808cec1280d547b649600",
     "build-shorts.js": "9dfbb4dfee70ffb9105148b9744081e2bb287957",
-    "CLAUDE.md": "d98507058a5cb173ffc53256f216202ae2b4aaa2",
+    "CLAUDE.md": "bd86170ea61703fd8a1a38991facfee03e0da3a7",
     "comfy-engine.js": "8c996abee0f09f010330ecf4c4fdaaa07b8f5787",
     "core/accounts.js": "e36e07bbbf9eec4d56b584c3add8a1077fbe0cec",
     "core/book/book-theme.css": "8b3345c9004092d1a07713b37755344beabea91a",
@@ -38,7 +38,7 @@
     "core/parsers/playlist-parser.js": "33b137a661094beaa47a03258fda524478f2ec0d",
     "core/pipeline.js": "079ee119562098b88ede6559f68b304eb5c673a7",
     "core/playlist-video.js": "778de9f558cd66934fd944f3eb32611fabfc1828",
-    "core/premiere-xml.js": "85b9218286a92b99c760e538f037c7dce15ef7e8",
+    "core/premiere-xml.js": "f22ad204082cd9a5d72913f583cd6882314aedf9",
     "core/project-model.js": "7c31feb413dbae38b8f683f1a56975ac36b0cf13",
     "core/prompt-io.js": "cb429515d67ef5ebf8f254e4fc8d92279b95b81c",
     "core/sentence-splitter.js": "b9d1b29983edd59530322499d12303e61978bba1",
@@ -59,7 +59,7 @@
     "light-updater.js": "c9be26807112942a9cf4a88dfcd14a1004634762",
     "main.js": "fa0a6e0f2463e5c2ddcc92efbc23b8d86262cc5c",
     "package-lock.json": "7c46c6c7a08739e1e28df9c9286a860c70cd6760",
-    "package.json": "79e6a9234db35cb9d8bca3747a6dfb3740d78216",
+    "package.json": "914ee3b4759a6e015948c12c06f94cee84807f88",
     "preload.js": "76d66a53e576bc7ecb8170cc5ee90faf4b3ef589",
     "renderer/dist/assets/index-BGMqQ7XX.js": "d06f22c7c618aab69ffe78371f66410af7104d34",
     "renderer/dist/assets/index-CA-E3jEq.css": "8ee55c3eea9c830a45e7353b9140df0b90f5f33a",
