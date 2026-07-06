@@ -667,7 +667,14 @@ ipcMain.handle('export-premiere', async (_e, args = {}) => {
     if (r.success) {
       outs.push(r.xmlPath);
       // 자막(.srt) 을 XML 옆에 같이 생성 — Premiere 「캡션 가져오기」용.
-      try { P.writeSrt(pr, path.join(S.outRoot, `${baseName}_premiere.srt`), captionMaxChars); log(`   📄 자막: ${baseName}_premiere.srt`); }
+      //   ⚠ Premiere 는 BOM 없는 UTF-8 한글 srt 를 인코딩 오인(깨짐/미표시)하는 사례가 있어 BOM 을 붙인다.
+      try {
+        const srtPath = path.join(S.outRoot, `${baseName}_premiere.srt`);
+        P.writeSrt(pr, srtPath, captionMaxChars);
+        const buf = fs.readFileSync(srtPath);
+        if (!(buf[0] === 0xEF && buf[1] === 0xBB && buf[2] === 0xBF)) fs.writeFileSync(srtPath, Buffer.concat([Buffer.from([0xEF, 0xBB, 0xBF]), buf]));
+        log(`   📄 자막: ${baseName}_premiere.srt (UTF-8 BOM)`);
+      }
       catch (e) { log(`   ⚠ srt 생성 실패: ${e.message}`); }
     }
     else log(`✗ ${prLabel(pr)} 프리미어 XML 실패: ${r.error}`);
