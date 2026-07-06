@@ -429,7 +429,7 @@ export default function App() {
   // Premiere Pro 임포트용 XML(FCP7 xmeml) — 파일 > 가져오기로 시퀀스가 바로 열림.
   async function runPremiere(shortsNum) {
     setStatus('프리미어 XML 내보내는 중…');
-    try { const r = await api.exportPremiere({ shortsNum }); setStatus(r && r.outs && r.outs.length ? `프리미어 XML ${r.outs.length}개 — Premiere 에서 파일>가져오기` : '프리미어 XML 실패 — 로그 확인'); }
+    try { const r = await api.exportPremiere({ shortsNum, captionMaxChars: effCap }); setStatus(r && r.outs && r.outs.length ? `프리미어 XML ${r.outs.length}개 — Premiere 에서 파일>가져오기 (자막=.srt)` : '프리미어 XML 실패 — 로그 확인'); }
     catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
   }
   async function attachAsset(shortsNum, groupNum) {

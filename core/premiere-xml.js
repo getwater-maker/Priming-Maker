@@ -43,7 +43,7 @@ async function mediaDurationSec(p) {
 
 /**
  * @param {object} project  Project (sentences/groups/aspect/title)
- * @param {{ outPath: string, log?: fn }} a
+ * @param {{ outPath: string, ttsDir?: string, log?: fn }} a
  * @returns {Promise<{success:boolean, xmlPath?:string, error?:string}>}
  */
 async function buildPremiereXml(project, a) {
@@ -54,10 +54,24 @@ async function buildPremiereXml(project, a) {
     const W = vertical ? 1080 : square ? 1080 : 1920;
     const H = vertical ? 1920 : 1080;
 
+    // 문장 오디오 경로 해석 — tts 폴더 정본(`<num>.mp3/wav`) 우선, 없으면 s.ttsAudioPath.
+    //   (s.ttsAudioPath 는 캐시/임시 경로일 수 있어 — 프리미어가 프로젝트 하위 tts-N 파일을 물게 한다)
+    const resolveAudio = (s) => {
+      if (a.ttsDir) {
+        for (const ext of ['mp3', 'wav']) {
+          const p = path.join(a.ttsDir, `${s.num}.${ext}`);
+          if (fs.existsSync(p)) return p;
+        }
+      }
+      if (s.ttsAudioPath && fs.existsSync(s.ttsAudioPath)) return s.ttsAudioPath;
+      return null;
+    };
+
     // 그룹별 타임라인 구간 계산 (문장 TTS 누적 — vrew 와 동일)
     let cursor = 0; // 초
     const videoClips = [];
     const audioClips = [];
+    const missingAudio = [];
     let fileSeq = 0;
     for (const g of project.groups) {
       const sents = project.getSentencesOfGroup(g);
@@ -65,11 +79,13 @@ async function buildPremiereXml(project, a) {
       if (gDur <= 0) continue;
       const gStart = cursor;
 
-      // A1 — 문장 오디오 순차
+      // A1 — 문장 오디오 순차 (파일명 = 실제 tts 파일 그대로, 예 "37.mp3")
       for (const s of sents) {
         const d = s.ttsDurationSec || 0;
-        if (d > 0 && s.ttsAudioPath && fs.existsSync(s.ttsAudioPath)) {
-          audioClips.push({ id: ++fileSeq, path: s.ttsAudioPath, name: `tts_${String(s.num).padStart(3, '0')}`, start: cursor, dur: d, mediaDur: d });
+        if (d > 0) {
+          const ap = resolveAudio(s);
+          if (ap) audioClips.push({ id: ++fileSeq, path: ap, name: path.basename(ap), start: cursor, dur: d, mediaDur: d });
+          else missingAudio.push(s.num);
         }
         cursor += d;
       }
@@ -83,11 +99,22 @@ async function buildPremiereXml(project, a) {
         const vDur = Math.min(md, gDur);
         videoClips.push({ id: ++fileSeq, path: vid, name: `G${g.num}`, start: gStart, dur: vDur, mediaDur: md, isVideo: true });
         if (vDur < gDur - 0.05 && img) {
-          videoClips.push({ id: ++fileSeq, path: img, name: `G${g.num}_img`, start: gStart + vDur, dur: gDur - vDur, isVideo: false });
+          videoClips.push({ id: ++fileSeq, path: img, name: `G${g.num}_img`, start: gStart + vDur, dur: gDur - vDur, isVideo: false, kb: g.num });
         }
       } else if (img) {
-        videoClips.push({ id: ++fileSeq, path: img, name: `G${g.num}`, start: gStart, dur: gDur, isVideo: false });
+        videoClips.push({ id: ++fileSeq, path: img, name: `G${g.num}`, start: gStart, dur: gDur, isVideo: false, kb: g.num });
       }
+    }
+    // 이미지 실치수 → 화면 꽉 채움 스케일(%). Premiere 는 스틸을 원본 픽셀 그대로 놓으므로
+    //   Basic Motion Scale 로 cover 배율을 직접 지정해야 1920×1080 을 가득 채운다.
+    let readImageSize = null;
+    try { readImageSize = require('../vrew/vrew-builder').readImageSize; } catch {}
+    for (const c of videoClips) {
+      if (c.isVideo !== false) continue;
+      let iw = W, ih = H;
+      try { const sz = readImageSize && readImageSize(c.path); if (sz && sz.w && sz.h) { iw = sz.w; ih = sz.h; } } catch {}
+      c.imgW = iw; c.imgH = ih;
+      c.fillScale = Math.max(W / iw, H / ih) * 100; // cover 배율(%)
     }
     const totalFrames = toFrames(cursor);
     if (!audioClips.length && !videoClips.length) return { success: false, error: 'TTS·이미지가 없어 시퀀스를 만들 수 없습니다 (먼저 생성하세요)' };
@@ -98,17 +125,38 @@ async function buildPremiereXml(project, a) {
   <pathurl>${esc(pathUrl(c.path))}</pathurl>
   ${rate}
   ${c.mediaDur ? `<duration>${toFrames(c.mediaDur)}</duration>` : ''}
-  <media>${c.isVideo === false ? `<video><samplecharacteristics><width>${W}</width><height>${H}</height></samplecharacteristics></video>`
+  <media>${c.isVideo === false ? `<video><samplecharacteristics><width>${c.imgW || W}</width><height>${c.imgH || H}</height></samplecharacteristics></video>`
     : c.isVideo ? `<video><samplecharacteristics><width>${W}</width><height>${H}</height></samplecharacteristics></video><audio><channelcount>2</channelcount></audio>`
     : '<audio><channelcount>2</channelcount></audio>'}</media>
 </file>`;
+
+    // 이미지 스틸용 Basic Motion(Scale) — cover 배율 + 켄번스(그룹 번호 홀짝으로 줌인/줌아웃 교차).
+    //   Premiere 가 xmeml 의 Basic Motion scale 키프레임을 Motion>Scale 로 읽는다.
+    const kenBurnsFilter = (c) => {
+      if (c.isVideo !== false || !c.fillScale) return '';
+      const durF = toFrames(c.dur);
+      const s0 = c.fillScale, s1 = c.fillScale * 1.1; // 10% 줌
+      const zoomIn = (Number(c.kb) || 0) % 2 === 1;   // G홀수=줌인, G짝수=줌아웃
+      const from = (zoomIn ? s0 : s1).toFixed(2), to = (zoomIn ? s1 : s0).toFixed(2);
+      return `
+  <filter><effect>
+    <name>Basic Motion</name><effectid>basic</effectid>
+    <effectcategory>motion</effectcategory><effecttype>motion</effecttype><mediatype>video</mediatype>
+    <parameter>
+      <parameterid>scale</parameterid><name>Scale</name>
+      <valuemin>0</valuemin><valuemax>10000</valuemax>
+      <keyframe><when>0</when><value>${from}</value></keyframe>
+      <keyframe><when>${durF}</when><value>${to}</value></keyframe>
+    </parameter>
+  </effect></filter>`;
+    };
 
     const vItems = videoClips.map((c) => `<clipitem id="clip-${c.id}">
   <name>${esc(c.name)}</name>
   ${rate}
   <start>${toFrames(c.start)}</start><end>${toFrames(c.start + c.dur)}</end>
   <in>0</in><out>${toFrames(c.dur)}</out>
-  ${fileXml(c)}
+  ${fileXml(c)}${kenBurnsFilter(c)}
 </clipitem>`).join('\n');
 
     const aItems = audioClips.map((c) => `<clipitem id="clip-${c.id}">
@@ -151,8 +199,9 @@ ${aItems}
 
     fs.mkdirSync(path.dirname(a.outPath), { recursive: true });
     fs.writeFileSync(a.outPath, xml, 'utf8');
-    log(`🎬 프리미어 XML — 비디오/이미지 클립 ${videoClips.length}개 · 오디오 ${audioClips.length}개 · ${cursor.toFixed(1)}초 (${W}×${H}@${FPS}fps) → ${path.basename(a.outPath)}`);
-    log(`   Premiere: 파일 > 가져오기로 이 XML 열기 → 자막은 같은 폴더 .srt 를 캡션으로 가져오면 됩니다.`);
+    if (missingAudio.length) log(`⚠ 음성 파일을 못 찾은 문장 ${missingAudio.length}개 (컷 ${missingAudio.slice(0, 10).join(',')}${missingAudio.length > 10 ? '…' : ''}) — 그 구간은 무음. 🎤 TTS 재변환 후 다시 내보내세요.`);
+    log(`🎬 프리미어 XML — 비디오/이미지 클립 ${videoClips.length}개(이미지=화면 채움+켄번스) · 오디오 ${audioClips.length}개 · ${cursor.toFixed(1)}초 (${W}×${H}@${FPS}fps) → ${path.basename(a.outPath)}`);
+    log(`   Premiere: 파일 > 가져오기로 이 XML 열기 → 자막은 같은 폴더 _premiere.srt 를 「캡션 가져오기」로 얹으세요.`);
     return { success: true, xmlPath: a.outPath };
   } catch (e) {
     return { success: false, error: String(e.message || e) };

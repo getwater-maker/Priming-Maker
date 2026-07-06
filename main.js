@@ -654,7 +654,7 @@ ipcMain.handle('tts-build', async (_e, args = {}) => {
 // Premiere Pro 임포트용 XML(FCP7 xmeml) — 편별 시퀀스 파일 생성. Premiere: 파일 > 가져오기.
 ipcMain.handle('export-premiere', async (_e, args = {}) => {
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
-  const { shortsNum = null } = args;
+  const { shortsNum = null, captionMaxChars = 7 } = args;
   const { buildPremiereXml } = require('./core/premiere-xml');
   try { fs.mkdirSync(S.outRoot, { recursive: true }); } catch {}
   const outs = [];
@@ -662,8 +662,14 @@ ipcMain.handle('export-premiere', async (_e, args = {}) => {
     if (shortsNum && pr.shortsNum !== shortsNum) continue;
     const baseName = vrewBaseName(pr);
     const xmlPath = path.join(S.outRoot, `${baseName}_premiere.xml`);
-    const r = await buildPremiereXml(pr, { outPath: xmlPath, log });
-    if (r.success) outs.push(r.xmlPath);
+    // ttsDir 전달 — 오디오를 프로젝트 하위 tts-N 폴더 정본(<num>.mp3)으로 참조(캐시/임시 경로 방지).
+    const r = await buildPremiereXml(pr, { outPath: xmlPath, ttsDir: shortsDirs(S.outRoot, pr.shortsNum).tts, log });
+    if (r.success) {
+      outs.push(r.xmlPath);
+      // 자막(.srt) 을 XML 옆에 같이 생성 — Premiere 「캡션 가져오기」용.
+      try { P.writeSrt(pr, path.join(S.outRoot, `${baseName}_premiere.srt`), captionMaxChars); log(`   📄 자막: ${baseName}_premiere.srt`); }
+      catch (e) { log(`   ⚠ srt 생성 실패: ${e.message}`); }
+    }
     else log(`✗ ${prLabel(pr)} 프리미어 XML 실패: ${r.error}`);
   }
   if (outs.length) { try { shell.openPath(S.outRoot); } catch {} }
