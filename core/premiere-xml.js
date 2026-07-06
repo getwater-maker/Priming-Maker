@@ -42,6 +42,26 @@ async function mediaDurationSec(p) {
   } catch (_) { return null; }
 }
 
+// 이미지 → 켄번스(줌) 영상 사전 렌더 — Premiere 의 xmeml 임포터가 Basic Motion 키프레임을
+//   신뢰성 있게 안 읽어(정지 스케일만 적용, 실측), 확실하게 ffmpeg zoompan 으로 mp4 를 구워 넣는다.
+//   출력: 이미지 옆 kb_G{num}_{frames}f.mp4 (같은 이름 있으면 재사용 — 멱등).
+function renderKenBurns(imgPath, outPath, durSec, zoomIn, W, H) {
+  const { spawnSync } = require('child_process');
+  const ff = require('./media-utils').getFfmpegPath();
+  if (!ff || !fs.existsSync(ff)) return false;
+  const frames = Math.max(2, Math.round(durSec * FPS));
+  // 입력을 2배 크기로 cover 크롭 후 zoompan(중앙 기준) — 저배율 줌의 지터 완화.
+  const W2 = W * 2, H2 = H * 2;
+  const z = zoomIn
+    ? `1+0.10*on/${frames - 1}`      // 100% → 110% 줌인
+    : `1.10-0.10*on/${frames - 1}`;  // 110% → 100% 줌아웃
+  const vf = `scale=${W2}:${H2}:force_original_aspect_ratio=increase,crop=${W2}:${H2},` +
+    `zoompan=z='${z}':x='(iw-iw/zoom)/2':y='(ih-ih/zoom)/2':d=${frames}:s=${W}x${H}:fps=${FPS}`;
+  const r = spawnSync(ff, ['-y', '-i', imgPath, '-vf', vf, '-frames:v', String(frames),
+    '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p', '-an', outPath], { stdio: 'ignore' });
+  return r.status === 0 && fs.existsSync(outPath) && fs.statSync(outPath).size > 1024;
+}
+
 /**
  * @param {object} project  Project (sentences/groups/aspect/title)
  * @param {{ outPath: string, ttsDir?: string, log?: fn }} a
@@ -105,7 +125,16 @@ async function buildPremiereXml(project, a) {
           if (rep > 50) break; // 안전 상한
         }
       } else if (img) {
-        videoClips.push({ id: ++fileSeq, path: img, name: `G${g.num}`, start: gStart, dur: gDur, isVideo: false, kb: g.num });
+        // 켄번스 사전 렌더(mp4) — 성공 시 영상 클립으로, 실패(ffmpeg 없음 등) 시 스틸+필터 폴백.
+        const frames = Math.max(2, Math.round(gDur * FPS));
+        const kbPath = path.join(path.dirname(img), `kb_G${g.num}_${frames}f.mp4`);
+        let ok = fs.existsSync(kbPath) && fs.statSync(kbPath).size > 1024; // 멱등 재사용
+        if (!ok) {
+          log(`  🎞 G${g.num} 켄번스 렌더 (${gDur.toFixed(1)}s)…`);
+          ok = renderKenBurns(img, kbPath, gDur, (g.num % 2) === 1, W, H);
+        }
+        if (ok) videoClips.push({ id: ++fileSeq, path: kbPath, name: `G${g.num}`, start: gStart, dur: gDur, mediaDur: gDur, isVideo: true, noAudio: true });
+        else videoClips.push({ id: ++fileSeq, path: img, name: `G${g.num}`, start: gStart, dur: gDur, isVideo: false, kb: g.num });
       }
     }
     // 이미지 실치수 → 화면 꽉 채움 스케일(%). Premiere 는 스틸을 원본 픽셀 그대로 놓으므로
@@ -129,7 +158,7 @@ async function buildPremiereXml(project, a) {
   ${rate}
   ${c.mediaDur ? `<duration>${toFrames(c.mediaDur)}</duration>` : ''}
   <media>${c.isVideo === false ? `<video><samplecharacteristics><width>${c.imgW || W}</width><height>${c.imgH || H}</height></samplecharacteristics></video>`
-    : c.isVideo ? `<video><samplecharacteristics><width>${W}</width><height>${H}</height></samplecharacteristics></video><audio><channelcount>2</channelcount></audio>`
+    : c.isVideo ? `<video><samplecharacteristics><width>${W}</width><height>${H}</height></samplecharacteristics></video>${c.noAudio ? '' : '<audio><channelcount>2</channelcount></audio>'}`
     : '<audio><channelcount>2</channelcount></audio>'}</media>
 </file>`;
 
