@@ -7,6 +7,13 @@
 **편별 Vrew 4.0.1 .vrew 파일**을 자동 생성하는 Electron 앱. PrimingFlow(D:\PrimingFlow)의 엔진을
 복사·재활용한 독립 클론.
 
+## 🎞 프리미어 XML 3종 수정 (2026-07-04, v0.1.79)
+- **오디오**: `s.ttsAudioPath` 가 캐시/임시 경로면 프리미어가 엉뚱한 파일을 물거나(존재 시) 조용히 건너뜀(부재 시 무음).
+  → `buildPremiereXml(a.ttsDir)` 로 **tts-N 폴더 정본(`<num>.mp3/wav`) 우선** 참조 + 못 찾으면 컷 번호 경고 로그.
+- **이미지**: Premiere 는 스틸을 원본 픽셀 그대로 배치(1376×768 → 화면에 안 참) → 파일 실치수(readImageSize, **{w,h} 반환** 주의)
+  + `Basic Motion` scale 키프레임(xmeml)로 **cover 배율 → ×1.1 켄번스**(그룹 홀짝 줌인/줌아웃).
+- **자막**: export-premiere 가 XML 옆에 `_premiere.srt` 동시 생성(Premiere 캡션 가져오기용, captionMaxChars 반영).
+
 ## 🎵📖 BGM .vrew 삽입 확정 + 발음사전 UI + 그룹TTS 재변환 + BGM표시 (2026-07-04, v0.1.73)
 - 🐞 **BGM 이 .vrew 에 안 들어가던 문제 해결 — 수동 삽입 .vrew 샘플 분석으로 형식 확정**:
   Vrew BGM = ① `files[]` 에 `sourceFileType:'BGM'` 파일 + ② `props.tracks[tid]` 에 **`type:'bgm'`** 트랙
