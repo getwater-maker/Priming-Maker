@@ -530,8 +530,10 @@ export default function App() {
       for (const c of p.cuts) {
         const needImg = image === 'all' || (image === 'range' && inRange(c.num));
         const needVid = video === 'all' || (video === 'range' && inRange(c.num));
-        const noImg = needImg && (!c.imagePrompt || !c.imagePrompt.trim());
-        const noVid = needVid && (!c.videoPrompt || !c.videoPrompt.trim());
+        // 이미 이미지/영상이 첨부돼 있으면(hasVisual) 프롬프트가 없어도 생성 불필요 — 실제 생성 로직(hasVisual)과 기준을 맞춤.
+        const hasVisual = !!(c.imagePath || c.videoPath);
+        const noImg = needImg && !hasVisual && (!c.imagePrompt || !c.imagePrompt.trim());
+        const noVid = needVid && !c.videoPath && (!c.videoPrompt || !c.videoPrompt.trim());
         if (noImg || noVid) missing.push(`${p.title} G${c.num}: ${[noImg ? '이미지' : null, noVid ? 'i2v' : null].filter(Boolean).join('·')} 없음`);
       }
     }
