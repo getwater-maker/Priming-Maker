@@ -532,8 +532,11 @@ export default function App() {
         const needVid = video === 'all' || (video === 'range' && inRange(c.num));
         // 이미 이미지/영상이 첨부돼 있으면(hasVisual) 프롬프트가 없어도 생성 불필요 — 실제 생성 로직(hasVisual)과 기준을 맞춤.
         const hasVisual = !!(c.imagePath || c.videoPath);
+        const hasImgSource = hasVisual || (c.imagePrompt && c.imagePrompt.trim()); // 이미지 or 이미지프롬프트
         const noImg = needImg && !hasVisual && (!c.imagePrompt || !c.imagePrompt.trim());
-        const noVid = needVid && !c.videoPath && (!c.videoPrompt || !c.videoPrompt.trim());
+        // i2v 는 '이미지→영상'이라 이미지(또는 이미지프롬프트)만 있으면 videoPrompt 없어도 기본 모션으로 생성됨(선택 사항).
+        //   → 이미지 소스가 아예 없을 때만 경고(그건 애초에 이미지 경고로 이미 잡힘).
+        const noVid = needVid && !c.videoPath && !hasImgSource;
         if (noImg || noVid) missing.push(`${p.title} G${c.num}: ${[noImg ? '이미지' : null, noVid ? 'i2v' : null].filter(Boolean).join('·')} 없음`);
       }
     }
