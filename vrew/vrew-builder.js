@@ -292,42 +292,47 @@ const DEFAULT_SPEAKER = {
   versions: ['v4'], isUnavailable: false,
 };
 
-// 켄번스 패턴 풀 — 12개(줌2·팬4·대각4·코너푸시2)로 확장, 시선 집중·다양성↑.
+// 켄번스 패턴 풀 — 12개(줌2·팬4·대각4·코너푸시2).
 // ★ Vrew 좌표: scale = "이미지에서 보이는 영역의 비율"(1.0=전체, 작을수록 줌인).
 //   크롭창이 이미지를 벗어나면(=center 가 [scale/2, 1−scale/2] 밖) 뒤 검정이 노출됨.
-//   아래 패턴은 전부 그 안전범위 안에서 설계 + _kenBurnsFor 가 한 번 더 클램프(안전망).
+// ★★ 이 12개는 앱 미리보기(renderer/src/styles.css @keyframes kb0~kb11)와 "정확히" 일치시킨다.
+//   미리보기는 object-fit:cover + `transform: scale(S) translate(T%)` (CSS scale=확대배율, 1.08~1.22).
+//   Vrew scale(=보이는 영역 비율)는 그 역수: scale_vrew = 1/scale_css → 0.82~0.93 (약한 줌).
+//   center = 0.5 − T/100 (translate 부호 반영). 예전엔 scale 0.60~0.66(=1.5~1.67배 강줌)이라
+//   Vrew 에서만 이미지가 34~40% 잘려 상단이 날아갔음 → 미리보기와 동일한 약한 줌으로 통일.
+//   인덱스도 미리보기와 같은 (g.num*7+3)%12 로 맞춰(_kenBurnsFor(g.num)) 그룹별 패턴이 완전 일치.
 const KEN_BURNS_PATTERNS = [
-  // 0) 중앙 슬로우 줌인 (전체 → 확대)
-  { from: { scale: 0.95, centerX: 0.50, centerY: 0.50 }, to: { scale: 0.62, centerX: 0.50, centerY: 0.50 } },
-  // 1) 중앙 줌아웃 (확대 → 전체)
-  { from: { scale: 0.62, centerX: 0.50, centerY: 0.50 }, to: { scale: 0.95, centerX: 0.50, centerY: 0.50 } },
-  // 2) 좌 → 우 가로 팬 (줌 고정)
-  { from: { scale: 0.66, centerX: 0.34, centerY: 0.50 }, to: { scale: 0.66, centerX: 0.66, centerY: 0.50 } },
-  // 3) 우 → 좌 가로 팬
-  { from: { scale: 0.66, centerX: 0.66, centerY: 0.50 }, to: { scale: 0.66, centerX: 0.34, centerY: 0.50 } },
-  // 4) 하 → 상 세로 팬
-  { from: { scale: 0.66, centerX: 0.50, centerY: 0.66 }, to: { scale: 0.66, centerX: 0.50, centerY: 0.34 } },
-  // 5) 상 → 하 세로 팬
-  { from: { scale: 0.66, centerX: 0.50, centerY: 0.34 }, to: { scale: 0.66, centerX: 0.50, centerY: 0.66 } },
-  // 6) 좌상 → 중앙 대각 줌인
-  { from: { scale: 0.70, centerX: 0.37, centerY: 0.37 }, to: { scale: 0.80, centerX: 0.50, centerY: 0.50 } },
-  // 7) 우상 → 중앙 대각 줌인
-  { from: { scale: 0.70, centerX: 0.63, centerY: 0.37 }, to: { scale: 0.80, centerX: 0.50, centerY: 0.50 } },
-  // 8) 좌하 → 중앙 대각 줌인
-  { from: { scale: 0.70, centerX: 0.37, centerY: 0.63 }, to: { scale: 0.80, centerX: 0.50, centerY: 0.50 } },
-  // 9) 우하 → 중앙 대각 줌인
-  { from: { scale: 0.70, centerX: 0.63, centerY: 0.63 }, to: { scale: 0.80, centerX: 0.50, centerY: 0.50 } },
-  // 10) 전체 → 우상 코너로 푸시인
-  { from: { scale: 0.92, centerX: 0.50, centerY: 0.50 }, to: { scale: 0.60, centerX: 0.62, centerY: 0.40 } },
-  // 11) 전체 → 좌하 코너로 푸시인
-  { from: { scale: 0.92, centerX: 0.50, centerY: 0.50 }, to: { scale: 0.60, centerX: 0.38, centerY: 0.60 } },
+  // 0) 중앙 슬로우 줌인 (kb0: 1.08→1.22)
+  { from: { scale: 0.926, centerX: 0.50, centerY: 0.50 }, to: { scale: 0.820, centerX: 0.50, centerY: 0.50 } },
+  // 1) 중앙 줌아웃 (kb1: 1.22→1.08)
+  { from: { scale: 0.820, centerX: 0.50, centerY: 0.50 }, to: { scale: 0.926, centerX: 0.50, centerY: 0.50 } },
+  // 2) 좌 → 우 가로 팬 (kb2: translate -5%→5%)
+  { from: { scale: 0.862, centerX: 0.55, centerY: 0.50 }, to: { scale: 0.862, centerX: 0.45, centerY: 0.50 } },
+  // 3) 우 → 좌 가로 팬 (kb3)
+  { from: { scale: 0.862, centerX: 0.45, centerY: 0.50 }, to: { scale: 0.862, centerX: 0.55, centerY: 0.50 } },
+  // 4) 하 → 상 세로 팬 (kb4)
+  { from: { scale: 0.862, centerX: 0.50, centerY: 0.45 }, to: { scale: 0.862, centerX: 0.50, centerY: 0.55 } },
+  // 5) 상 → 하 세로 팬 (kb5)
+  { from: { scale: 0.862, centerX: 0.50, centerY: 0.55 }, to: { scale: 0.862, centerX: 0.50, centerY: 0.45 } },
+  // 6) 좌상 → 중앙 대각 줌인 (kb6: 1.10 t(-4,-4) → 1.20 t(2,2))
+  { from: { scale: 0.909, centerX: 0.54, centerY: 0.54 }, to: { scale: 0.833, centerX: 0.48, centerY: 0.48 } },
+  // 7) 우상 → 중앙 대각 줌인 (kb7)
+  { from: { scale: 0.909, centerX: 0.46, centerY: 0.54 }, to: { scale: 0.833, centerX: 0.52, centerY: 0.48 } },
+  // 8) 좌하 → 중앙 대각 줌인 (kb8)
+  { from: { scale: 0.909, centerX: 0.54, centerY: 0.46 }, to: { scale: 0.833, centerX: 0.48, centerY: 0.52 } },
+  // 9) 우하 → 중앙 대각 줌인 (kb9)
+  { from: { scale: 0.909, centerX: 0.46, centerY: 0.46 }, to: { scale: 0.833, centerX: 0.52, centerY: 0.52 } },
+  // 10) 전체 → 우상 코너 푸시인 (kb10: 1.08 → 1.22 t(5,-5))
+  { from: { scale: 0.926, centerX: 0.50, centerY: 0.50 }, to: { scale: 0.820, centerX: 0.45, centerY: 0.55 } },
+  // 11) 전체 → 좌하 코너 푸시인 (kb11: 1.08 → 1.22 t(-5,5))
+  { from: { scale: 0.926, centerX: 0.50, centerY: 0.50 }, to: { scale: 0.820, centerX: 0.55, centerY: 0.45 } },
 ];
 
-// 인접 그룹이 같은 패턴을 받지 않도록 의사 난수 시퀀스 (소수 곱셈 + 오프셋).
+// 미리보기(App.jsx)와 동일 공식: 그룹 번호(1-based) 기반 (num*7+3)%12.
 // 곱수 7 은 풀 길이 12 와 서로소 → 인덱스가 0~11 전부 비반복 순회.
-function _pickKenBurnsIndex(groupIdx) {
+function _pickKenBurnsIndex(groupNum) {
   const len = KEN_BURNS_PATTERNS.length;
-  return ((groupIdx * 7) + 3) % len;
+  return (((Number(groupNum) || 0) * 7) + 3) % len;
 }
 
 // ★ 검정 방지 클램프: scale 은 (0,1] (1 초과면 이미지보다 큰 영역 = 검정), center 는
@@ -1005,7 +1010,7 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
       const scale = Math.min(_canvasW / isz.w, _canvasH / isz.h);
       const wF = (isz.w * scale) / _canvasW;
       const hF = (isz.h * scale) / _canvasH;
-      const kb = _kenBurnsFor(groupIdx);
+      const kb = _kenBurnsFor(g.num);
       track = {
         trackId: tid, mediaId: mid,
         xPos: (1 - wF) / 2, yPos: (1 - hF) / 2, height: hF, width: wF,
@@ -1017,7 +1022,7 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
       };
       log(`[Vrew] 그룹${g.num} 이미지 ${isz.w}x${isz.h}(비율${imgRatio.toFixed(2)}) — 가운데 비율유지 + 켄번스`);
     } else {
-      const kb = _kenBurnsFor(groupIdx);
+      const kb = _kenBurnsFor(g.num);
       track = {
         trackId: tid, mediaId: mid,
         xPos: _aspect === '16:9' ? -0.004 : 0, yPos: 0, height: 1, width: _aspect === '16:9' ? 1.008 : 1,

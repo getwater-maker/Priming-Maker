@@ -1,5 +1,5 @@
 {
-  "version": "0.1.84",
+  "version": "0.1.85",
   "deps": "0a1409dd7b6c37e6b850a8223ac05d93b0380d94",
   "files": {
     "AGENTS.md": "1a0fd73c104ff40f5cce110a3ffac07a7aa77205",
@@ -59,7 +59,7 @@
     "light-updater.js": "c9be26807112942a9cf4a88dfcd14a1004634762",
     "main.js": "86586f63abedc89cf4085628198bb261ca466b82",
     "package-lock.json": "7c46c6c7a08739e1e28df9c9286a860c70cd6760",
-    "package.json": "7cf02649b5d7bd791e170a6b7ab964e41cdc1432",
+    "package.json": "6f11fb998a7c3bd1bfdddddcf9f1791c32a3bdcc",
     "preload.js": "76d66a53e576bc7ecb8170cc5ee90faf4b3ef589",
     "renderer/dist/assets/index-BhxEOTPt.js": "af170ac601895fb4701fea8203203c062868f523",
     "renderer/dist/assets/index-CA-E3jEq.css": "8ee55c3eea9c830a45e7353b9140df0b90f5f33a",
@@ -93,7 +93,7 @@
     "vrew/dummy/shape-square.vbin": "7915d4dcdcd7572c4a988ef773ea5bd0a927dc8e",
     "vrew/dummy/uc-0010-simple-textbox.bin": "24d897751b391f868b8bcfb5159a0da4f2abc9b7",
     "vrew/dummy/uc-0010-simple-textbox.meta.json": "ba3a41513c2bb7efff3802d219c754ce9b181e43",
-    "vrew/vrew-builder.js": "311992db8bf02f0f06e4689fc6c0c2e9f2ff972f",
+    "vrew/vrew-builder.js": "195614ce5f546b784f765f0318b51d86a4b8abd1",
     "vrew-template.json": "7df033330328143fbc9211ca92eb2063c6cace65",
     "Wan2.2 I2V/video_wan2_2_14B_i2v.json": "dd98d01d3119f22846c118334e4819f46eaf56ad"
   }
