@@ -1066,8 +1066,12 @@ async function generatePromptsChunked(projects, opts, callAnswer, logger) {
 
 // 프롬프트 없는 그룹(prose/롱폼 대본 등) → 이미지 생성 전에 LLM 으로 내용 맞는 영어 프롬프트 자동 생성.
 // Ollama 1순위 → Gemini 키 → 나레이션 폴백. 이미 프롬프트 있으면 아무것도 안 함.
+// ★ 이미 이미지/영상이 붙은 그룹(일괄첨부·삼국지처럼 사전 렌더된 이미지)은 제외 — 어차피 이미지 생성을
+//   건너뛰므로(hasVisual) 프롬프트가 쓸모없다. 예전엔 imagePrompt 텍스트 유무만 봐서, 이미지 다 붙어도
+//   대본에 `> 🖼️ 이미지:` 줄이 없으면 Ollama 가 전 그룹 프롬프트를 헛생성해 실행이 크게 지연됐다.
 async function autoFillPrompts(projects, logger) {
-  const need = projects.some((pr) => pr.groups.some((g) => !g.imagePrompt || !g.imagePrompt.trim()));
+  const needsPrompt = (g) => (!g.imagePrompt || !g.imagePrompt.trim()) && !hasVisual(g);
+  const need = projects.some((pr) => pr.groups.some(needsPrompt));
   if (!need) return;
   const PromptIO = require('./core/prompt-io');
   // 1순위: 로컬/원격 Ollama (무료) — 도달 가능하면 사용
@@ -1076,7 +1080,7 @@ async function autoFillPrompts(projects, logger) {
   if (tags.ok) {
     try {
       logger(`🤖 프롬프트 없는 그룹 — Ollama(${oc.model})로 내용 맞는 프롬프트 자동 생성 중…`);
-      const r = await generatePromptsChunked(projects, { includeFn: (g) => !g.imagePrompt || !g.imagePrompt.trim() }, (req) => PromptIO.callLlmTextApi('ollama', '', req, { baseUrl: oc.baseUrl, model: oc.model }), logger);
+      const r = await generatePromptsChunked(projects, { includeFn: needsPrompt }, (req) => PromptIO.callLlmTextApi('ollama', '', req, { baseUrl: oc.baseUrl, model: oc.model }), logger);
       logger(`📥 프롬프트 자동 생성 완료(Ollama) — ${r.groups}개 그룹 (🖼${r.img}·🎬${r.vid})`);
       return;
     } catch (e) { logger('Ollama 프롬프트 생성 실패: ' + e.message + ' — Gemini/나레이션으로 폴백'); }
@@ -1087,7 +1091,7 @@ async function autoFillPrompts(projects, logger) {
   if (!key.trim()) { logger('⚠ 프롬프트 없는 그룹 — Ollama 미도달 & Gemini 키 없음(⚙에서 설정 권장). 지금은 나레이션으로 진행됩니다.'); return; }
   try {
     logger('🤖 프롬프트 없는 그룹 — Gemini API로 내용 맞는 프롬프트 자동 생성 중…');
-    const r = await generatePromptsChunked(projects, { includeFn: (g) => !g.imagePrompt || !g.imagePrompt.trim() }, (req) => PromptIO.callLlmTextApi('gemini', key, req), logger);
+    const r = await generatePromptsChunked(projects, { includeFn: needsPrompt }, (req) => PromptIO.callLlmTextApi('gemini', key, req), logger);
     logger(`📥 프롬프트 자동 생성 완료(Gemini) — ${r.groups}개 그룹 (🖼${r.img}·🎬${r.vid})`);
   } catch (e) { logger('프롬프트 자동 생성 실패: ' + e.message + ' (나레이션으로 진행)'); }
 }
