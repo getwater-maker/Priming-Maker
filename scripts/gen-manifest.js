@@ -17,7 +17,7 @@ const ROOT = path.resolve(__dirname, '..');
 const OUT = path.join(ROOT, 'update-manifest.json');
 
 // 폴더 단위 제외 (이름 일치) — 주의: 'dist' 는 여기 넣지 않는다(renderer/dist 는 포함해야 함).
-const EXCLUDE_DIR_NAMES = new Set(['node_modules', '.git', 'output', 'test', 'lora-dataset', 'scripts', 'Ace Step', 'kaggle-lora']);
+const EXCLUDE_DIR_NAMES = new Set(['node_modules', '.git', 'output', 'test', 'lora-dataset', 'scripts', 'Ace Step', 'kaggle-lora', 'qwen-design']);
 // 상대경로(슬래시) 정규식 제외 — 대용량/정적/소스 + 루트 설치산출물 dist/
 const EXCLUDE_REL = [
   /^dist\//,            // electron-builder 설치파일 산출물 (renderer/dist 는 제외 안 됨)

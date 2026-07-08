@@ -132,6 +132,14 @@ export default function App() {
   const [styleEditOpen, setStyleEditOpen] = useState(false); // 이미지 스타일 편집 모달
   const [newStyle, setNewStyle] = useState({ name: '', prompt: '' }); // 새 스타일 입력 버퍼
   const [dictOpen, setDictOpen] = useState(false);   // 발음사전 모달
+  // 🎨 보이스디자인(Qwen3-TTS) 모달
+  const [vdOpen, setVdOpen] = useState(false);
+  const [vdInstruct, setVdInstruct] = useState('');
+  const [vdText, setVdText] = useState('안녕하세요. 오늘은 아주 흥미로운 역사 이야기를 들려드리겠습니다.');
+  const [vdStatus, setVdStatus] = useState('');
+  const [vdBusy, setVdBusy] = useState(false);
+  const [vdWavUrl, setVdWavUrl] = useState('');
+  const [vdSavedPath, setVdSavedPath] = useState('');
   const [dictRows, setDictRows] = useState([]);       // [{source, pron, enabled}]
   const [ollamaOpen, setOllamaOpen] = useState(false);
   const [ollama, setOllama] = useState(null);           // { baseUrl, model }
@@ -813,6 +821,45 @@ export default function App() {
     try { const url = await api.readAudio(p); if (url) { const a = new Audio(url); a.play().catch(() => {}); } }
     catch (e) { logline('미리듣기 실패: ' + e.message); }
   }
+  // ── 🎨 보이스디자인 (Qwen3-TTS 온디맨드 서버) ─────────────────────────────
+  async function openVoiceDesign() {
+    setVdOpen(true); setVdWavUrl(''); setVdSavedPath(''); setVdBusy(true); setVdStatus('설치 확인 중…');
+    try {
+      const st = await api.qwenDesignStatus();
+      if (!st || !st.installed) { setVdStatus('⚠ 설치 안 됨 — qwen-design 폴더의 "1_최초설치.bat" 를 먼저 실행하세요.'); setVdBusy(false); return; }
+      setVdStatus('서버 준비 중… (첫 실행은 모델 로딩으로 수 분 소요)');
+      const r = await api.qwenDesignStart();
+      if (r && r.ok) setVdStatus('준비 완료 — 목소리 설명을 입력하고 생성하세요.');
+      else setVdStatus('⚠ 서버 준비 실패: ' + ((r && r.error) || '알 수 없음'));
+    } catch (e) { setVdStatus('오류: ' + e.message); }
+    setVdBusy(false);
+  }
+  async function vdGenerate() {
+    if (!vdInstruct.trim()) { setVdStatus('목소리 설명을 먼저 입력하세요.'); return; }
+    setVdBusy(true); setVdStatus('목소리 생성 중… (수 초)');
+    try {
+      const r = await api.qwenDesignGenerate({ instruct: vdInstruct, text: vdText || undefined });
+      if (r && r.ok) {
+        setVdSavedPath(r.path);
+        const url = await api.readAudio(r.path);
+        setVdWavUrl(url || '');
+        if (url) new Audio(url).play().catch(() => {});
+        setVdStatus('생성 완료 — 들어보고, 좋으면 아래 “참조음성으로 지정” 을 누르세요.');
+      } else setVdStatus('⚠ 생성 실패: ' + ((r && r.error) || '알 수 없음'));
+    } catch (e) { setVdStatus('오류: ' + e.message); }
+    setVdBusy(false);
+  }
+  async function vdAssign() {
+    if (!vdSavedPath) return;
+    setCh((c) => ({ ...c, voiceCloneRefAudio: vdSavedPath, voiceCloneRefText: vdText }));
+    try { const list = await api.listRefAudio(); setChRefList(Array.isArray(list) ? list : []); } catch {}
+    setStatus('보이스디자인 음성을 참조음성으로 지정했습니다. (채널 편집창에서 저장하세요)');
+    closeVoiceDesign();
+  }
+  async function closeVoiceDesign() {
+    setVdOpen(false);
+    try { await api.qwenDesignStop(); } catch {}
+  }
   // Supertonic 음성 미리듣기 — 백엔드로 짧은 샘플을 즉석 합성해 재생.
   async function previewSupertonicVoice() {
     const v = /^[MF][1-5]$/.test(ch && ch.voice) ? ch.voice : 'M1';
@@ -1254,7 +1301,8 @@ export default function App() {
                     {chRefList.map((r) => <option key={r.path} value={r.path}>{r.name}</option>)}
                   </select>
                   <button className="ghost" style={{ flex: '0 0 auto' }} title="미리듣기" onClick={() => playRef(ch.voiceCloneRefAudio)}>▶</button>
-                  <button className="ghost" style={{ flex: '0 0 auto' }} title="참조음성 폴더 열기 (같은 이름의 .txt 가 참조텍스트로 쓰입니다)" onClick={() => api.openRefFolder(ch.voiceCloneRefAudio || '')}>찾기</button></div>
+                  <button className="ghost" style={{ flex: '0 0 auto' }} title="참조음성 폴더 열기 (같은 이름의 .txt 가 참조텍스트로 쓰입니다)" onClick={() => api.openRefFolder(ch.voiceCloneRefAudio || '')}>찾기</button>
+                  <button className="ghost" style={{ flex: '0 0 auto' }} title="텍스트 설명으로 새 목소리 만들기 (Qwen3-TTS 보이스디자인)" onClick={openVoiceDesign}>🎨 디자인</button></div>
               </>
             )}
             <div className="frow"><label>사전설정</label><textarea rows="2" placeholder="예: 30대 한국 남성, 회색 양복, 따뜻한 조명 (모든 이미지 공통)" value={ch.presetPrompt} onChange={(e) => setCh({ ...ch, presetPrompt: e.target.value })} /></div>
@@ -1338,6 +1386,26 @@ export default function App() {
               <span className="meta" style={{ marginLeft: 8 }}>저장 후 <b>TTS를 다시 변환</b>해야 반영됩니다.</span>
             </div>
             <div className="mbtns"><button onClick={saveDict}>저장</button><button className="ghost" onClick={() => setDictOpen(false)}>취소</button></div>
+          </div>
+        </div>
+      )}
+      {vdOpen && (
+        <div className="modal-bg show" onClick={(e) => { if (e.target.classList.contains('modal-bg')) closeVoiceDesign(); }}>
+          <div className="modal-card wide" onClick={(e) => e.stopPropagation()}>
+            <h3>🎨 보이스디자인 — 텍스트 설명으로 새 목소리</h3>
+            <p className="meta" style={{ margin: '0 0 12px' }}>원하는 목소리를 글로 설명하면 새 목소리를 만들어 이 채널의 <b>참조음성</b>으로 지정합니다. 이후 음성변환은 OmniVoice 가 그 목소리를 복제해서 진행합니다. (창을 닫으면 디자인 서버는 자동으로 꺼집니다)</p>
+            <div className="frow" style={{ alignItems: 'flex-start' }}><label>목소리 설명</label>
+              <textarea rows="3" placeholder="예: 60대 한국인 남성 내레이터. 중저음이고 차분하며 신뢰감 있는 목소리. 역사 다큐멘터리 톤." value={vdInstruct} onChange={(e) => setVdInstruct(e.target.value)} /></div>
+            <div className="frow" style={{ alignItems: 'flex-start' }}><label>미리들을 문장</label>
+              <textarea rows="2" value={vdText} onChange={(e) => setVdText(e.target.value)} /></div>
+            <div className="frow"><label></label>
+              <button onClick={vdGenerate} disabled={vdBusy}>🎨 목소리 생성</button>
+              {vdWavUrl ? <button className="ghost" onClick={() => new Audio(vdWavUrl).play().catch(() => {})}>▶ 다시 듣기</button> : null}
+              {vdSavedPath ? <button onClick={vdAssign} disabled={vdBusy}>✔ 이 목소리를 참조음성으로 지정</button> : null}
+            </div>
+            {vdWavUrl ? <div className="frow"><label></label><audio controls src={vdWavUrl} style={{ flex: 1 }} /></div> : null}
+            <div className="meta" style={{ minHeight: 22, whiteSpace: 'pre-wrap', color: vdStatus.startsWith('⚠') ? '#c0392b' : undefined }}>{vdBusy ? '⏳ ' : ''}{vdStatus}</div>
+            <div className="mbtns"><button className="ghost" onClick={closeVoiceDesign}>닫기</button></div>
           </div>
         </div>
       )}

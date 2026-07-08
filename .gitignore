@@ -14,3 +14,7 @@ kaggle-lora/*.zip
 kaggle-lora/joseon-krea-dataset.zip
 # 별개 프로젝트(임베디드 git repo) — 배포 제외
 usage-coach/
+# Qwen3-TTS 보이스디자인 — 파이썬 venv(2.5GB)·테스트 산출물은 로컬 전용(커밋 제외)
+qwen-design/venv/
+qwen-design/__pycache__/
+qwen-design/test.wav

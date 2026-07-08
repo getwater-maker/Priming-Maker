@@ -520,6 +520,42 @@ ipcMain.handle('open-ref-folder', (_e, p) => {
   return true;
 });
 
+// ── Qwen3-TTS 보이스디자인 (온디맨드 서버 9893) ───────────────────────────────
+//   모달 열 때 start(서버 기동+모델 로딩) → generate(설명→wav, ref-audio 폴더 저장) → 모달 닫을 때 stop.
+//   start 되면 S.voiceDesignActive=true → 그동안 음성변환(OmniVoice)을 막아 VRAM 동시 사용(OOM) 차단.
+const QD = require('./core/qwen-design');
+ipcMain.handle('qwen-design-status', async () => {
+  try { return await QD.status(); } catch (e) { return { installed: false, error: String((e && e.message) || e) }; }
+});
+ipcMain.handle('qwen-design-start', async () => {
+  const r = await QD.start(log).catch((e) => ({ ok: false, error: String((e && e.message) || e) }));
+  if (r && r.ok) S.voiceDesignActive = true;
+  return r;
+});
+ipcMain.handle('qwen-design-stop', async () => {
+  S.voiceDesignActive = false;
+  return await QD.stop(log).catch((e) => ({ ok: false, error: String((e && e.message) || e) }));
+});
+ipcMain.handle('qwen-design-generate', async (_e, args = {}) => {
+  const instruct = (args.instruct || '').trim();
+  const text = (args.text || '').trim() || '안녕하세요. 이 목소리로 이야기를 들려드리겠습니다.';
+  if (!instruct) return { ok: false, error: '목소리 설명이 비어 있습니다' };
+  const r = await QD.generate({ instruct, text, language: args.language || 'Korean' }, log);
+  if (!r.ok) return r;
+  // ref-audio 폴더에 wav + 같은이름.txt(참조텍스트) 저장 → 참조음성 목록에 자동 편입(OmniVoice 가 .txt 를 refText 로 사용)
+  try {
+    const dir = path.join(os.homedir(), '.flow-app', 'ref-audio');
+    fs.mkdirSync(dir, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14);
+    const base = 'voicedesign_' + stamp;
+    const wavPath = path.join(dir, base + '.wav');
+    fs.writeFileSync(wavPath, r.buffer);
+    fs.writeFileSync(path.join(dir, base + '.txt'), text, 'utf8');
+    log(`🎨 보이스디자인 저장: ${base}.wav (+ .txt 참조텍스트)`);
+    return { ok: true, path: wavPath, name: base + '.wav', text };
+  } catch (e) { return { ok: false, error: '저장 실패: ' + String((e && e.message) || e) }; }
+});
+
 // 대본(.md) 내용으로 롱폼/쇼츠 자동 판별 — '## 쇼츠 N' 헤더가 있으면 쇼츠, 없으면 롱폼.
 //   (사용자가 탭을 잘못 골라 열어도 대본 형식에 맞는 모드로 연다.) 파일을 못 읽으면 null.
 function detectScriptMode(scriptPath) {
@@ -615,6 +651,7 @@ function ensureDirs(outRoot) {
 }
 
 ipcMain.handle('tts-build', async (_e, args = {}) => {
+  if (S.voiceDesignActive) { log('⚠ 보이스디자인 중에는 음성변환을 할 수 없습니다. 디자인 창을 닫은 뒤 다시 시도하세요.'); return { ok: false, error: 'voice-design-active' }; }
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
   const { shortsNum = null, dry = false, presetName = null, speed = 1.15, force = false } = args;
   const clipMaxSec = (args.clipMaxSec && Number(args.clipMaxSec) > 0) ? Number(args.clipMaxSec) : 8.0; // 영상 엔진별 그룹 캡(Grok 6/Flow 8)
@@ -1673,6 +1710,7 @@ ipcMain.handle('load-project', async () => {
 // 전체 제작 코어 — 현재 활성 대본(S.parsed/S.outRoot)에 대해 TTS→이미지→영상→.vrew.
 //   make-all(단건)·run-batch(순차 큐)가 공용. opts.openVrew/openFolder 로 자동열기 제어(큐 실행 시 끔).
 async function runMakeAllCore(opts = {}) {
+  if (S.voiceDesignActive) { log('⚠ 보이스디자인 중에는 제작을 할 수 없습니다. 디자인 창을 닫은 뒤 다시 시도하세요.'); return; }
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
   const { shortsNum = null, engine = 'genspark', presetName = null, speed = null, captionStyle = null, captionMaxChars = 7, styleId = null, fromNum = null, toNum = null, dry = false, videoEngine = 'grok', flowVideoModel = 'Veo 3.1 - Lite', flowCount = 'x1', clipMaxSec = null, aiNotice = false, bgm = null, openVrew = true, openFolder = true } = opts;
   const stylePrompt = styleId ? (require('./core/style-store').getPrompt(styleId) || '') : '';
