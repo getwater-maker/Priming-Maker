@@ -1,4 +1,7 @@
 * text=auto eol=lf
+# Windows 배치는 CRLF 유지 (LF면 chcp+한글경로에서 cmd 파싱이 깨짐)
+*.bat text eol=crlf
+*.cmd text eol=crlf
 *.vbin binary
 *.bin binary
 *.mp3 binary
