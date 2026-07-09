@@ -542,17 +542,31 @@ ipcMain.handle('qwen-design-generate', async (_e, args = {}) => {
   if (!instruct) return { ok: false, error: '목소리 설명이 비어 있습니다' };
   const r = await QD.generate({ instruct, text, language: args.language || 'Korean' }, log);
   if (!r.ok) return r;
-  // ref-audio 폴더에 wav + 같은이름.txt(참조텍스트) 저장 → 참조음성 목록에 자동 편입(OmniVoice 가 .txt 를 refText 로 사용)
+  // 미리듣기용 임시 파일에만 저장(아직 참조음성 목록엔 넣지 않음) — 저장 버튼을 눌러야 정식 등록.
+  try {
+    const tmpDir = path.join(os.homedir(), '.shots-maker', 'voicedesign-temp');
+    fs.mkdirSync(tmpDir, { recursive: true });
+    const tmpPath = path.join(tmpDir, 'preview.wav');
+    fs.writeFileSync(tmpPath, r.buffer);
+    S.vdLastTemp = tmpPath; S.vdLastText = text;   // 저장 시 이 wav + 이 문장(=참조텍스트) 사용
+    return { ok: true, tempPath: tmpPath, text };
+  } catch (e) { return { ok: false, error: '임시 저장 실패: ' + String((e && e.message) || e) }; }
+});
+// 저장: 방금 생성한 미리듣기 wav 를 사용자가 지정한 파일명으로 ref-audio 에 정식 등록(+.txt 참조텍스트).
+ipcMain.handle('qwen-design-save', async (_e, args = {}) => {
+  if (!S.vdLastTemp || !fs.existsSync(S.vdLastTemp)) return { ok: false, error: '먼저 목소리를 생성하세요' };
+  let name = String(args.filename || '').trim().replace(/[\\/:*?"<>|]/g, '').replace(/\.wav$/i, '').trim();
+  if (!name) return { ok: false, error: '파일명을 입력하세요' };
   try {
     const dir = path.join(os.homedir(), '.flow-app', 'ref-audio');
     fs.mkdirSync(dir, { recursive: true });
-    const stamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14);
-    const base = 'voicedesign_' + stamp;
+    let base = name, i = 2;
+    while (fs.existsSync(path.join(dir, base + '.wav'))) { base = name + '_' + i; i++; }  // 같은 이름 있으면 _2, _3…
     const wavPath = path.join(dir, base + '.wav');
-    fs.writeFileSync(wavPath, r.buffer);
-    fs.writeFileSync(path.join(dir, base + '.txt'), text, 'utf8');
-    log(`🎨 보이스디자인 저장: ${base}.wav (+ .txt 참조텍스트)`);
-    return { ok: true, path: wavPath, name: base + '.wav', text };
+    fs.copyFileSync(S.vdLastTemp, wavPath);
+    fs.writeFileSync(path.join(dir, base + '.txt'), S.vdLastText || '', 'utf8');  // 같은 이름 .txt = 참조텍스트
+    log(`🎨 참조음성 저장: ${base}.wav (+ ${base}.txt)`);
+    return { ok: true, path: wavPath, name: base + '.wav' };
   } catch (e) { return { ok: false, error: '저장 실패: ' + String((e && e.message) || e) }; }
 });
 

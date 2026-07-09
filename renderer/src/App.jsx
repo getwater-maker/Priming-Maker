@@ -139,7 +139,8 @@ export default function App() {
   const [vdStatus, setVdStatus] = useState('');
   const [vdBusy, setVdBusy] = useState(false);
   const [vdWavUrl, setVdWavUrl] = useState('');
-  const [vdSavedPath, setVdSavedPath] = useState('');
+  const [vdGenerated, setVdGenerated] = useState(false);
+  const [vdFilename, setVdFilename] = useState('');
   const [dictRows, setDictRows] = useState([]);       // [{source, pron, enabled}]
   const [ollamaOpen, setOllamaOpen] = useState(false);
   const [ollama, setOllama] = useState(null);           // { baseUrl, model }
@@ -823,7 +824,7 @@ export default function App() {
   }
   // ── 🎨 보이스디자인 (Qwen3-TTS 온디맨드 서버) ─────────────────────────────
   async function openVoiceDesign() {
-    setVdOpen(true); setVdWavUrl(''); setVdSavedPath(''); setVdBusy(true); setVdStatus('설치 확인 중…');
+    setVdOpen(true); setVdWavUrl(''); setVdGenerated(false); setVdFilename(''); setVdBusy(true); setVdStatus('설치 확인 중…');
     try {
       const st = await api.qwenDesignStatus();
       if (!st || !st.installed) { setVdStatus('⚠ 설치 안 됨 — qwen-design 폴더의 "1_최초설치.bat" 를 먼저 실행하세요.'); setVdBusy(false); return; }
@@ -840,21 +841,29 @@ export default function App() {
     try {
       const r = await api.qwenDesignGenerate({ instruct: vdInstruct, text: vdText || undefined });
       if (r && r.ok) {
-        setVdSavedPath(r.path);
-        const url = await api.readAudio(r.path);
-        setVdWavUrl(url || '');
+        const url = await api.readAudio(r.tempPath);
+        setVdWavUrl(url || ''); setVdGenerated(true);
         if (url) new Audio(url).play().catch(() => {});
-        setVdStatus('생성 완료 — 들어보고, 좋으면 아래 “참조음성으로 지정” 을 누르세요.');
+        setVdStatus('생성 완료 — 들어보고, 마음에 들면 아래에 파일명을 입력해 저장하세요. (안 들면 설명을 바꿔 다시 생성)');
       } else setVdStatus('⚠ 생성 실패: ' + ((r && r.error) || '알 수 없음'));
     } catch (e) { setVdStatus('오류: ' + e.message); }
     setVdBusy(false);
   }
-  async function vdAssign() {
-    if (!vdSavedPath) return;
-    setCh((c) => ({ ...c, voiceCloneRefAudio: vdSavedPath, voiceCloneRefText: vdText }));
-    try { const list = await api.listRefAudio(); setChRefList(Array.isArray(list) ? list : []); } catch {}
-    setStatus('보이스디자인 음성을 참조음성으로 지정했습니다. (채널 편집창에서 저장하세요)');
-    closeVoiceDesign();
+  async function vdSave() {
+    const fn = (vdFilename || '').trim();
+    if (!fn) { setVdStatus('저장할 파일명을 입력하세요.'); return; }
+    if (!vdGenerated) { setVdStatus('먼저 목소리를 생성하세요.'); return; }
+    setVdBusy(true); setVdStatus('저장 중…');
+    try {
+      const r = await api.qwenDesignSave({ filename: fn });
+      if (r && r.ok) {
+        try { const list = await api.listRefAudio(); setChRefList(Array.isArray(list) ? list : []); } catch {}
+        setCh((c) => ({ ...c, voiceCloneRefAudio: r.path, voiceCloneRefText: vdText }));
+        setVdFilename('');
+        setVdStatus(`✔ 저장됨: ${r.name} — 참조음성 목록에 추가 + 이 채널에 지정했습니다. (채널편집 창에서 “저장”을 눌러야 최종 반영)`);
+      } else setVdStatus('⚠ 저장 실패: ' + ((r && r.error) || '알 수 없음'));
+    } catch (e) { setVdStatus('오류: ' + e.message); }
+    setVdBusy(false);
   }
   async function closeVoiceDesign() {
     setVdOpen(false);
@@ -1393,17 +1402,23 @@ export default function App() {
         <div className="modal-bg show" onClick={(e) => { if (e.target.classList.contains('modal-bg')) closeVoiceDesign(); }}>
           <div className="modal-card wide" onClick={(e) => e.stopPropagation()}>
             <h3>🎨 보이스디자인 — 텍스트 설명으로 새 목소리</h3>
-            <p className="meta" style={{ margin: '0 0 12px' }}>원하는 목소리를 글로 설명하면 새 목소리를 만들어 이 채널의 <b>참조음성</b>으로 지정합니다. 이후 음성변환은 OmniVoice 가 그 목소리를 복제해서 진행합니다. (창을 닫으면 디자인 서버는 자동으로 꺼집니다)</p>
+            <p className="meta" style={{ margin: '0 0 12px' }}>목소리를 글로 설명 → <b>생성</b>해서 들어보고 → 마음에 들면 <b>파일명을 입력해 저장</b>하면 참조음성 목록에 추가돼 어느 채널에서든 쓸 수 있습니다. (창을 닫으면 디자인 서버는 자동으로 꺼집니다)</p>
             <div className="frow" style={{ alignItems: 'flex-start' }}><label>목소리 설명</label>
               <textarea rows="3" placeholder="예: 60대 한국인 남성 내레이터. 중저음이고 차분하며 신뢰감 있는 목소리. 역사 다큐멘터리 톤." value={vdInstruct} onChange={(e) => setVdInstruct(e.target.value)} /></div>
-            <div className="frow" style={{ alignItems: 'flex-start' }}><label>미리들을 문장</label>
-              <textarea rows="2" value={vdText} onChange={(e) => setVdText(e.target.value)} /></div>
+            <div className="frow" style={{ alignItems: 'flex-start' }}><label title="자유롭게 바꿀 수 있습니다. 이 문장이 그대로 저장되는 .txt(참조텍스트)가 됩니다">미리들을 문장</label>
+              <textarea rows="2" placeholder="이 문장을 그 목소리로 읽어 미리듣기 합니다 (자유 수정 가능)" value={vdText} onChange={(e) => setVdText(e.target.value)} /></div>
             <div className="frow"><label></label>
               <button onClick={vdGenerate} disabled={vdBusy}>🎨 목소리 생성</button>
               {vdWavUrl ? <button className="ghost" onClick={() => new Audio(vdWavUrl).play().catch(() => {})}>▶ 다시 듣기</button> : null}
-              {vdSavedPath ? <button onClick={vdAssign} disabled={vdBusy}>✔ 이 목소리를 참조음성으로 지정</button> : null}
+              <button className="ghost" style={{ marginLeft: 'auto' }} title="참조음성이 저장되는 폴더 열기" onClick={() => api.openRefFolder('')}>📂 참조음성 폴더</button>
             </div>
             {vdWavUrl ? <div className="frow"><label></label><audio controls src={vdWavUrl} style={{ flex: 1 }} /></div> : null}
+            {vdGenerated ? (
+              <div className="frow"><label>파일명</label>
+                <input placeholder="예: 고전서재_내레이터" value={vdFilename} onChange={(e) => setVdFilename(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') vdSave(); }} style={{ flex: 1 }} />
+                <button onClick={vdSave} disabled={vdBusy} title="이 목소리를 참조음성 목록에 추가 (.wav + 같은이름.txt 생성)">💾 저장</button>
+              </div>
+            ) : null}
             <div className="meta" style={{ minHeight: 22, whiteSpace: 'pre-wrap', color: vdStatus.startsWith('⚠') ? '#c0392b' : undefined }}>{vdBusy ? '⏳ ' : ''}{vdStatus}</div>
             <div className="mbtns"><button className="ghost" onClick={closeVoiceDesign}>닫기</button></div>
           </div>

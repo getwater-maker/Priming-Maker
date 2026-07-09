@@ -20,6 +20,7 @@ contextBridge.exposeInMainWorld('api', {
   qwenDesignStart: () => ipcRenderer.invoke('qwen-design-start'),
   qwenDesignStop: () => ipcRenderer.invoke('qwen-design-stop'),
   qwenDesignGenerate: (args) => ipcRenderer.invoke('qwen-design-generate', args),
+  qwenDesignSave: (args) => ipcRenderer.invoke('qwen-design-save', args),
   getComfyConfig: () => ipcRenderer.invoke('get-comfy-config'),
   setComfyConfig: (patch) => ipcRenderer.invoke('set-comfy-config', patch),
   testComfy: () => ipcRenderer.invoke('test-comfy'),
