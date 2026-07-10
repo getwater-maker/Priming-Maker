@@ -798,7 +798,7 @@ export default function App() {
     };
     const sl = p.split || { introSentenceSize: p.introSentenceSize, mainSentenceSize: p.mainSentenceSize, shortLen: p.shortLen, longLen: p.longLen };
     setCh({
-      name: p.name || '', engine: p.engine || 'omnivoice', voice: p.voice || '',
+      name: p.name || '', engine: p.engine || 'omnivoice', startMode: p.startMode || 'longform', voice: p.voice || '',
       voiceCloneRefAudio: p.voiceCloneRefAudio || '', voiceCloneRefText: p.voiceCloneRefText || '',
       scriptFolder: p.scriptFolder || '', seed: p.seed != null ? p.seed : '',
       gemini: gkey, aiNotice: !!(p.aiNotice && p.aiNotice.enabled),
@@ -815,6 +815,16 @@ export default function App() {
       _raw: p,
     });
     setChOpen(true);
+  }
+  // 채널(프리셋) 선택 시 그 채널이 지정한 시작 화면(startMode)으로 전환.
+  async function switchModeForChannel(name) {
+    setPresetName(name);
+    try {
+      const p = await api.getPresetDetail(name);
+      const sm = (p && p.startMode) || 'longform';
+      setMode(sm);
+      setAspect(sm === 'shorts' ? '9:16' : '16:9');
+    } catch {}
   }
   // 모달 내 참조음성 미리듣기
   async function playRef(p) {
@@ -885,6 +895,7 @@ export default function App() {
     const capToStyle = (c) => ({ size: String(c.size), align: c.align, yAlign: c.yAlign, yOffset: yOffsetOf(c) });
     const patch = {
       engine: ch.engine || 'omnivoice',
+      startMode: ch.startMode || 'longform',              // 이 채널 선택 시 시작할 화면(모드)
       voice: ch.voice || '',                              // Supertonic 사전정의 음성(M1~F5) 등 — 저장
       voiceCloneRefAudio: (ch.voiceCloneRefAudio || '').trim(),
       voiceCloneRefText: (ch.voiceCloneRefText || '').trim(),
@@ -1103,7 +1114,7 @@ export default function App() {
               <button className={mode === 'playlist' ? 'active' : ''} onClick={() => switchMode('playlist')}>🎵 플리</button>
               <button className={mode === 'book' ? 'active' : ''} onClick={() => switchMode('book')}>📖 출판</button>
             </span>
-            <select title="채널(프리셋)" value={presetName} onChange={(e) => setPresetName(e.target.value)}>
+            <select title="채널(프리셋) — 고르면 그 채널의 시작 화면으로 전환" value={presetName} onChange={(e) => switchModeForChannel(e.target.value)}>
               {presets.map((p) => <option key={p.name} value={p.name}>{p.name}</option>)}
             </select>
             <button className="ghost" title="채널(프리셋) 설정 편집" style={{ padding: '6px 9px' }} onClick={openChannelEditor}>⚙</button>
@@ -1175,10 +1186,8 @@ export default function App() {
         <div className="hrow">
           <div className="hright">
             <span className="meta" style={{ marginRight: 'auto' }}>{dto && dto.kind === 'playlist' ? `${dto.tracks.length}곡` : '플리 스펙(.md)을 여세요 — 클로드가 채팅에서 만들어 줍니다'}</span>
-            <button disabled={!(dto && dto.kind === 'playlist' && dto.tracks.length)} title="모든 곡을 로컬 ComfyUI(ACE-Step)로 자동 생성 → 출력폴더 저장" onClick={() => runMakePlaylist(null)}>⚡ 음악 전체 생성</button>
-            <button disabled={!(dto && dto.kind === 'playlist' && dto.tracks.length)} title="음악(없는 곡 자동 생성) + 배경(무한루프 영상) + 곡 제목 자막 → .vrew 까지 한 번에. Vrew 에서 마무리·내보내기" onClick={runMakePlaylistVideo}>🎬 만들기</button>
+            <button disabled={!(dto && dto.kind === 'playlist' && dto.tracks.length)} title="음악(ACE-Step) + 배경(심리스 반복 영상) + 곡 제목 자막 → .vrew 까지 한 번에. Vrew 에서 마무리·내보내기" onClick={runMakePlaylistVideo}>🎬 만들기</button>
             <button className="ghost" title="진행 중인 생성 중단" onClick={abort}>■ 중단</button>
-            <button className="ghost" title="ComfyUI 서버·ACE-Step 워크플로 설정" style={{ padding: '6px 9px' }} onClick={openComfy}>⚙ Comfy</button>
             <button className="ghost" disabled={!(dto && dto.kind === 'playlist')} onClick={() => api.openFolder()}>📁 출력폴더</button>
           </div>
         </div>
@@ -1283,12 +1292,14 @@ export default function App() {
         <div className="modal-bg show" onClick={(e) => { if (e.target.classList.contains('modal-bg')) setChOpen(false); }}>
           <div className="modal-card wide">
             <h3>⚙ 채널(프리셋) 편집 — {ch.name}</h3>
-            <div className="frow"><label>엔진</label>
-              <span className="engtoggle">
-                {[['omnivoice', 'OmniVoice'], ['gemini', 'Gemini'], ['supertonic', 'Supertonic']].map(([v, t]) => (
-                  <button key={v} className={ch.engine === v ? 'active' : ''} onClick={() => setCh({ ...ch, engine: v, ...(v === 'supertonic' && !/^[MF][1-5]$/.test(ch.voice) ? { voice: 'M1' } : {}) })}>{t}</button>
-                ))}
-              </span>
+            <div className="frow"><label>시작 화면</label>
+              <select style={{ flex: '0 0 220px', padding: 6 }} value={ch.startMode || 'longform'} onChange={(e) => setCh({ ...ch, startMode: e.target.value })}>
+                <option value="longform">롱폼 (16:9)</option>
+                <option value="shorts">쇼츠 (9:16)</option>
+                <option value="playlist">🎵 플리 (음악)</option>
+                <option value="book">📖 출판</option>
+              </select>
+              <span className="meta">이 채널을 고르면 이 화면으로 시작합니다 (음성 엔진은 OmniVoice 기본)</span>
             </div>
             {ch.engine === 'supertonic' ? (
               /* Supertonic — 사전 정의 음성만 선택(참조음성·복제·시드·Clone강도 미적용) */
