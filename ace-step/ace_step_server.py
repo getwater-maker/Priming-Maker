@@ -35,6 +35,25 @@ try:
 except Exception:
     pass
 
+# ── torchaudio.save → soundfile 대체 ────────────────────────────────────────
+# torchaudio 2.12 는 save 시 torchcodec(+FFmpeg) 을 요구하는데 미설치면 크래시한다.
+# ACE-Step 이 torchaudio.save(path, waveform, sr) 로 wav 를 저장하므로, 이미 설치된
+# soundfile 로 저장하도록 교체(추가 설치 불필요).
+try:
+    import torchaudio as _ta
+    import soundfile as _sf
+    import numpy as _np
+
+    def _ta_save_sf(uri, src, sample_rate, channels_first=True, **kwargs):
+        a = src.detach().cpu().float().numpy() if hasattr(src, "detach") else _np.asarray(src)
+        if a.ndim == 2 and channels_first:
+            a = a.T  # (channels, frames) → (frames, channels)
+        _sf.write(str(uri), a, int(sample_rate))
+
+    _ta.save = _ta_save_sf
+except Exception:
+    pass
+
 _STATE = {"model": None, "loading": False, "loaded": False, "error": None}
 _LOCK = threading.Lock()  # 생성은 한 번에 하나만(GPU 직렬화)
 

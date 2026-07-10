@@ -12,5 +12,5 @@ if not exist "venv\Scripts\python.exe" (
   pause
   exit /b 1
 )
-call "venv\Scripts\python.exe" ace_step_server.py --port 9894
+call "venv\Scripts\python.exe" ace_step_server.py --port 9894 --cpu-offload
 pause
