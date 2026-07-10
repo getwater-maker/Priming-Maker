@@ -2487,14 +2487,13 @@ ipcMain.handle('make-playlist-video', async () => {
   } else if (bgImg) {
     log(`🖼 첨부된 배경 이미지 사용: ${path.basename(bgImg)}`);
   } else {
-    // 자동 생성 — 단일 그룹 미니 프로젝트를 만들어 쇼츠와 동일한 엔진 사용.
-    const styleId = (S.preset && S.preset.styleId) || null;
+    // 자동 생성 — 단일 그룹 미니 프로젝트. 배경 스타일은 스펙의 `> 배경:` 프롬프트가 그대로 제어(프로그램 스타일 미적용).
     const bgProj = { aspect: '16:9', fileTitle: S.parsed.fileTitle || 'bg',
       groups: [{ id: 'bg', num: 1, phase: '훅', imagePrompt: `${bgRaw.trim().replace(/[,\s]+$/, '')}, no text, no watermark`, videoPrompt: bgRaw, motionNote: 'slow subtle motion, seamless loop', isI2V: true, sentences: [] }] };
     const bgWork = path.join(outRoot, '_bgwork');
     try {
-      log(`🖼 배경 이미지 생성(순환 엔진: Flow/Genspark) — "${bgRaw.slice(0, 60)}"`);
-      await runRotatingImages(bgProj, bgWork, log, styleId, null, [1]);
+      log(`🖼 배경 이미지 생성(순환 엔진: Flow/Genspark) — 스타일은 배경 프롬프트가 제어 — "${bgRaw.slice(0, 60)}"`);
+      await runRotatingImages(bgProj, bgWork, log, null, null, [1]);   // styleId=null → 스펙 배경 프롬프트가 스타일 제어
       bgImg = bgProj.groups[0].imagePath || null;
       if (bgImg) { S.parsed.bgImagePath = bgImg; pushDtoUpdate(); log(`  ✓ 배경 이미지: ${path.basename(bgImg)}`); }
       else log('  ✗ 배경 이미지 생성 실패');

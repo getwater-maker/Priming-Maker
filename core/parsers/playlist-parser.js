@@ -50,8 +50,17 @@ function parsePlaylistText(text) {
     cur = null;
   };
 
+  let inLyrics = false; // `lyrics:` 뒤 여러 줄 가사([verse]/[chorus]…) 수집 모드
   for (const raw of lines) {
     const line = raw.trim();
+    const isSection = /^#{1,2}\s+/.test(line) || /^>/.test(line);
+    const isField = /^[-*]\s*(tags|스타일|lyrics|가사|length|duration|길이)\s*[:：]/i.test(line);
+    // 가사 여러 줄 수집 — 다음 필드/헤더 전까지 이어붙임(빈 줄=연 구분 보존).
+    if (inLyrics && !isSection && !isField) {
+      if (cur) cur.lyrics += (cur.lyrics ? '\n' : '') + line;
+      continue;
+    }
+    inLyrics = false;
     if (!line) continue;
     // H1 제목
     let m = line.match(/^#\s+(.*)$/);
@@ -74,7 +83,11 @@ function parsePlaylistText(text) {
     // 필드 — 불릿(- ) 제거 후 라벨 매칭
     const body = line.replace(/^[-*]\s*/, '');
     if (/^(tags|스타일)\s*[:：]/i.test(body)) cur.tags = fieldValue(body);
-    else if (/^(lyrics|가사)\s*[:：]/i.test(body)) cur.lyrics = fieldValue(body);
+    else if (/^(lyrics|가사)\s*[:：]/i.test(body)) {
+      const v = fieldValue(body);
+      cur.lyrics = v;
+      if (!v) inLyrics = true; // `- lyrics:` 만 있고 값 없으면 다음 줄부터 여러 줄 가사 수집
+    }
     else if (/^(length|duration|길이)\s*[:：]/i.test(body)) {
       const v = fieldValue(body).match(/\d+/);
       cur.durationSec = v ? parseInt(v[0], 10) : 0;
