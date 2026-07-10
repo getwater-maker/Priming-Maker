@@ -30,6 +30,8 @@ contextBridge.exposeInMainWorld('api', {
   listOllamaModels: () => ipcRenderer.invoke('list-ollama-models'),
   getImageRotation: () => ipcRenderer.invoke('get-image-rotation'),
   setImageRotation: (patch) => ipcRenderer.invoke('set-image-rotation', patch),
+  getGeminiImageConfig: () => ipcRenderer.invoke('get-gemini-image-config'),
+  setGeminiImageConfig: (patch) => ipcRenderer.invoke('set-gemini-image-config', patch),
   getLoraCollect: () => ipcRenderer.invoke('get-lora-collect'),
   setLoraCollect: (patch) => ipcRenderer.invoke('set-lora-collect', patch),
   pickLoraDir: () => ipcRenderer.invoke('pick-lora-dir'),

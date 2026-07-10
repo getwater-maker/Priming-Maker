@@ -365,6 +365,9 @@ ipcMain.handle('list-ollama-models', async () => {
 // 이미지 순환 설정 — 풀에 넣을 엔진/순서 (Genspark↔Flow 등)
 ipcMain.handle('get-image-rotation', () => require('./core/image-rotation').load());
 ipcMain.handle('set-image-rotation', (_e, patch) => require('./core/image-rotation').save(patch || {}));
+// Nano Banana 2 Lite (Gemini 이미지 API) 설정 — 모델명·비율전송
+ipcMain.handle('get-gemini-image-config', () => { try { return require('./core/gemini-image').loadConfig(); } catch { return {}; } });
+ipcMain.handle('set-gemini-image-config', (_e, patch) => { try { return require('./core/gemini-image').saveConfig(patch || {}); } catch (e) { return { error: String((e && e.message) || e) }; } });
 
 // LoRA 데이터셋 수집 설정 — Genspark/Flow 이미지를 학습용으로 적립
 ipcMain.handle('get-lora-collect', () => { const L = require('./core/lora-collect'); return { ...L.load(), count: L.count() }; });
@@ -918,7 +921,28 @@ async function runFlowImages(project, imagesDir, logger, styleId, onlyNums) {
 
 // ── 이미지 순환(rotation) ── 순서대로 엔진을 돌며 '남은(미생성) 그룹'만 생성. 한 엔진이 한도면 다음 엔진으로 이어감.
 //   startEngine = 사용자가 고른 엔진(맨 앞 우선). ComfyUI 는 순환 제외(별도 단독).
+// Nano Banana 2 Lite (Gemini 이미지 API) — 브라우저 없이 API 로 이미지 생성. imgEngine==='gemini' 일 때.
+async function runGeminiImages(project, imagesDir, logger, styleId, onlyNums) {
+  const GI = require('./core/gemini-image');
+  if (!GI.hasKey()) { logger('⚠ Gemini API 키 없음 — ⚙ 채널편집의 「Gemini 키」를 설정하세요.'); return; }
+  const stylePrompt = styleId ? (require('./core/style-store').getPrompt(styleId) || '') : '';
+  const targets = project.groups.filter((g) => g.imagePrompt && g.imagePrompt.trim() && !hasVisual(g) && (!onlyNums || onlyNums.includes(g.num)));
+  if (!targets.length) return;
+  try { fs.mkdirSync(imagesDir, { recursive: true }); } catch {}
+  const model = GI.loadConfig().model;
+  logger(`🍌 Nano Banana 2 Lite (Gemini API · ${model}) — ${targets.length}장 즉시 생성`);
+  for (const g of targets) {
+    if (S.abort) { logger('⏹ 중단됨'); break; }
+    const prompt = stylePrompt ? `${stylePrompt.trim().replace(/[,\s]+$/, '')}, ${g.imagePrompt.trim()}` : g.imagePrompt.trim();
+    const base = path.join(imagesDir, String(g.num).padStart(2, '0'));
+    const r = await GI.generateImageToFile({ prompt, aspect: project.aspect || '9:16', outPathNoExt: base });
+    if (r.ok) { g.imagePath = r.path; logger(`  ✓ G${g.num} → ${path.basename(r.path)}`); pushDtoUpdate(); }
+    else { logger(`  ✗ G${g.num} 실패: ${r.error}`); }
+  }
+}
+
 async function runRotatingImages(project, imagesDir, logger, styleId, startEngine, onlyNums) {
+  if (startEngine === 'gemini') return runGeminiImages(project, imagesDir, logger, styleId, onlyNums);
   const Rot = require('./core/image-rotation');
   const order = Rot.activeOrder(startEngine);
   if (!order.length) { logger('⚠ 순환 엔진이 비어있음 — ⚙ 순환 설정 확인'); return; }
