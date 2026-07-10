@@ -24,6 +24,17 @@ import threading
 import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+# ── Windows symlink 권한 회피 (WinError 1314) ───────────────────────────────
+# HuggingFace 캐시는 기본적으로 symlink 를 쓰는데, 윈도우에서 개발자모드/관리자가 아니면
+# os.symlink 이 WinError 1314 로 실패하고 huggingface_hub 이 이를 못 잡아 다운로드가 크래시한다.
+# are_symlinks_supported 를 False 로 고정 → HF 가 symlink 대신 파일 복사를 쓰게 해 권한 없이도 동작.
+os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
+try:
+    import huggingface_hub.file_download as _hf_fd
+    _hf_fd.are_symlinks_supported = lambda *a, **k: False
+except Exception:
+    pass
+
 _STATE = {"model": None, "loading": False, "loaded": False, "error": None}
 _LOCK = threading.Lock()  # 생성은 한 번에 하나만(GPU 직렬화)
 
