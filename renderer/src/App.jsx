@@ -1176,7 +1176,7 @@ export default function App() {
           <div className="hright">
             <span className="meta" style={{ marginRight: 'auto' }}>{dto && dto.kind === 'playlist' ? `${dto.tracks.length}곡` : '플리 스펙(.md)을 여세요 — 클로드가 채팅에서 만들어 줍니다'}</span>
             <button disabled={!(dto && dto.kind === 'playlist' && dto.tracks.length)} title="모든 곡을 로컬 ComfyUI(ACE-Step)로 자동 생성 → 출력폴더 저장" onClick={() => runMakePlaylist(null)}>⚡ 음악 전체 생성</button>
-            <button disabled={!(dto && dto.kind === 'playlist' && dto.tracks.length)} title="배경(끊김 없는 무한루프 영상) + 곡 제목 자막 → .vrew 생성 (음악 먼저 생성 필요). Vrew 에서 마무리·내보내기" onClick={runMakePlaylistVideo}>🎬 배경+vrew</button>
+            <button disabled={!(dto && dto.kind === 'playlist' && dto.tracks.length)} title="음악(없는 곡 자동 생성) + 배경(무한루프 영상) + 곡 제목 자막 → .vrew 까지 한 번에. Vrew 에서 마무리·내보내기" onClick={runMakePlaylistVideo}>🎬 만들기</button>
             <button className="ghost" title="진행 중인 생성 중단" onClick={abort}>■ 중단</button>
             <button className="ghost" title="ComfyUI 서버·ACE-Step 워크플로 설정" style={{ padding: '6px 9px' }} onClick={openComfy}>⚙ Comfy</button>
             <button className="ghost" disabled={!(dto && dto.kind === 'playlist')} onClick={() => api.openFolder()}>📁 출력폴더</button>
@@ -1688,11 +1688,11 @@ export default function App() {
   // 플리 배경(무한루프 영상) + 곡제목 자막 → .vrew 생성 (음악 mp3 가 있어야 함).
   async function runMakePlaylistVideo() {
     try {
-      setStatus('배경 영상 + .vrew 생성 중…');
+      setStatus('만들기 진행 중… (음악 + 배경 + .vrew)');
       const d = await api.makePlaylistVideo();
       if (d) setDto(d);
-      setStatus('배경+.vrew 완료');
-    } catch (e) { logline('배경/​.vrew 오류: ' + e.message); }
+      setStatus('만들기 완료');
+    } catch (e) { logline('만들기 오류: ' + e.message); }
   }
   // 플리 배경 이미지/영상 첨부·삭제 (전 곡 공통 배경).
   async function attachPlBg() {

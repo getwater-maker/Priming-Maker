@@ -2358,6 +2358,39 @@ ipcMain.handle('open-playlist-spec', async (_e, args = {}) => {
 });
 
 // 플리 전체 생성 — 곡마다 ComfyUI ACE-Step API 호출 → 출력폴더에 저장.
+// 음악 없는 곡만 로컬 ComfyUI(ACE-Step)로 생성 — 「🎬 만들기」(이미지+음악+vrew) 앞단계에서 사용.
+//   반환 { done, fail, serverDown }. 이미 mp3 있는 곡은 건너뜀(재생성은 ⚡음악 버튼이 담당).
+async function ensurePlaylistMusic() {
+  const cfg = require('./core/comfy-config').load();
+  const { ComfyEngine } = require('./comfy-engine');
+  const acfg = (cfg.audioBaseUrl && cfg.audioBaseUrl.trim())
+    ? { ...cfg, cloud: false, apiKey: '', baseUrl: cfg.audioBaseUrl.trim() }
+    : cfg;
+  const eng = new ComfyEngine(acfg, log);
+  if (!(await eng.health())) { log(`ComfyUI(음악) 연결 실패 (${acfg.baseUrl}) — 음악 서버 실행/주소를 확인하세요.`); return { done: 0, fail: 0, serverDown: true }; }
+  const outRoot = S.outRoot || playlistOutRoot(S.scriptPath || 'playlist.md', S.preset);
+  try { fs.mkdirSync(outRoot, { recursive: true }); } catch {}
+  const todo = (S.parsed.tracks || []).filter((t) => !(t.audioPath && fs.existsSync(t.audioPath)));
+  if (!todo.length) { log('🎵 모든 곡에 음악이 이미 있습니다 — 음악 생성 건너뜀'); return { done: 0, fail: 0, serverDown: false }; }
+  log(`🎵 음악 생성 — ${todo.length}곡 → ${outRoot}`);
+  let done = 0, fail = 0;
+  for (const t of todo) {
+    if (S.abort) { log('⛔ 중단됨'); break; }
+    t.status = 'generating'; t.error = null; pushDtoUpdate();
+    const base = `${String(t.num).padStart(2, '0')}_${_safeFolder(t.title).slice(0, 40)}`;
+    const outPath = path.join(outRoot, base + '.mp3');
+    log(`  ▶ ${t.num}. ${t.title} (${t.durationSec || 180}초)`);
+    const r = await eng.textToAudio({ tags: t.tags, lyrics: t.lyrics, durationSec: t.durationSec || 180, outputPath: outPath, abortSignal: () => S.abort });
+    if (r.success) {
+      t.status = 'done'; t.audioPath = r.audioPath; done++;
+      try { const info = await require('./core/media-utils').getMediaInfo(r.audioPath); if (info.durationSec > 1) t.durationSec = Math.round(info.durationSec * 10) / 10; } catch {}
+      log(`  ✓ ${path.basename(r.audioPath)} (${t.durationSec}초)`);
+    } else { t.status = 'fail'; t.error = r.error; fail++; log(`  ✗ 실패: ${r.error}`); }
+    pushDtoUpdate();
+  }
+  return { done, fail, serverDown: false };
+}
+
 ipcMain.handle('make-playlist', async (_e, args = {}) => {
   if (!S.parsed || S.parsed.kind !== 'playlist') { log('열린 플리가 없습니다 — 스펙을 먼저 여세요.'); return currentDTO(); }
   S.abort = false;
@@ -2429,8 +2462,12 @@ ipcMain.handle('playlist-clear-bg', () => {
 //   곡=클립[ 곡 mp3 + 배경 루프 + 곡 제목 자막 ] 로 .vrew. Vrew 에서 마무리·내보내기.
 ipcMain.handle('make-playlist-video', async () => {
   if (!S.parsed || S.parsed.kind !== 'playlist') { log('열린 플리가 없습니다 — 스펙을 먼저 여세요.'); return currentDTO(); }
+  S.abort = false;
+  // ① 음악 — 없는 곡 먼저 로컬 ComfyUI(ACE-Step)로 생성 (이미지+음악+vrew 한 번에)
+  const mres = await ensurePlaylistMusic();
+  if (S.abort) { log('⏹ 중단됨'); return currentDTO(); }
   const tracks = (S.parsed.tracks || []).filter((t) => t.audioPath && fs.existsSync(t.audioPath));
-  if (!tracks.length) { log('⚠ 먼저 ⚡ 음악을 생성하세요 (mp3 없는 곡은 영상에서 제외).'); return currentDTO(); }
+  if (!tracks.length) { log('⚠ 음악이 없어 만들 수 없습니다' + (mres && mres.serverDown ? ' — 음악 서버(ComfyUI 127.0.0.1:8188)를 켜세요.' : ' (음악 생성 실패).')); return currentDTO(); }
   // 곡 길이 실측 보정 — 복원된 세션은 스펙값(예: 180초)만 남아 실제 mp3 와 다를 수 있음(배경 루프 길이 정합)
   for (const t of tracks) {
     try {
