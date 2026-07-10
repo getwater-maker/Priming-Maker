@@ -1722,16 +1722,16 @@ function PlaylistView({ dto, onMakeOne, onPreview, onPreviewMedia, onAttachBg, o
         {dto.concept ? <span className="meta">{dto.concept}</span> : null}
         <span className="meta">· {dto.tracks.length}곡</span>
       </div>
-      <div className="plmain" style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
-        <div className="plbg" style={{ flex: '0 0 auto', width: 230, position: 'sticky', top: 0 }}>
+      <div className="plmain">
+        <div className="plbg" style={{ marginBottom: 14 }}>
           <div className="lab" style={{ fontWeight: 600, marginBottom: 6 }}>🎬 배경 (전 곡 공통)</div>
           <Thumb c={{ videoPath: dto.bgVideoPath, imagePath: dto.bgImagePath }} isLf={true}
             onAttach={onAttachBg} onClear={onClearBg} onPreview={onPreviewMedia || onPreview} />
           <div className="meta" style={{ marginTop: 6, fontSize: 12, lineHeight: 1.45 }}>
-            클릭해 이미지/영상 첨부(＋) · 삭제(✕).<br />첨부하면 그걸 배경으로, 비우면 컨셉으로 자동 생성합니다.
+            클릭해 이미지/영상 첨부(＋) · 삭제(✕). 첨부하면 그걸 배경으로, 비우면 배경 프롬프트로 자동 생성(심리스 반복 영상).
           </div>
         </div>
-        <div className="pltracks" style={{ flex: 1 }}>
+        <div className="pltracks">
         {dto.tracks.map((t) => (
           <div key={t.num} className={'pltrack s-' + t.status}>
             <div className="plnum">{String(t.num).padStart(2, '0')}</div>
@@ -1742,7 +1742,7 @@ function PlaylistView({ dto, onMakeOne, onPreview, onPreviewMedia, onAttachBg, o
               </div>
               <div className="pltags" title={t.tags}>{t.tags || <span className="meta">스타일 태그 없음</span>}</div>
               {t.lyrics
-                ? <div className="pllyrics">🎤 {t.lyrics.slice(0, 90)}{t.lyrics.length > 90 ? '…' : ''}</div>
+                ? <div className="pllyrics" style={{ whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>🎤 {t.lyrics}</div>
                 : <div className="pllyrics meta">연주곡 (보컬 없음)</div>}
               {t.error ? <div className="plerr">✗ {t.error}</div> : null}
               {t.audioPath ? <audio controls preload="none" src={media(t.audioPath)} className="plaudio" /> : null}

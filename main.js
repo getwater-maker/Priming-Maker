@@ -2361,6 +2361,19 @@ ipcMain.handle('open-playlist-spec', async (_e, args = {}) => {
 // 플리 전체 생성 — 곡마다 ComfyUI ACE-Step API 호출 → 출력폴더에 저장.
 // 음악 없는 곡만 로컬 ComfyUI(ACE-Step)로 생성 — 「🎬 만들기」(이미지+음악+vrew) 앞단계에서 사용.
 //   반환 { done, fail, serverDown }. 이미 mp3 있는 곡은 건너뜀(재생성은 ⚡음악 버튼이 담당).
+// 오디오 끝 페이드아웃 — ACE-Step 은 곡 끝이 갑자기 뚝 끊기는 경향 → ffmpeg afade 로 자연스럽게.
+function fadeOutAudioFile(wavPath, durSec, fadeSec = 3) {
+  try {
+    const ff = require('./core/media-utils').getFfmpegPath();
+    if (!ff || !fs.existsSync(wavPath)) return;
+    const st = Math.max(0, (Number(durSec) || 0) - fadeSec);
+    const tmp = wavPath + '.fade.wav';
+    const r = require('child_process').spawnSync(ff, ['-y', '-i', wavPath, '-af', `afade=t=out:st=${st}:d=${fadeSec}`, tmp], { windowsHide: true });
+    if (r.status === 0 && fs.existsSync(tmp)) { fs.renameSync(tmp, wavPath); }
+    else { try { fs.unlinkSync(tmp); } catch {} }
+  } catch {}
+}
+
 // GPU 뮤텍스: 보이스디자인·음악 중엔 서로/음성변환을 막는다(한 번에 하나만 GPU 무겁게).
 function gpuBusyReason() {
   if (S.voiceDesignActive) return '보이스디자인';
@@ -2394,6 +2407,7 @@ async function runAceStepMusic(tracks) {
         t.status = 'done'; t.audioPath = wavPath; done++;
         // 곡 길이 실측 보정 — 배경 루프·자막 길이 정합
         try { const info = await require('./core/media-utils').getMediaInfo(wavPath); if (info.durationSec > 1) t.durationSec = Math.round(info.durationSec * 10) / 10; } catch {}
+        fadeOutAudioFile(wavPath, t.durationSec, 3);   // 끝 3초 페이드아웃(ACE-Step 특유의 갑작 끊김 완화)
         log(`  ✓ ${base}.wav (${t.durationSec}초)`);
       } else { t.status = 'fail'; t.error = r.error; fail++; log(`  ✗ 실패: ${r.error}`); }
       pushDtoUpdate();
@@ -2454,62 +2468,64 @@ ipcMain.handle('playlist-clear-bg', () => {
 ipcMain.handle('make-playlist-video', async () => {
   if (!S.parsed || S.parsed.kind !== 'playlist') { log('열린 플리가 없습니다 — 스펙을 먼저 여세요.'); return currentDTO(); }
   S.abort = false;
-  // ① 음악 — 없는 곡 먼저 로컬 ComfyUI(ACE-Step)로 생성 (이미지+음악+vrew 한 번에)
-  const mres = await ensurePlaylistMusic();
-  if (S.abort) { log('⏹ 중단됨'); return currentDTO(); }
-  const tracks = (S.parsed.tracks || []).filter((t) => t.audioPath && fs.existsSync(t.audioPath));
-  if (!tracks.length) { log('⚠ 음악이 없어 만들 수 없습니다' + (mres && mres.notInstalled ? ' — ace-step/1_최초설치.bat 를 먼저 실행하세요.' : ' (음악 생성 실패 — 로그 확인).')); return currentDTO(); }
-  // 곡 길이 실측 보정 — 복원된 세션은 스펙값(예: 180초)만 남아 실제 mp3 와 다를 수 있음(배경 루프 길이 정합)
-  for (const t of tracks) {
-    try {
-      const info = await require('./core/media-utils').getMediaInfo(t.audioPath);
-      if (info.durationSec > 1 && Math.abs(info.durationSec - (t.durationSec || 0)) > 1) {
-        t.durationSec = Math.round(info.durationSec * 10) / 10;
-      }
-    } catch {}
-  }
-  S.abort = false;
   const PV = require('./core/playlist-video');
   const outRoot = S.outRoot || playlistOutRoot(S.scriptPath || 'playlist.md', S.preset);
   try { fs.mkdirSync(outRoot, { recursive: true }); } catch {}
   const t0 = Date.now();
 
-  // 1) 배경 프롬프트 — 스펙의 '배경:' > 컨셉 > 제목 순.
+  // 배경 프롬프트 — 스펙의 '배경:' > 컨셉 > 제목 순.
   const bgRaw = (S.parsed.bgPrompt && S.parsed.bgPrompt.trim()) || S.parsed.concept || S.parsed.fileTitle
     || 'calm ambient scenery, slow gentle motion, cinematic, soft light';
 
-  // 2) 배경 소스 — 첨부(영상/이미지) 우선. 없으면 롱폼/쇼츠와 같은 엔진으로 자동 생성(순환 이미지 → Grok i2v 영상).
-  //    ComfyUI 미사용. 실패해도 음악+제목 자막으로 .vrew 는 생성(배경만 빠짐).
+  // 배경 소스 — 첨부(영상/이미지) 우선. 스타일은 스펙 `> 배경:` 프롬프트가 그대로 제어.
   let bgImg = (S.parsed.bgImagePath && fs.existsSync(S.parsed.bgImagePath)) ? S.parsed.bgImagePath : null;
   let bgClipPath = (S.parsed.bgVideoPath && fs.existsSync(S.parsed.bgVideoPath)) ? S.parsed.bgVideoPath : null;
-  if (bgClipPath) {
-    log(`🎬 첨부된 배경 영상 사용: ${path.basename(bgClipPath)}`);
-  } else if (bgImg) {
-    log(`🖼 첨부된 배경 이미지 사용: ${path.basename(bgImg)}`);
-  } else {
-    // 자동 생성 — 단일 그룹 미니 프로젝트. 배경 스타일은 스펙의 `> 배경:` 프롬프트가 그대로 제어(프로그램 스타일 미적용).
+
+  // 배경 이미지→영상 태스크 — Flow/Genspark(이미지) → Grok i2v(영상). 브라우저 엔진이라 GPU 안 씀 → 음악과 병렬.
+  const bgTask = (async () => {
+    if (bgClipPath) { log(`🎬 첨부된 배경 영상 사용: ${path.basename(bgClipPath)}`); return; }
     const bgProj = { aspect: '16:9', fileTitle: S.parsed.fileTitle || 'bg',
       groups: [{ id: 'bg', num: 1, phase: '훅', imagePrompt: `${bgRaw.trim().replace(/[,\s]+$/, '')}, no text, no watermark`, videoPrompt: bgRaw, motionNote: 'slow subtle motion, seamless loop', isI2V: true, sentences: [] }] };
     const bgWork = path.join(outRoot, '_bgwork');
-    try {
-      log(`🖼 배경 이미지 생성(순환 엔진: Flow/Genspark) — 스타일은 배경 프롬프트가 제어 — "${bgRaw.slice(0, 60)}"`);
-      await runRotatingImages(bgProj, bgWork, log, null, null, [1]);   // styleId=null → 스펙 배경 프롬프트가 스타일 제어
-      bgImg = bgProj.groups[0].imagePath || null;
-      if (bgImg) { S.parsed.bgImagePath = bgImg; pushDtoUpdate(); log(`  ✓ 배경 이미지: ${path.basename(bgImg)}`); }
-      else log('  ✗ 배경 이미지 생성 실패');
-    } catch (e) { log('  ✗ 배경 이미지 오류: ' + (e && e.message || e)); }
+    if (bgImg) { bgProj.groups[0].imagePath = bgImg; log(`🖼 첨부된 배경 이미지 사용: ${path.basename(bgImg)}`); }
+    else {
+      try {
+        log(`🖼 배경 이미지 생성(순환 엔진: Flow/Genspark) — 스타일은 배경 프롬프트가 제어 — "${bgRaw.slice(0, 60)}"`);
+        await runRotatingImages(bgProj, bgWork, log, null, null, [1]);   // styleId=null → 스펙 배경 프롬프트가 스타일 제어
+        bgImg = bgProj.groups[0].imagePath || null;
+        if (bgImg) { S.parsed.bgImagePath = bgImg; pushDtoUpdate(); log(`  ✓ 배경 이미지: ${path.basename(bgImg)}`); }
+        else log('  ✗ 배경 이미지 생성 실패');
+      } catch (e) { log('  ✗ 배경 이미지 오류: ' + (e && e.message || e)); }
+    }
+    // 이미지 나오면 바로 영상(Grok i2v) — 심리스 무한루프용 짧은 클립
     if (bgImg && !S.abort) {
       try {
-        log('🎬 배경 영상(Grok i2v, 무한루프용 짧은 클립)…');
+        log('🎬 배경 영상(Grok i2v)…');
         await P.generateHookVideosGrok(bgProj, bgWork, log, () => S.abort, 0, pushDtoUpdate, [1], 6);
         const vp = bgProj.groups[0].videoPath;
         if (vp && fs.existsSync(vp)) { bgClipPath = vp; S.parsed.bgVideoPath = bgClipPath; pushDtoUpdate(); log(`  ✓ 배경 영상: ${path.basename(bgClipPath)}`); }
         else log('  ℹ 배경 영상 없음 — 이미지 배경으로 진행');
       } catch (e) { log('  ✗ 배경 영상 오류: ' + (e && e.message || e) + ' — 이미지 배경으로 진행'); }
     }
-    if (!bgImg && !bgClipPath) log('ℹ 배경을 못 만들었습니다 — 배경 없이 음악+제목 자막으로 .vrew 를 만듭니다. (원하면 「+」로 이미지/영상을 직접 첨부하세요)');
+    if (!bgImg && !bgClipPath) log('ℹ 배경을 못 만들었습니다 — 배경 없이 음악+제목 자막으로 .vrew 를 만듭니다.');
+    try { closeFlowEng(); } catch {}
+  })();
+
+  // ▶ 병렬: 음악(GPU, ACE-Step) ∥ 배경 이미지·영상(브라우저) — GPU 안 겹침
+  log('⚡ 만들기 — 음악(GPU) ∥ 배경 이미지·영상(브라우저) 병렬 진행…');
+  const [mSettled] = await Promise.allSettled([ensurePlaylistMusic(), bgTask]);
+  const mres = mSettled && mSettled.status === 'fulfilled' ? mSettled.value : {};
+  if (S.abort) { log('⏹ 중단됨'); return currentDTO(); }
+
+  const tracks = (S.parsed.tracks || []).filter((t) => t.audioPath && fs.existsSync(t.audioPath));
+  if (!tracks.length) { log('⚠ 음악이 없어 만들 수 없습니다' + (mres && mres.notInstalled ? ' — ace-step/1_최초설치.bat 를 먼저 실행하세요.' : ' (음악 생성 실패 — 로그 확인).')); return currentDTO(); }
+  // 곡 길이 실측 보정 — 배경 루프 길이 정합
+  for (const t of tracks) {
+    try {
+      const info = await require('./core/media-utils').getMediaInfo(t.audioPath);
+      if (info.durationSec > 1 && Math.abs(info.durationSec - (t.durationSec || 0)) > 1) t.durationSec = Math.round(info.durationSec * 10) / 10;
+    } catch {}
   }
-  try { closeFlowEng(); } catch {}
 
   // 4) seamless 부메랑 → 곡 길이만큼 곡별 루프
   let boomerang = null;
