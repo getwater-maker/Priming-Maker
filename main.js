@@ -528,6 +528,7 @@ ipcMain.handle('qwen-design-status', async () => {
   try { return await QD.status(); } catch (e) { return { installed: false, error: String((e && e.message) || e) }; }
 });
 ipcMain.handle('qwen-design-start', async () => {
+  if (S.musicActive) { log('⚠ 음악 생성 중에는 보이스디자인을 열 수 없습니다. 끝난 뒤 다시 시도하세요.'); return { ok: false, error: 'gpu-busy' }; }
   const r = await QD.start(log).catch((e) => ({ ok: false, error: String((e && e.message) || e) }));
   if (r && r.ok) S.voiceDesignActive = true;
   return r;
@@ -665,7 +666,7 @@ function ensureDirs(outRoot) {
 }
 
 ipcMain.handle('tts-build', async (_e, args = {}) => {
-  if (S.voiceDesignActive) { log('⚠ 보이스디자인 중에는 음성변환을 할 수 없습니다. 디자인 창을 닫은 뒤 다시 시도하세요.'); return { ok: false, error: 'voice-design-active' }; }
+  { const _b = gpuBusyReason(); if (_b) { log(`⚠ ${_b} 중에는 음성변환을 할 수 없습니다. 끝난 뒤 다시 시도하세요.`); return { ok: false, error: 'gpu-busy' }; } }
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
   const { shortsNum = null, dry = false, presetName = null, speed = 1.15, force = false } = args;
   const clipMaxSec = (args.clipMaxSec && Number(args.clipMaxSec) > 0) ? Number(args.clipMaxSec) : 8.0; // 영상 엔진별 그룹 캡(Grok 6/Flow 8)
@@ -1724,7 +1725,7 @@ ipcMain.handle('load-project', async () => {
 // 전체 제작 코어 — 현재 활성 대본(S.parsed/S.outRoot)에 대해 TTS→이미지→영상→.vrew.
 //   make-all(단건)·run-batch(순차 큐)가 공용. opts.openVrew/openFolder 로 자동열기 제어(큐 실행 시 끔).
 async function runMakeAllCore(opts = {}) {
-  if (S.voiceDesignActive) { log('⚠ 보이스디자인 중에는 제작을 할 수 없습니다. 디자인 창을 닫은 뒤 다시 시도하세요.'); return; }
+  { const _b = gpuBusyReason(); if (_b) { log(`⚠ ${_b} 중에는 제작을 할 수 없습니다. 끝난 뒤 다시 시도하세요.`); return; } }
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
   const { shortsNum = null, engine = 'genspark', presetName = null, speed = null, captionStyle = null, captionMaxChars = 7, styleId = null, fromNum = null, toNum = null, dry = false, videoEngine = 'grok', flowVideoModel = 'Veo 3.1 - Lite', flowCount = 'x1', clipMaxSec = null, aiNotice = false, bgm = null, openVrew = true, openFolder = true } = opts;
   const stylePrompt = styleId ? (require('./core/style-store').getPrompt(styleId) || '') : '';
@@ -2360,78 +2361,68 @@ ipcMain.handle('open-playlist-spec', async (_e, args = {}) => {
 // 플리 전체 생성 — 곡마다 ComfyUI ACE-Step API 호출 → 출력폴더에 저장.
 // 음악 없는 곡만 로컬 ComfyUI(ACE-Step)로 생성 — 「🎬 만들기」(이미지+음악+vrew) 앞단계에서 사용.
 //   반환 { done, fail, serverDown }. 이미 mp3 있는 곡은 건너뜀(재생성은 ⚡음악 버튼이 담당).
-async function ensurePlaylistMusic() {
-  const cfg = require('./core/comfy-config').load();
-  const { ComfyEngine } = require('./comfy-engine');
-  const acfg = (cfg.audioBaseUrl && cfg.audioBaseUrl.trim())
-    ? { ...cfg, cloud: false, apiKey: '', baseUrl: cfg.audioBaseUrl.trim() }
-    : cfg;
-  const eng = new ComfyEngine(acfg, log);
-  if (!(await eng.health())) { log(`ComfyUI(음악) 연결 실패 (${acfg.baseUrl}) — 음악 서버 실행/주소를 확인하세요.`); return { done: 0, fail: 0, serverDown: true }; }
-  const outRoot = S.outRoot || playlistOutRoot(S.scriptPath || 'playlist.md', S.preset);
-  try { fs.mkdirSync(outRoot, { recursive: true }); } catch {}
-  const todo = (S.parsed.tracks || []).filter((t) => !(t.audioPath && fs.existsSync(t.audioPath)));
-  if (!todo.length) { log('🎵 모든 곡에 음악이 이미 있습니다 — 음악 생성 건너뜀'); return { done: 0, fail: 0, serverDown: false }; }
-  log(`🎵 음악 생성 — ${todo.length}곡 → ${outRoot}`);
-  let done = 0, fail = 0;
-  for (const t of todo) {
-    if (S.abort) { log('⛔ 중단됨'); break; }
-    t.status = 'generating'; t.error = null; pushDtoUpdate();
-    const base = `${String(t.num).padStart(2, '0')}_${_safeFolder(t.title).slice(0, 40)}`;
-    const outPath = path.join(outRoot, base + '.mp3');
-    log(`  ▶ ${t.num}. ${t.title} (${t.durationSec || 180}초)`);
-    const r = await eng.textToAudio({ tags: t.tags, lyrics: t.lyrics, durationSec: t.durationSec || 180, outputPath: outPath, abortSignal: () => S.abort });
-    if (r.success) {
-      t.status = 'done'; t.audioPath = r.audioPath; done++;
-      try { const info = await require('./core/media-utils').getMediaInfo(r.audioPath); if (info.durationSec > 1) t.durationSec = Math.round(info.durationSec * 10) / 10; } catch {}
-      log(`  ✓ ${path.basename(r.audioPath)} (${t.durationSec}초)`);
-    } else { t.status = 'fail'; t.error = r.error; fail++; log(`  ✗ 실패: ${r.error}`); }
-    pushDtoUpdate();
-  }
-  return { done, fail, serverDown: false };
+// GPU 뮤텍스: 보이스디자인·음악 중엔 서로/음성변환을 막는다(한 번에 하나만 GPU 무겁게).
+function gpuBusyReason() {
+  if (S.voiceDesignActive) return '보이스디자인';
+  if (S.musicActive) return '음악 생성';
+  return null;
 }
 
+// 주어진 곡들을 ACE-Step 독립 서버(로컬 GPU, ComfyUI 불필요)로 생성. 서버를 자동으로 켜고(모델 로딩) 끝나면 끔.
+// 음악 생성 동안 S.musicActive=true → TTS(OmniVoice)·Qwen 차단(VRAM 동시 사용 방지).
+async function runAceStepMusic(tracks) {
+  const AS = require('./core/ace-step');
+  if (!AS.isInstalled()) { log('⚠ ACE-Step 미설치 — ace-step/1_최초설치.bat 를 먼저 실행하세요.'); return { done: 0, fail: 0, notInstalled: true }; }
+  if (S.voiceDesignActive) { log('⚠ 보이스디자인 중에는 음악을 만들 수 없습니다. 디자인 창을 닫은 뒤 다시 시도하세요.'); return { done: 0, fail: 0 }; }
+  const outRoot = S.outRoot || playlistOutRoot(S.scriptPath || 'playlist.md', S.preset);
+  try { fs.mkdirSync(outRoot, { recursive: true }); } catch {}
+  S.musicActive = true;
+  let done = 0, fail = 0;
+  try {
+    log(`🎵 음악 생성 — ${tracks.length}곡 → ${outRoot}`);
+    const st = await AS.start(log);
+    if (!st.ok) { log('✗ ACE-Step 시작 실패: ' + st.error); return { done, fail, startFail: true }; }
+    for (const t of tracks) {
+      if (S.abort) { log('⛔ 중단됨'); break; }
+      t.status = 'generating'; t.error = null; pushDtoUpdate();
+      const base = `${String(t.num).padStart(2, '0')}_${_safeFolder(t.title).slice(0, 40)}`;
+      log(`  ▶ ${t.num}. ${t.title} (${t.durationSec || 180}초)`);
+      const r = await AS.generate({ tags: t.tags, lyrics: t.lyrics, durationSec: t.durationSec || 180 }, log);
+      if (r.ok) {
+        const wavPath = path.join(outRoot, base + '.wav');
+        fs.writeFileSync(wavPath, r.buffer);
+        t.status = 'done'; t.audioPath = wavPath; done++;
+        // 곡 길이 실측 보정 — 배경 루프·자막 길이 정합
+        try { const info = await require('./core/media-utils').getMediaInfo(wavPath); if (info.durationSec > 1) t.durationSec = Math.round(info.durationSec * 10) / 10; } catch {}
+        log(`  ✓ ${base}.wav (${t.durationSec}초)`);
+      } else { t.status = 'fail'; t.error = r.error; fail++; log(`  ✗ 실패: ${r.error}`); }
+      pushDtoUpdate();
+    }
+  } finally {
+    try { await AS.stop(log); } catch {}   // 서버 종료 → VRAM 반납
+    S.musicActive = false;
+  }
+  return { done, fail };
+}
+
+// 음악 없는 곡만 생성 — 「🎬 만들기」(음악+배경+vrew) 앞단계.
+async function ensurePlaylistMusic() {
+  const todo = (S.parsed.tracks || []).filter((t) => !(t.audioPath && fs.existsSync(t.audioPath)));
+  if (!todo.length) { log('🎵 모든 곡에 음악이 이미 있습니다 — 음악 생성 건너뜀'); return { done: 0, fail: 0 }; }
+  return await runAceStepMusic(todo);
+}
+
+// ⚡ 음악 전체 생성(또는 특정 곡 재생성) — ACE-Step 서버.
 ipcMain.handle('make-playlist', async (_e, args = {}) => {
   if (!S.parsed || S.parsed.kind !== 'playlist') { log('열린 플리가 없습니다 — 스펙을 먼저 여세요.'); return currentDTO(); }
   S.abort = false;
-  const cfg = require('./core/comfy-config').load();
-  const { ComfyEngine } = require('./comfy-engine');
-  // 음악 전용 서버(audioBaseUrl)가 있으면 클라우드 설정 무시하고 그 로컬 주소로 — 이미지/영상은 클라우드, 음악만 로컬 가능.
-  const acfg = (cfg.audioBaseUrl && cfg.audioBaseUrl.trim())
-    ? { ...cfg, cloud: false, apiKey: '', baseUrl: cfg.audioBaseUrl.trim() }
-    : cfg;
-  const eng = new ComfyEngine(acfg, log);
-  if (!(await eng.health())) { log(`ComfyUI 연결 실패 (${acfg.baseUrl}) — 음악 서버 실행/주소를 확인하세요.`); return currentDTO(); }
-  const outRoot = S.outRoot || playlistOutRoot(S.scriptPath || 'playlist.md', S.preset);
-  try { fs.mkdirSync(outRoot, { recursive: true }); } catch {}
-  const tracks = S.parsed.tracks;
-  const only = (args && Number(args.num)) || null; // 특정 곡만(재생성) — null=전체
+  const only = (args && Number(args.num)) || null;   // 특정 곡만(재생성) — null=전체
+  const tracks = only ? S.parsed.tracks.filter((t) => t.num === only) : S.parsed.tracks;
   const t0 = Date.now();
-  let done = 0, fail = 0;
-  log(`🎵 플리 생성 시작 — ${only ? `${only}번 곡만` : `${tracks.length}곡`} → ${outRoot}`);
-  for (const t of tracks) {
-    if (only && t.num !== only) continue;
-    if (S.abort) { log('⛔ 중단됨'); break; }
-    t.status = 'generating'; t.error = null; pushDtoUpdate();
-    const base = `${String(t.num).padStart(2, '0')}_${_safeFolder(t.title).slice(0, 40)}`;
-    const outPath = path.join(outRoot, base + '.mp3');
-    log(`  ▶ ${t.num}. ${t.title} (${t.durationSec || 180}초)`);
-    const r = await eng.textToAudio({ tags: t.tags, lyrics: t.lyrics, durationSec: t.durationSec || 180, outputPath: outPath, abortSignal: () => S.abort });
-    if (r.success) {
-      t.status = 'done'; t.audioPath = r.audioPath; done++;
-      // 곡 길이를 실측으로 보정 — ACE-Step 출력이 스펙과 다르면(무음 트림 등) 배경 루프·자막 길이가 어긋남
-      try {
-        const info = await require('./core/media-utils').getMediaInfo(r.audioPath);
-        if (info.durationSec > 1) t.durationSec = Math.round(info.durationSec * 10) / 10;
-      } catch {}
-      log(`  ✓ ${path.basename(r.audioPath)} (${t.durationSec}초)`);
-    }
-    else { t.status = 'fail'; t.error = r.error; fail++; log(`  ✗ 실패: ${r.error}`); }
-    pushDtoUpdate();
-  }
+  const r = await runAceStepMusic(tracks);
   S.timings.make = Math.round((Date.now() - t0) / 1000);
-  log(`🎵 플리 생성 완료 — 성공 ${done}곡 · 실패 ${fail}곡 (${S.timings.make}초)`);
-  try { if (done > 0) shell.openPath(outRoot); } catch {}
+  log(`🎵 플리 생성 완료 — 성공 ${r.done}곡 · 실패 ${r.fail}곡 (${S.timings.make}초)`);
+  try { if (r.done > 0) shell.openPath(S.outRoot || playlistOutRoot(S.scriptPath || 'playlist.md', S.preset)); } catch {}
   return currentDTO();
 });
 
@@ -2467,7 +2458,7 @@ ipcMain.handle('make-playlist-video', async () => {
   const mres = await ensurePlaylistMusic();
   if (S.abort) { log('⏹ 중단됨'); return currentDTO(); }
   const tracks = (S.parsed.tracks || []).filter((t) => t.audioPath && fs.existsSync(t.audioPath));
-  if (!tracks.length) { log('⚠ 음악이 없어 만들 수 없습니다' + (mres && mres.serverDown ? ' — 음악 서버(ComfyUI 127.0.0.1:8188)를 켜세요.' : ' (음악 생성 실패).')); return currentDTO(); }
+  if (!tracks.length) { log('⚠ 음악이 없어 만들 수 없습니다' + (mres && mres.notInstalled ? ' — ace-step/1_최초설치.bat 를 먼저 실행하세요.' : ' (음악 생성 실패 — 로그 확인).')); return currentDTO(); }
   // 곡 길이 실측 보정 — 복원된 세션은 스펙값(예: 180초)만 남아 실제 mp3 와 다를 수 있음(배경 루프 길이 정합)
   for (const t of tracks) {
     try {
@@ -2478,44 +2469,48 @@ ipcMain.handle('make-playlist-video', async () => {
     } catch {}
   }
   S.abort = false;
-  const cfg = require('./core/comfy-config').load();
-  const { ComfyEngine } = require('./comfy-engine');
-  const eng = new ComfyEngine(cfg, log); // 이미지(Krea2)·영상(LTX) — 이미지/영상은 클라우드 설정 그대로
-  if (!(await eng.health())) { log(`ComfyUI 연결 실패 (${cfg.baseUrl}) — 이미지/영상 서버를 확인하세요.`); return currentDTO(); }
   const PV = require('./core/playlist-video');
   const outRoot = S.outRoot || playlistOutRoot(S.scriptPath || 'playlist.md', S.preset);
   try { fs.mkdirSync(outRoot, { recursive: true }); } catch {}
   const t0 = Date.now();
 
-  // 1) 배경 프롬프트 — 스펙의 '배경:' > 컨셉 > 제목 순. 스타일 프리픽스 적용.
+  // 1) 배경 프롬프트 — 스펙의 '배경:' > 컨셉 > 제목 순.
   const bgRaw = (S.parsed.bgPrompt && S.parsed.bgPrompt.trim()) || S.parsed.concept || S.parsed.fileTitle
     || 'calm ambient scenery, slow gentle motion, cinematic, soft light';
-  const stylePrompt = (S.preset && S.preset.styleId) ? (require('./core/style-store').getPrompt(S.preset.styleId) || '') : '';
-  const fullImgPrompt = `${stylePrompt ? stylePrompt.trim().replace(/[,\s]+$/, '') + ', ' : ''}${bgRaw.trim().replace(/[,\s]+$/, '')}, no text, no watermark`;
 
-  // 2) 배경 소스 확보 — 첨부된 배경(영상/이미지) 우선, 없으면 Krea2 이미지 생성.
+  // 2) 배경 소스 — 첨부(영상/이미지) 우선. 없으면 롱폼/쇼츠와 같은 엔진으로 자동 생성(순환 이미지 → Grok i2v 영상).
+  //    ComfyUI 미사용. 실패해도 음악+제목 자막으로 .vrew 는 생성(배경만 빠짐).
   let bgImg = (S.parsed.bgImagePath && fs.existsSync(S.parsed.bgImagePath)) ? S.parsed.bgImagePath : null;
   let bgClipPath = (S.parsed.bgVideoPath && fs.existsSync(S.parsed.bgVideoPath)) ? S.parsed.bgVideoPath : null;
   if (bgClipPath) {
     log(`🎬 첨부된 배경 영상 사용: ${path.basename(bgClipPath)}`);
+  } else if (bgImg) {
+    log(`🖼 첨부된 배경 이미지 사용: ${path.basename(bgImg)}`);
   } else {
-    if (!bgImg) {
-      log(`🖼 배경 이미지 생성(Krea2) — "${bgRaw.slice(0, 60)}"`);
-      const outImg = path.join(outRoot, '_bg.png');
-      const ri = await eng.textToImage({ prompt: fullImgPrompt, aspect: '16:9', outputPath: outImg, abortSignal: () => S.abort });
-      if (!ri.success) { log('✗ 배경 이미지 실패: ' + ri.error); return currentDTO(); }
-      bgImg = ri.imagePath; S.parsed.bgImagePath = bgImg; pushDtoUpdate();
-    } else {
-      log(`🖼 첨부된 배경 이미지 사용: ${path.basename(bgImg)}`);
+    // 자동 생성 — 단일 그룹 미니 프로젝트를 만들어 쇼츠와 동일한 엔진 사용.
+    const styleId = (S.preset && S.preset.styleId) || null;
+    const bgProj = { aspect: '16:9', fileTitle: S.parsed.fileTitle || 'bg',
+      groups: [{ id: 'bg', num: 1, phase: '훅', imagePrompt: `${bgRaw.trim().replace(/[,\s]+$/, '')}, no text, no watermark`, videoPrompt: bgRaw, motionNote: 'slow subtle motion, seamless loop', isI2V: true, sentences: [] }] };
+    const bgWork = path.join(outRoot, '_bgwork');
+    try {
+      log(`🖼 배경 이미지 생성(순환 엔진: Flow/Genspark) — "${bgRaw.slice(0, 60)}"`);
+      await runRotatingImages(bgProj, bgWork, log, styleId, null, [1]);
+      bgImg = bgProj.groups[0].imagePath || null;
+      if (bgImg) { S.parsed.bgImagePath = bgImg; pushDtoUpdate(); log(`  ✓ 배경 이미지: ${path.basename(bgImg)}`); }
+      else log('  ✗ 배경 이미지 생성 실패');
+    } catch (e) { log('  ✗ 배경 이미지 오류: ' + (e && e.message || e)); }
+    if (bgImg && !S.abort) {
+      try {
+        log('🎬 배경 영상(Grok i2v, 무한루프용 짧은 클립)…');
+        await P.generateHookVideosGrok(bgProj, bgWork, log, () => S.abort, 0, pushDtoUpdate, [1], 6);
+        const vp = bgProj.groups[0].videoPath;
+        if (vp && fs.existsSync(vp)) { bgClipPath = vp; S.parsed.bgVideoPath = bgClipPath; pushDtoUpdate(); log(`  ✓ 배경 영상: ${path.basename(bgClipPath)}`); }
+        else log('  ℹ 배경 영상 없음 — 이미지 배경으로 진행');
+      } catch (e) { log('  ✗ 배경 영상 오류: ' + (e && e.message || e) + ' — 이미지 배경으로 진행'); }
     }
-    // 3) 배경 영상(LTX i2v 짧은 클립) — 이미지에 움직임 부여
-    if (S.abort) { log('⏹ 중단됨'); return currentDTO(); }
-    log('🎬 배경 영상 클립 생성(LTX i2v)…');
-    const outClip = path.join(outRoot, '_bg_clip.mp4');
-    const rv = await eng.imageToVideo({ imagePath: bgImg, prompt: bgRaw, outputPath: outClip, aspect: '16:9', durationSec: null, abortSignal: () => S.abort });
-    if (rv.success && rv.videoPath) { bgClipPath = rv.videoPath; S.parsed.bgVideoPath = bgClipPath; pushDtoUpdate(); }
-    else { log('✗ 배경 영상 실패: ' + rv.error + ' — 이미지 배경으로 .vrew 만 생성합니다.'); }
+    if (!bgImg && !bgClipPath) log('ℹ 배경을 못 만들었습니다 — 배경 없이 음악+제목 자막으로 .vrew 를 만듭니다. (원하면 「+」로 이미지/영상을 직접 첨부하세요)');
   }
+  try { closeFlowEng(); } catch {}
 
   // 4) seamless 부메랑 → 곡 길이만큼 곡별 루프
   let boomerang = null;

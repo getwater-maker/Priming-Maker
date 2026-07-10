@@ -82,6 +82,8 @@ main{flex:1;overflow:auto;padding:14px 16px}
 .thumb.none{display:flex;align-items:center;justify-content:center;color:#c3b6a4;font-size:40px;cursor:default}
 .thumbwrap{position:relative;width:150px;height:264px}
 .thumbwrap.lf{width:320px;height:180px}
+/* 플리 배경 썸네일은 사이드바(230px)에 맞게 축소 — 오른쪽 음악 리스트를 가리지 않게 */
+.plbg .thumb.lf,.plbg .thumbwrap.lf{width:214px;height:120px}
 .playbadge{position:absolute;left:6px;bottom:6px;color:#fff;font-size:13px;background:rgba(125,79,163,.85);
   border-radius:5px;padding:1px 6px;pointer-events:none}
 /* 영상 썸네일 중앙 재생 버튼 (클릭 시에만 재생) */
