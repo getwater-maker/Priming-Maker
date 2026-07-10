@@ -83,17 +83,31 @@ def _load_model():
         _STATE["loading"] = False
 
 
+_INST_MARKERS = {"", "(instrumental)", "instrumental", "[instrumental]", "[inst]",
+                 "(연주곡)", "연주곡", "(inst)", "no vocals", "보컬 없음"}
+
+
+def _norm_lyrics(lyrics):
+    """가사가 비었거나 연주곡 표시면 ACE-Step 전용 태그 '[instrumental]' 로 강제한다.
+    (빈 가사를 그냥 넘기면 ACE-Step 이 임의 가사(기본 중국어)를 만들어 부른다.)"""
+    s = (lyrics or "").strip()
+    if s.lower() in _INST_MARKERS:
+        return "[instrumental]"
+    return s
+
+
 def _generate(tags, lyrics, duration, infer_step, guidance_scale):
     model = _STATE["model"]
     if model is None:
         raise RuntimeError("model not loaded")
+    lyrics = _norm_lyrics(lyrics)
     fd, out_path = tempfile.mkstemp(suffix=".wav", prefix="acestep_")
     os.close(fd)
     with _LOCK:
         model(
             audio_duration=float(duration),
             prompt=tags or "",
-            lyrics=lyrics or "",
+            lyrics=lyrics or "[instrumental]",
             infer_step=int(infer_step),
             guidance_scale=float(guidance_scale),
             scheduler_type="euler",
