@@ -5,9 +5,18 @@ echo ============================================================
 echo   ACE-Step music server - first-time setup (run once)
 echo ============================================================
 echo.
-set "PYBASE=D:\miniconda3\python.exe"
-if not exist "%PYBASE%" set "PYBASE=python"
-echo [1/5] Creating virtual env (venv)...
+rem ACE-Step needs Python 3.11/3.12 (NOT 3.13 - spacy 3.8.4 has no 3.13 wheel).
+rem Use an existing conda env's Python as the base.
+set "PYBASE="
+if exist "D:\miniconda3\envs\bgm\python.exe" set "PYBASE=D:\miniconda3\envs\bgm\python.exe"
+if not defined PYBASE if exist "D:\miniconda3\envs\Qwen3TTS\python.exe" set "PYBASE=D:\miniconda3\envs\Qwen3TTS\python.exe"
+if not defined PYBASE if exist "D:\miniconda3\envs\audiobook\python.exe" set "PYBASE=D:\miniconda3\envs\audiobook\python.exe"
+if not defined PYBASE set "PYBASE=python"
+echo Base Python:
+"%PYBASE%" --version
+echo.
+echo [1/5] Creating virtual env (venv)  (removing any old 3.13 venv first)...
+if exist "venv" rmdir /s /q venv
 "%PYBASE%" -m venv venv
 if errorlevel 1 goto err
 echo [2/5] Upgrading pip...
