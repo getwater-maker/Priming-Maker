@@ -38,7 +38,7 @@ function phaseBadge(p, isLf) {
 }
 
 const QSTATUS = { idle: '대기', running: '진행중', done: '완료', failed: '실패' };
-const ENGINE_META = { genspark: { name: 'Genspark (Nano Banana 2)' }, flow: { name: 'Google Flow' }, comfy: { name: 'ComfyUI (Krea2 Turbo)' } };
+const ENGINE_META = { genspark: { name: 'Genspark (Nano Banana 2)' }, flow: { name: 'Google Flow' }, gemini: { name: '🍌 나노바나나2 Lite (Gemini API)' }, comfy: { name: 'ComfyUI (Krea2 Turbo)' } };
 
 // 스타일 편집 모달의 한 행 — 기본 스타일은 읽기전용(복사만), 사용자 스타일은 이름·프롬프트 수정/삭제.
 function StyleRow({ s, index, total, onCopy, onSave, onDelete, onMove }) {
@@ -151,6 +151,7 @@ export default function App() {
   const [imgRotOpen, setImgRotOpen] = useState(false);
   const [imgRot, setImgRot] = useState(null);            // { order:[], enabled:{} } 이미지 순환 설정
   const [giCfg, setGiCfg] = useState(null);              // Nano Banana 2 Lite (Gemini 이미지 API) 설정
+  const [giKey, setGiKey] = useState('');                // Gemini API 키(이미지 설정 팝업에서 입력) — secret-store 공용
   const [lora, setLora] = useState(null);                // LoRA 수집 설정 { enabled, dir, trigger, count }
   const [gsAccOpen, setGsAccOpen] = useState(false);
   const [gsAcc, setGsAcc] = useState(null);              // Genspark 멀티계정
@@ -665,10 +666,12 @@ export default function App() {
       const c = await api.getImageRotation(); setImgRot(c || { order: ['genspark', 'flow'], enabled: { genspark: true, flow: true }, flowImageModel: 'Nano Banana 2' });
       try { setLora(await api.getLoraCollect()); } catch (_) {}
       try { setGiCfg(await api.getGeminiImageConfig()); } catch (_) {}
+      try { setGiKey(await api.getGeminiKey() || ''); } catch (_) {}
       setImgRotOpen(true);
     } catch (e) { logline('순환 설정 읽기 오류: ' + e.message); }
   }
   async function saveGiCfg(patch) { try { setGiCfg(await api.setGeminiImageConfig(patch)); } catch (e) { logline('나노바나나 설정 오류: ' + e.message); } }
+  async function saveGiKey(k) { try { await api.setGeminiKey(k || ''); setGiKey(k || ''); setStatus('Gemini API 키 저장됨'); } catch (e) { logline('Gemini 키 저장 오류: ' + e.message); } }
   async function saveLora(patch) { try { setLora(await api.setLoraCollect(patch)); } catch (e) { logline('LoRA 설정 오류: ' + e.message); } }
   async function pickLoraDir() { try { const r = await api.pickLoraDir(); if (r) setLora(r); } catch (e) { logline(e.message); } }
   async function saveImgRot(next) { setImgRot(next); try { await api.setImageRotation(next); } catch (e) { logline('순환 저장 오류: ' + e.message); } }
@@ -1153,13 +1156,8 @@ export default function App() {
               {styles.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
             <button className="ghost" title="이미지 스타일 편집(추가·수정·삭제·프롬프트 복사)" style={{ padding: '6px 9px' }} onClick={() => setStyleEditOpen(true)}>✎ 스타일</button>
-            <select title="이미지 생성 방식" value={imgEngine} onChange={(e) => setImgEngine(e.target.value)}>
-              <option value="rotate">이미지: 순환(Flow+Genspark)</option>
-              <option value="gemini">이미지: 나노바나나2 Lite(즉시·API)</option>
-            </select>
-            {imgEngine === 'rotate'
-              ? <button className="ghost" title="순환 엔진/순서·계정 설정" style={{ padding: '6px 9px' }} onClick={openImgRotation}>⚙ 순환</button>
-              : <button className="ghost" title="Nano Banana 2 Lite 모델·키 설정" style={{ padding: '6px 9px' }} onClick={openImgRotation}>⚙ 모델</button>}
+            <span className="meta" title="이미지 = 설정한 순서대로 생성(Genspark → Flow → 나노바나나2 Lite)">이미지: 순환</span>
+            <button className="ghost" title="이미지 생성 순서·엔진·키 설정" style={{ padding: '6px 9px' }} onClick={openImgRotation}>⚙ 이미지</button>
             <button className="ghost" disabled={!loaded} onClick={() => runImg(null)}>🖼 이미지</button>
             <span className="hdiv" />
             <select title="i2v 비디오 엔진" value={videoEngine} onChange={(e) => setVideoEngine(e.target.value)}>
@@ -1527,7 +1525,7 @@ export default function App() {
                 <label className="chk" style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
                   <input type="checkbox" style={{ width: 'auto' }} checked={giCfg.sendAspect !== false} onChange={(e) => saveGiCfg({ sendAspect: e.target.checked })} />비율 전송
                 </label>
-                <div className="meta" style={{ width: '100%', marginTop: 4 }}>키는 「채널편집 → Gemini 키」에서 설정. 모델명이 안 맞으면(404 오류) 여기서 고치세요. 비율(aspectRatio) 미지원 모델이면 「비율 전송」을 끄세요.</div>
+                <div className="meta" style={{ width: '100%', marginTop: 4 }}>API 키는 아래 「🍌 나노바나나2 Lite」 줄에서 입력. 모델명이 안 맞으면(404 오류) 여기서 고치세요. 비율(aspectRatio) 미지원 모델이면 「비율 전송」을 끄세요.</div>
               </div>
             ) : null}
             <div className="meta" style={{ marginBottom: 8 }}>위에서부터 순서대로 시도하고, 한 엔진이 <b>한도</b>(Genspark가 보내는 휴식/한도 메시지, Flow 계정한도)에 걸리면 <b>다음 엔진</b>이 남은 이미지를 이어 만듭니다. 체크 해제 시 순환에서 제외. (ComfyUI는 순환과 별개 단독)</div>
@@ -1550,6 +1548,12 @@ export default function App() {
                   )}
                   {id === 'flow' && <button className="ghost" style={{ flex: '0 0 auto' }} onClick={() => { setImgRotOpen(false); openFlowAcc(); }}>🔑 Flow 계정</button>}
                   {id === 'genspark' && <button className="ghost" style={{ flex: '0 0 auto' }} onClick={() => { setImgRotOpen(false); openGsAcc(); }}>🔑 Genspark 계정</button>}
+                  {id === 'gemini' && (
+                    <span style={{ flex: '0 0 auto', display: 'flex', gap: 4, alignItems: 'center' }}>
+                      <input type="password" placeholder="🔑 Gemini API 키" value={giKey} style={{ width: 150 }}
+                        onChange={(e) => setGiKey(e.target.value)} onBlur={() => saveGiKey(giKey.trim())} />
+                    </span>
+                  )}
                 </div>
               ))}
             </div>

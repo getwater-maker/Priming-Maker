@@ -942,7 +942,6 @@ async function runGeminiImages(project, imagesDir, logger, styleId, onlyNums) {
 }
 
 async function runRotatingImages(project, imagesDir, logger, styleId, startEngine, onlyNums) {
-  if (startEngine === 'gemini') return runGeminiImages(project, imagesDir, logger, styleId, onlyNums);
   const Rot = require('./core/image-rotation');
   const order = Rot.activeOrder(startEngine);
   if (!order.length) { logger('⚠ 순환 엔진이 비어있음 — ⚙ 순환 설정 확인'); return; }
@@ -973,6 +972,8 @@ async function runRotatingImages(project, imagesDir, logger, styleId, startEngin
         }
       } else if (engineId === 'flow') {
         await runFlowImages(project, imagesDir, logger, styleId, nums);
+      } else if (engineId === 'gemini') {
+        await runGeminiImages(project, imagesDir, logger, styleId, nums);
       } else { logger(`(건너뜀) 알 수 없는 엔진: ${engineId}`); }
     } catch (e) {
       logger(`⚠ ${engineId} 중단(${e.message}) — 다음 엔진으로 이어감`);

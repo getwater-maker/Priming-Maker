@@ -16,8 +16,8 @@ const STORE_DIR = path.join(os.homedir(), '.priming-maker');
 const CONFIG_PATH = path.join(STORE_DIR, 'image-rotation.json');
 
 const DEFAULTS = {
-  order: ['genspark', 'flow'],           // 기본 순서: Genspark → Flow
-  enabled: { genspark: true, flow: true },
+  order: ['genspark', 'flow', 'gemini'], // 기본 순서: Genspark → Flow → 나노바나나2 Lite(Gemini API)
+  enabled: { genspark: true, flow: true, gemini: false }, // gemini 는 API 키 필요 → 기본 off
   // Flow 이미지 생성 모델 — flow-engine.js run()이 opts.model 로 그대로 받아 드롭다운 선택(_selectModel).
   //   'Nano Banana 2 Lite'(2026-06-30 출시, gemini-3.1-flash-lite-image) 추가 — 더 빠르고 저렴한 경량 모델.
   //   ⚠ Flow 웹 UI 드롭다운에 이 라벨이 실제로 존재하는지 실측 필요 — 없으면 _selectModel 이 조용히
@@ -29,8 +29,11 @@ function load() {
   try {
     if (fs.existsSync(CONFIG_PATH)) {
       const j = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+      // 저장된 order 에 신규 기본 엔진(gemini 등)이 빠져 있으면 뒤에 추가(기존 사용자 호환).
+      const order = (j.order && j.order.length) ? [...j.order] : [...DEFAULTS.order];
+      for (const e of DEFAULTS.order) if (!order.includes(e)) order.push(e);
       return {
-        order: j.order || DEFAULTS.order,
+        order,
         enabled: { ...DEFAULTS.enabled, ...(j.enabled || {}) },
         flowImageModel: j.flowImageModel || DEFAULTS.flowImageModel,
       };
