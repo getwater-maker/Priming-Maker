@@ -18,3 +18,7 @@ usage-coach/
 qwen-design/venv/
 qwen-design/__pycache__/
 qwen-design/test.wav
+# ACE-Step 음악 서버 — 파이썬 venv·테스트 산출물은 로컬 전용(커밋 제외)
+ace-step/venv/
+ace-step/__pycache__/
+ace-step/test.wav
