@@ -933,7 +933,7 @@ async function runGeminiImages(project, imagesDir, logger, styleId, onlyNums) {
   logger(`🍌 Nano Banana 2 Lite (Gemini API · ${model}) — ${targets.length}장 즉시 생성`);
   for (const g of targets) {
     if (S.abort) { logger('⏹ 중단됨'); break; }
-    const prompt = stylePrompt ? `${stylePrompt.trim().replace(/[,\s]+$/, '')}, ${g.imagePrompt.trim()}` : g.imagePrompt.trim();
+    const prompt = P.buildImagePrompt(stylePrompt, g.imagePrompt);
     const base = path.join(imagesDir, String(g.num).padStart(2, '0'));
     const r = await GI.generateImageToFile({ prompt, aspect: project.aspect || '9:16', outPathNoExt: base });
     if (r.ok) { g.imagePath = r.path; logger(`  ✓ G${g.num} → ${path.basename(r.path)}`); pushDtoUpdate(); }

@@ -313,10 +313,12 @@ async function buildProjectVrew(project, vrewPath, preset, logger, captionMaxCha
 // group.imagePrompt 를 "그대로" 투입. 컷 num → cut{num}.png. 결과를 group.imagePath 에 매핑.
 // 모든 이미지 엔진(Genspark/Flow/…) 공통 최종 프롬프트 빌더 — 엔진이 달라도 동일 프롬프트 보장.
 //   `<스타일>, <대본 이미지프롬프트>, no text, no watermark`
+// 공통 네거티브 — 지저분·비호감 캐릭터 방지(엔진들이 별도 네거티브칸이 없어 긍정 프롬프트에 자연어로 부착).
+const NEG_UGLY = 'no ugly faces, no deformed or distorted faces, no disfigured features, no mutated or extra limbs, no malformed hands, no creepy or unpleasant expressions';
 function buildImagePrompt(stylePrompt, imagePrompt) {
   const style = stylePrompt ? String(stylePrompt).trim().replace(/[,\s]+$/, '') + ', ' : '';
   const body = String(imagePrompt || '').trim().replace(/[,\s]+$/, '');
-  return `${style}${body}, no text, no watermark`;
+  return `${style}${body}, no text, no watermark, ${NEG_UGLY}`;
 }
 
 // 모더레이션(NSFW) 우회용 프롬프트 순화 — 무기/폭력/유혈/선정 표현을 완화.

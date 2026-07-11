@@ -631,6 +631,12 @@ class GensparkEngine {
           newSrcs = (await this._resultSrcsInOrder()).filter(s => !beforeSrcs.has(s));
           if (newSrcs.length >= N) { this.log(`[Genspark] ${newSrcs.length}장 감지 (${elapsed}초)`); break; }
         }
+        // 0장인 채로 오래(2분) 지나면 Genspark 서버 지연/막힘 → 헛대기 말고 다음 엔진으로.
+        //   (정상 배치는 보통 20~40초에 첫 장이 뜸. 2분간 0장이면 이 배치는 안 나올 확률이 큼)
+        if (newSrcs.length === 0 && elapsed >= 120) {
+          this.log('[Genspark] 2분간 0장 감지 — 서버 지연/막힘 판단, 다음 엔진(Flow→나노바나나)으로 넘어감');
+          break;
+        }
         // 사용 한도/제한 메시지 감지 → 조기 중단(순환의 다음 엔진으로).
         //   0장뿐 아니라 부분완료(예 3/6)에서 5시간 제한이 걸린 경우도 잡아야 하므로 newSrcs.length < N 이면 검사.
         //   (이전엔 ===0 만 검사 → 3/6 에서 제한 걸리면 타임아웃까지 4~5분 헛대기)
