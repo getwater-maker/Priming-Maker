@@ -619,6 +619,7 @@ class GensparkEngine {
       let limitMsg = null;
       let _gracedLogged = false;
       let nsfwSeen = false, nsfwAt = 0;
+      let lastCount = 0, lastProgressAt = Date.now(); // 진행 정체(스톨) 감지용
       while (true) {
         if (abortSignal && abortSignal()) return fail('사용자 중단');
         await this.page.waitForTimeout(POLL);
@@ -631,10 +632,12 @@ class GensparkEngine {
           newSrcs = (await this._resultSrcsInOrder()).filter(s => !beforeSrcs.has(s));
           if (newSrcs.length >= N) { this.log(`[Genspark] ${newSrcs.length}장 감지 (${elapsed}초)`); break; }
         }
-        // 0장인 채로 오래(2분) 지나면 Genspark 서버 지연/막힘 → 헛대기 말고 다음 엔진으로.
-        //   (정상 배치는 보통 20~40초에 첫 장이 뜸. 2분간 0장이면 이 배치는 안 나올 확률이 큼)
-        if (newSrcs.length === 0 && elapsed >= 120) {
-          this.log('[Genspark] 2분간 0장 감지 — 서버 지연/막힘 판단, 다음 엔진(Flow→나노바나나)으로 넘어감');
+        // 진행 정체(스톨) 감지 — 새 이미지 개수가 늘면 진행시각 갱신. 75초간 새 장이 없고 아직 부족하면
+        //   (거의 다 됐을 땐 제외 — 막판 유예로 처리) 타임아웃까지 헛대기 말고 조기 종료 → 상위가 단건 재생성.
+        if (newSrcs.length > lastCount) { lastCount = newSrcs.length; lastProgressAt = Date.now(); }
+        const almostDoneStall = N >= 2 && newSrcs.length >= N - 1;
+        if (!almostDoneStall && newSrcs.length < N && elapsed >= 45 && (Date.now() - lastProgressAt) > 75000) {
+          this.log(`[Genspark] ${elapsed}초·${newSrcs.length}/${N}에서 75초 정체 — 이 배치 종료 후 빠진 컷 단건 재생성`);
           break;
         }
         // 사용 한도/제한 메시지 감지 → 조기 중단(순환의 다음 엔진으로).
