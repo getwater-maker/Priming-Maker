@@ -1,5 +1,5 @@
 {
-  "version": "0.1.95",
+  "version": "0.1.96",
   "deps": "0a1409dd7b6c37e6b850a8223ac05d93b0380d94",
   "files": {
     "AGENTS.md": "1a0fd73c104ff40f5cce110a3ffac07a7aa77205",
@@ -45,7 +45,7 @@
     "core/prompt-io.js": "cb429515d67ef5ebf8f254e4fc8d92279b95b81c",
     "core/qwen-design.js": "609bc72e62d9fb818720fc76093a8e4f2c0dd830",
     "core/sentence-splitter.js": "b9d1b29983edd59530322499d12303e61978bba1",
-    "core/style-store.js": "3641a5f1486be9bd04a17aad8fa8efe6e9b68bf4",
+    "core/style-store.js": "aa8d618c2a710a4e1854c59769f01af87ecaf98e",
     "core/tts-cache.js": "8654afda97826e0d73cc3f49a53ef171e06bcb4e",
     "core/upscaler.js": "f8abfaf3bf55d3de9345c55699149ec859b4deaa",
     "docs/대본-작성-가이드.md": "690eb5bd0c1d4ccc019ff684614ff8a4094f3591",
@@ -63,7 +63,7 @@
     "light-updater.js": "c9be26807112942a9cf4a88dfcd14a1004634762",
     "main.js": "216ace892618f339e761f7a3dddbf0e91119cdaf",
     "package-lock.json": "7c46c6c7a08739e1e28df9c9286a860c70cd6760",
-    "package.json": "657c4482a33beff8e8d19f935b8f33f372823347",
+    "package.json": "78b578eab8859a975a696fb85179ad6e15ca3f0a",
     "preload.js": "9139806fd50384e3399c5718f765dd91b608d4c8",
     "renderer/dist/assets/index-5Ser1Ukx.css": "75d7c5c7cc88c16ea5f54f8bb71e35761b0f9abc",
     "renderer/dist/assets/index-BOPriGtp.js": "c17254a37f749858ecf1e04b0313a4ef347e3d13",

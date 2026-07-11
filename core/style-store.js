@@ -17,7 +17,7 @@ const STORE_PATH = path.join(STORE_DIR, 'styles.json');
 const ORDER_PATH = path.join(STORE_DIR, 'style-order.json');
 
 // 기본 28개 스타일 — flow-engine.js 의 옛 STYLE_PROMPTS 객체에서 이관
-const BUILT_IN_STYLES = [
+const _RAW_STYLES = [
   { id: 'k-webtoon',         name: '한국 웹툰',           prompt: 'beautiful Korean webtoon style, manhwa art, soft shading, detailed characters, emotional expressions, Korean comic illustration, clean lineart, pastel colors' },
   { id: 'webtoon-illust',    name: '웹툰 일러스트',       prompt: 'webtoon illustration style, digital painting, semi-realistic, vivid colors, detailed background, Korean manhwa inspired, clean composition' },
   { id: 'dramatic-webtoon',  name: '극적웹툰',            prompt: 'Dramatic Korean webtoon/manhwa illustration, semi-realistic, bold clean confident ink linework, rich cel-style shading, dramatic cinematic lighting (warm key light, deep shadows), high contrast, muted palette with a bold red-and-gold focal point, highly readable, consistent with the reference image, realistic adult body proportions and mature detailed faces — NOT chibi, NOT super-deformed, NOT big-head, NOT small-body, NOT cute, NOT kawaii, NOT pastel, NOT 3D Pixar, NOT photorealistic' },
@@ -47,6 +47,12 @@ const BUILT_IN_STYLES = [
   { id: 'biblical-chibi',    name: '치비 (성경시대)',     prompt: 'chibi anime style, cute super-deformed characters with big sparkling eyes and small bodies, kawaii, soft pastel earth tones (ochre, sand, olive, terracotta), ancient biblical era setting, characters wearing flowing robes and tunics, simple head coverings, leather sandals, bearded elders, Holy Land scenery with olive trees and stone buildings, gentle reverent atmosphere, hand-drawn anime illustration, NOT modern clothing, NOT Korean historical drama, NOT photorealistic' },
   { id: 'three-kingdoms',    name: '흑백 수묵화',          prompt: 'monochrome ink-wash painting style, traditional brush and ink art, smooth grayscale shading, black and white, fine ink rendering, realistic idealized rendering, strong contrast, cinematic lighting, detailed, 4K' },
 ];
+
+// 모든 스타일 공통 보정 — ① 인물은 미남·미녀(호감형 얼굴) ② 기본은 밝게(단 '어두워야 하는 장면'은 예외 → 내용 프롬프트가 어둡게 지정하면 그대로).
+//   인포그래픽·졸라맨(스틱맨)은 얼굴/조명 개념이 없어 제외.
+const BEAUTY_BRIGHT = ', attractive good-looking characters (beautiful women and handsome men) with pleasant appealing faces, prefer bright and well-lit imagery with clear luminous atmosphere unless the scene must be dark';
+const _NO_ENHANCE = new Set(['infographic-3d', 'infographic-2d', 'stickman']);
+const BUILT_IN_STYLES = _RAW_STYLES.map((s) => (_NO_ENHANCE.has(s.id) ? s : { ...s, prompt: s.prompt + BEAUTY_BRIGHT }));
 
 function _loadUserStyles() {
   try {
