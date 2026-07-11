@@ -159,6 +159,14 @@ export default function App() {
   const [grokAcc, setGrokAcc] = useState(null);          // Grok 멀티계정
 
   const logRef = useRef(null);
+  const previewAudioRef = useRef(null);   // 미리듣기 오디오 1개만 재생(새로 누르면 이전 것 정지)
+  function playPreviewUrl(url) {
+    try { if (previewAudioRef.current) { previewAudioRef.current.pause(); previewAudioRef.current.currentTime = 0; } } catch {}
+    if (!url) return;
+    const a = new Audio(url);
+    previewAudioRef.current = a;
+    a.play().catch(() => {});
+  }
   const loaded = !!(dto && ((dto.projects && dto.projects.length) || dto.kind === 'book'));
 
   const capCharsN = Math.max(2, parseInt(capChars, 10) || 7);
@@ -835,7 +843,7 @@ export default function App() {
   // 모달 내 참조음성 미리듣기
   async function playRef(p) {
     if (!p) return;
-    try { const url = await api.readAudio(p); if (url) { const a = new Audio(url); a.play().catch(() => {}); } }
+    try { const url = await api.readAudio(p); playPreviewUrl(url); }
     catch (e) { logline('미리듣기 실패: ' + e.message); }
   }
   // ── 🎨 보이스디자인 (Qwen3-TTS 온디맨드 서버) ─────────────────────────────
@@ -859,7 +867,7 @@ export default function App() {
       if (r && r.ok) {
         const url = await api.readAudio(r.tempPath);
         setVdWavUrl(url || ''); setVdGenerated(true);
-        if (url) new Audio(url).play().catch(() => {});
+        playPreviewUrl(url);
         setVdStatus('생성 완료 — 들어보고, 마음에 들면 아래에 파일명을 입력해 저장하세요. (안 들면 설명을 바꿔 다시 생성)');
       } else setVdStatus('⚠ 생성 실패: ' + ((r && r.error) || '알 수 없음'));
     } catch (e) { setVdStatus('오류: ' + e.message); }
@@ -891,7 +899,7 @@ export default function App() {
     try {
       setStatus(`Supertonic ${v} 미리듣기 합성 중…`);
       const r = await api.previewSupertonic({ voice: v, language: (ch && ch.language) || 'ko' });
-      if (r && r.dataUrl) { new Audio(r.dataUrl).play().catch(() => {}); setStatus(''); }
+      if (r && r.dataUrl) { playPreviewUrl(r.dataUrl); setStatus(''); }
       else { logline('미리듣기 실패: ' + ((r && r.error) || '알 수 없음')); setStatus('미리듣기 실패'); }
     } catch (e) { logline('미리듣기 오류: ' + e.message); setStatus('미리듣기 실패'); }
   }
@@ -1426,7 +1434,7 @@ export default function App() {
               <textarea rows="2" placeholder="이 문장을 그 목소리로 읽어 미리듣기 합니다 (자유 수정 가능)" value={vdText} onChange={(e) => setVdText(e.target.value)} /></div>
             <div className="frow"><label></label>
               <button onClick={vdGenerate} disabled={vdBusy}>🎨 목소리 생성</button>
-              {vdWavUrl ? <button className="ghost" onClick={() => new Audio(vdWavUrl).play().catch(() => {})}>▶ 다시 듣기</button> : null}
+              {vdWavUrl ? <button className="ghost" onClick={() => playPreviewUrl(vdWavUrl)}>▶ 다시 듣기</button> : null}
               <button className="ghost" style={{ marginLeft: 'auto' }} title="참조음성이 저장되는 폴더 열기" onClick={() => api.openRefFolder('')}>📂 참조음성 폴더</button>
             </div>
             {vdWavUrl ? <div className="frow"><label></label><audio controls src={vdWavUrl} style={{ flex: 1 }} /></div> : null}
