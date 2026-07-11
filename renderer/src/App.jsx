@@ -379,6 +379,12 @@ export default function App() {
       setDto(d); setStatus('오디오 완료');
     } catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
   }
+  async function deleteTtsAll() {
+    if (!window.confirm('이미 만든 TTS 음성 파일과 재활용 캐시를 모두 삭제하고, 화면의 시간기록도 지웁니다.\n(다음에 변환 버튼을 누르면 전부 새로 합성됩니다.)\n\n진행할까요?')) return;
+    setStatus('TTS 삭제 중…');
+    try { const d = await api.deleteTts(); if (d) setDto(d); setStatus('TTS 삭제 완료'); }
+    catch (e) { logline('TTS 삭제 오류: ' + e.message); setStatus('TTS 삭제 실패'); }
+  }
   async function runImg(shortsNum) {
     if (!ensurePromptsFilled(shortsNum, { image: 'all', video: 'none' })) return; // 이미지 버튼=이미지 프롬프트만
     setStatus(`이미지 생성중(${imgEngine})…`);
@@ -1156,7 +1162,7 @@ export default function App() {
           <div className="hcenter">
             <span title="음성 배속 (합성 1.0 → atempo 변환)">🎤 배속 <input type="number" value={ttsSpeed} step="0.05" min="0.5" max="2" style={{ width: 52 }} onChange={(e) => setTtsSpeed(e.target.value)} /></span>
             <button className="ghost" disabled={!loaded} onClick={() => runTts(null)}>🎤 TTS</button>
-            <button className="ghost" disabled={!loaded} title="기존 음성·캐시를 무시하고 현재 대본 전체 음성을 새로 합성" onClick={() => runTts(null, true)}>🔁 다시 변환</button>
+            <button className="ghost" disabled={!loaded} title="이미 만든 음성 파일·재활용 캐시를 삭제하고 화면의 시간기록도 지웁니다 (다음 변환은 전부 새로 합성)" onClick={deleteTtsAll}>🗑 TTS삭제</button>
             <button className="ghost" title="발음사전 — TTS가 잘못 읽는 단어를 발음대로 교정(자막은 대본 그대로)" style={{ padding: '6px 9px' }} onClick={openDict}>📖 발음사전</button>
             <span className="hdiv" />
             <select title="이미지 스타일" value={styleId} onChange={(e) => setStyleId(e.target.value)}>

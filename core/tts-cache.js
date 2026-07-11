@@ -59,4 +59,16 @@ function put(key, srcPath, dur, ext) {
   } catch {}
 }
 
-module.exports = { keyFor, get, put, DIR };
+// 캐시 전체 삭제 — 'TTS삭제' 에서 호출(다음 변환이 캐시 재활용 없이 새로 합성되도록).
+function clearAll() {
+  let n = 0;
+  try {
+    if (fs.existsSync(DIR)) {
+      for (const f of fs.readdirSync(DIR)) { try { fs.unlinkSync(path.join(DIR, f)); n++; } catch {} }
+    }
+  } catch {}
+  try { _saveIdx({}); } catch {}
+  return n;
+}
+
+module.exports = { keyFor, get, put, clearAll, DIR };

@@ -668,6 +668,27 @@ function ensureDirs(outRoot) {
   if (S.parsed) for (const pr of S.parsed.projects) shortsDirs(outRoot, pr.shortsNum);
 }
 
+// 'TTS삭제' — 이미 만든 음성 파일(tts-N)·재활용 캐시를 지우고 화면 시간기록 초기화.
+//   다음에 변환 버튼을 누르면 캐시 재활용 없이 전부 새로 합성된다.
+ipcMain.handle('delete-tts', async () => {
+  if (!S.parsed || !S.parsed.projects) { log('열린 대본이 없습니다.'); return currentDTO(); }
+  let files = 0;
+  for (const pr of S.parsed.projects) {
+    if (S.outRoot) {
+      try {
+        const dir = shortsDirs(S.outRoot, pr.shortsNum).tts;
+        if (fs.existsSync(dir)) for (const f of fs.readdirSync(dir)) { try { fs.unlinkSync(path.join(dir, f)); files++; } catch {} }
+      } catch {}
+    }
+    for (const s of pr.sentences) { s.ttsAudioPath = null; s.ttsDurationSec = null; }  // 화면 시간기록 제거
+  }
+  let cached = 0;
+  try { cached = require('./core/tts-cache').clearAll(); } catch {}
+  log(`🗑 TTS 삭제 완료 — 음성파일 ${files}개 + 재활용캐시 ${cached}개 삭제, 시간기록 초기화. (다음 변환은 전부 새로 합성)`);
+  pushDtoUpdate();
+  return currentDTO();
+});
+
 ipcMain.handle('tts-build', async (_e, args = {}) => {
   { const _b = gpuBusyReason(); if (_b) { log(`⚠ ${_b} 중에는 음성변환을 할 수 없습니다. 끝난 뒤 다시 시도하세요.`); return { ok: false, error: 'gpu-busy' }; } }
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');

@@ -56,6 +56,7 @@ contextBridge.exposeInMainWorld('api', {
   grokLogin: (accId) => ipcRenderer.invoke('grok-login', { accId }),
   openScript: (args) => ipcRenderer.invoke('open-script', args),
   ttsBuild: (args) => ipcRenderer.invoke('tts-build', args),
+  deleteTts: () => ipcRenderer.invoke('delete-tts'),
   imageBuild: (args) => ipcRenderer.invoke('image-build', args),
   videoBuild: (args) => ipcRenderer.invoke('video-build', args),
   exportVrew: (args) => ipcRenderer.invoke('export-vrew', args),
