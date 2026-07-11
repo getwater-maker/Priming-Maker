@@ -12,7 +12,7 @@ const os = require('os');
 
 const CFG_PATH = path.join(os.homedir(), '.shots-maker', 'gemini-image-config.json');
 const DEFAULTS = {
-  model: 'gemini-3.1-flash-lite-image',   // Nano Banana 2 Lite (API 모델명 다르면 여기 변경)
+  model: 'gemini-3.1-flash-lite-image',    // Nano Banana 2 Lite (공식 pricing 페이지 확인, 최저가·배치지원). ⚙에서 변경 가능.
   sendAspect: true,                        // generationConfig.imageConfig.aspectRatio 전송(미지원 모델이면 끄기)
 };
 function loadConfig() {
