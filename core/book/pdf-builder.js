@@ -79,14 +79,16 @@ function prepareWorkAssets(workDir) {
   return { fontCss, imageUrl };
 }
 
-function runCli(args, log, timeoutMs = 15 * 60 * 1000) {
+function runCli(args, log, timeoutMs = 15 * 60 * 1000, cwd = null) {
   return new Promise((resolve) => {
     const isElectron = !!process.versions.electron;
     const cmd = process.execPath;
     const fullArgs = [CLI_JS, ...args];
     const env = { ...process.env };
     if (isElectron) env.ELECTRON_RUN_AS_NODE = '1';
-    const child = spawn(cmd, fullArgs, { env, windowsHide: true });
+    // ⚠ cwd 를 작업폴더로 명시 — 앱 cwd(설치폴더 C:)와 입출력(G: 등)이 다른 드라이브면 vivliostyle 이
+    //   "output ... overwrite the original manuscript" 오탐으로 실패(실측). 같은 드라이브 기준이면 정상.
+    const child = spawn(cmd, fullArgs, { env, windowsHide: true, ...(cwd ? { cwd } : {}) });
     let out = '', err = '';
     const timer = setTimeout(() => { try { child.kill(); } catch (_) {} }, timeoutMs);
     child.stdout.on('data', (d) => { const s = d.toString(); out += s; if (log) for (const l of s.split('\n')) if (l.trim()) log(`  [vivliostyle] ${l.trim()}`); });
@@ -150,7 +152,7 @@ async function buildInteriorPdf(a) {
       if (a.grayScale) args.push('--preflight-option', 'gray-scale');
     }
     log(`📕 내지 PDF 조판 중… (Vivliostyle)`);
-    const r = await runCli(args, log, (a.timeoutSec || 600) * 1000 + 60000);
+    const r = await runCli(args, log, (a.timeoutSec || 600) * 1000 + 60000, a.workDir);
     if (r.code !== 0 || !fs.existsSync(a.outPdf)) {
       return { success: false, error: `vivliostyle 실패 (code ${r.code}) ${lastLines(r.err || r.out)}` };
     }
@@ -191,7 +193,7 @@ async function buildCoverPdf({ imagePath, spread, outPdf, workDir, log, timeoutS
     const chrome = chromiumPath();
     if (chrome && fs.existsSync(chrome)) args.push('--executable-browser', chrome);
     L('🖼 표지 PDF 생성 중…');
-    const r = await runCli(args, L, (timeoutSec || 180) * 1000 + 30000);
+    const r = await runCli(args, L, (timeoutSec || 180) * 1000 + 30000, workDir);
     if (r.code !== 0 || !fs.existsSync(outPdf)) return { success: false, error: `표지 PDF 실패 (code ${r.code}) ${lastLines(r.err || r.out)}` };
     L(`🖼 표지 PDF 완료 — ${spread.widthMm}×${spread.heightMm}mm (책등 ${spread.spineMm}mm)`);
     return { success: true, pdfPath: outPdf };

@@ -348,7 +348,7 @@ div.special-sec p { text-indent: 0; margin-bottom: 5pt; }
 nav.toc li { position: relative; padding-right: 2.2em; }
 nav.toc a::after {
   content: target-counter(attr(href url), page);
-  position: absolute; right: 0; font-weight: 400;
+  position: absolute; right: 0; top: 0; font-weight: 400;
   font-family: ${GOTHIC_STACK}; font-size: 0.9em;
 }
 `;

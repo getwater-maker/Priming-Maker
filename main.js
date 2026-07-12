@@ -236,7 +236,8 @@ function _mimeOf(p) {
 app.whenReady().then(() => {
   // media://<encoded-abs-path> → 로컬 파일. Range 직접 처리(비디오 스트리밍 — net.fetch(file://)는 Range에서 ERR_UNEXPECTED).
   protocol.handle('media', (request) => {
-    let p = decodeURIComponent(request.url.slice('media://'.length)).replace(/^\/+/, '');
+    // 쿼리/프래그먼트 제거 — 미리보기 캐시버스터(?t=…)가 파일 경로를 오염시키지 않게
+    let p = decodeURIComponent(request.url.slice('media://'.length)).split(/[?#]/)[0].replace(/^\/+/, '');
     try {
       const stat = fs.statSync(p);
       const mime = _mimeOf(p);

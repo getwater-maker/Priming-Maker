@@ -98,7 +98,9 @@ export default function BookView({ dto, setDto, setStatus, logline }) {
     setPreviewBusy(true); setStatus('조판 중…');
     try {
       const r = await api.bookPreview({ layout });
-      if (r && r.url) setPreviewUrl(r.url + '#t=' + Date.now()); // 캐시 무효화용 fragment
+      // 캐시 무효화 = 쿼리(?t=) — fragment(#t=)를 쓰면 문서 URL 에 프래그먼트가 남아
+      // 목차 target-counter 의 앵커(#ch-N) 해석이 깨져 쪽번호가 '??' 로 나오던 원인.
+      if (r && r.url) setPreviewUrl(r.url + '?t=' + Date.now());
       else { setPreviewBusy(false); setStatus('⚠ 미리보기 조판 실패 — 로그를 확인하세요'); } // 실패 시 '조판 중…' 고착 방지
     } catch (e) { logline('미리보기 오류: ' + e.message); setPreviewBusy(false); setStatus('⚠ 미리보기 오류 — 로그 확인'); }
   }, [loaded, layout]);
@@ -434,6 +436,8 @@ body{overflow-y:scroll}
           <span className="bkpage" title="1번째 화면은 표지 안내(내지 아님)">{pageInfo.cur === 1 ? '표지' : (pageInfo.cur > 1 ? pageInfo.cur - 1 : '–')} / {pageInfo.total || '–'}쪽</span>
           <button className="ghost" onClick={() => nav(Navigation.NEXT)} title="다음 펼침면">▶</button>
           <button className="ghost" onClick={() => nav(Navigation.LAST)} title="마지막 페이지">⏭</button>
+          <input type="range" title="페이지 빠른 이동(드래그)" min={1} max={Math.max(1, (pageInfo.total || 0) + 1)} value={Math.max(1, pageInfo.cur || 1)}
+            style={{ width: 150 }} onChange={(e) => { const v = parseInt(e.target.value, 10); try { viewerRef.current && viewerRef.current.navigateToPage(Navigation.EPAGE, v - 1); } catch (_) {} }} />
           <span className="hdiv" />
           <button className="ghost" onClick={() => applyZoom(zoomRef.current / 1.2)} title="축소">🔍−</button>
           <span className="meta" style={{ minWidth: 42, textAlign: 'center' }}>{zoomPct}%</span>
