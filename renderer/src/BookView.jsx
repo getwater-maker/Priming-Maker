@@ -71,6 +71,7 @@ export default function BookView({ dto, setDto, setStatus, logline }) {
   useEffect(() => {
     if (!dto || dto.kind !== 'book' || layoutLoadedFor.current === dto.scriptPath) return;
     layoutLoadedFor.current = dto.scriptPath;
+    lastPagesRef.current = 0; // 원고 전환 — 이전 원고와 새 조판 쪽수가 우연히 같아도 쪽수 보고가 스킵되지 않게 리셋
     const saved = dto.layoutSaved || {};
     setLayout({ ...LAYOUT_DEFAULTS, ...saved, marginsMm: { ...LAYOUT_DEFAULTS.marginsMm, ...(saved.marginsMm || {}) } });
   }, [dto && dto.scriptPath]);
@@ -96,7 +97,8 @@ export default function BookView({ dto, setDto, setStatus, logline }) {
     try {
       const r = await api.bookPreview({ layout });
       if (r && r.url) setPreviewUrl(r.url + '#t=' + Date.now()); // 캐시 무효화용 fragment
-    } catch (e) { logline('미리보기 오류: ' + e.message); }
+      else { setPreviewBusy(false); setStatus('⚠ 미리보기 조판 실패 — 로그를 확인하세요'); } // 실패 시 '조판 중…' 고착 방지
+    } catch (e) { logline('미리보기 오류: ' + e.message); setPreviewBusy(false); setStatus('⚠ 미리보기 오류 — 로그 확인'); }
   }, [loaded, layout]);
 
   // 조판에 영향을 주는 "내용"만 뽑은 문자열 시그니처.
@@ -197,7 +199,9 @@ html,body{margin:0;padding:0;background:#8a8177}
     try {
       const r = await api.bookBuildPdf({ layout });
       if (r && r.dto) setDto(r.dto);
-      setStatus(r && !r.error ? `PDF 완료 — 내지 ${r.pages}쪽${r.coverPdf ? ' + 표지' : ''}` : 'PDF 실패 — 로그 확인');
+      setStatus(r && !r.error
+        ? (r.coverError ? `⚠ 내지 ${r.pages}쪽 완료 · 표지 실패 — 로그 확인` : `PDF 완료 — 내지 ${r.pages}쪽${r.coverPdf ? ' + 표지' : ''}`)
+        : 'PDF 실패 — 로그 확인');
     } catch (e) { logline('PDF 오류: ' + e.message); }
     setBuilding(false);
   }
@@ -239,7 +243,8 @@ html,body{margin:0;padding:0;background:#8a8177}
       const r = await api.bookExportBarcode();
       if (!r || r.error) { setStatus(r ? r.error : '바코드 생성 실패'); return; }
       const png = await svgToPngDataUrl(r.svg, r.widthPx * 2, r.heightPx * 2); // 2배(≈600px 폭) 고해상
-      await api.bookSaveAsset({ name: `ISBN바코드_${r.isbn13}.png`, dataUrl: png });
+      const sv = await api.bookSaveAsset({ name: `ISBN바코드_${r.isbn13}.png`, dataUrl: png });
+      if (sv && sv.error) { setStatus('⚠ 바코드 PNG 저장 실패: ' + sv.error); return; }
       setStatus('ISBN 바코드 저장 (SVG+PNG) — 표지 뒷면 오른쪽 하단에 배치하세요');
     } catch (e) { logline('바코드 오류: ' + e.message); }
   }
@@ -247,7 +252,8 @@ html,body{margin:0;padding:0;background:#8a8177}
   async function exportCoverGuide() {
     try {
       const sp = dto.spread;
-      if (!sp || !sp.parts) return;
+      if (!sp || !sp.parts) { setStatus('⚠ 스프레드 정보 없음 — 미리보기 조판을 먼저 해주세요'); return; }
+      if (!(dto.lastPages > 0)) { setStatus('⚠ 쪽수 미확정(책등 0mm) — 미리보기/PDF 로 쪽수를 확정한 뒤 가이드를 만드세요'); return; }
       const mmToPx = (mm) => Math.round((mm / 25.4) * 300);
       const W = mmToPx(sp.widthMm), H = mmToPx(sp.heightMm);
       const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
@@ -281,7 +287,8 @@ html,body{margin:0;padding:0;background:#8a8177}
       // 상단 안내
       ctx.setLineDash([]); ctx.fillStyle = '#d32f2f'; ctx.textAlign = 'left'; font(44);
       ctx.fillText(`표지 스프레드 ${sp.widthMm}×${sp.heightMm}mm = ${W}×${H}px @300dpi · 빨강=재단선 · 초록=안전선(글자 금지 바깥)`, sf + 10, sf + 60);
-      await api.bookSaveAsset({ name: '표지가이드.png', dataUrl: cv.toDataURL('image/png') });
+      const sv = await api.bookSaveAsset({ name: '표지가이드.png', dataUrl: cv.toDataURL('image/png') });
+      if (sv && sv.error) { setStatus('⚠ 표지 가이드 저장 실패: ' + sv.error); return; }
       setStatus(`표지 가이드 저장 — ${W}×${H}px. 이 위에 디자인하고 가이드 레이어는 지우세요`);
     } catch (e) { logline('표지 가이드 오류: ' + e.message); }
   }
@@ -368,6 +375,7 @@ html,body{margin:0;padding:0;background:#8a8177}
         {missing.length > 0 && (
           <div className="bkwarn" title="출판문화산업진흥법상 간행물 필수 기재사항">
             ⚠ 판권 필수 미입력: {missing.map(([, l]) => l).join(' · ')}
+            <div style={{ fontWeight: 400, marginTop: 3 }}>※ [판권] 섹션에 자유문을 쓴 경우 이 검사는 책 정보 폼만 봅니다 — 자유문에 ISBN·발행일·발행처 등이 실제로 들어갔는지 직접 확인하세요.</div>
           </div>
         )}
         <details open>

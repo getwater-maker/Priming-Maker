@@ -153,9 +153,9 @@ function inline(text, book, ctx) {
 async function cropFrontCover(spreadImage, spread, outJpg) {
   try {
     const { readImageSize } = require('../../vrew/vrew-builder');
-    const dim = readImageSize(spreadImage);
-    if (!dim || !dim.width) return null;
-    const pxPerMm = dim.width / spread.widthMm;
+    const dim = readImageSize(spreadImage);   // {w,h} 반환 (width/height 아님)
+    if (!dim || !dim.w) return null;
+    const pxPerMm = dim.w / spread.widthMm;
     // 앞표지 x = bleed + [날개] + 뒤표지 + 책등, 폭 = 판형폭 (parts 에서 계산)
     let x = 0, w = 0;
     let acc = 0;

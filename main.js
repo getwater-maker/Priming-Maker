@@ -2835,9 +2835,24 @@ ipcMain.handle('book-build-pdf', async (_e, args = {}) => {
     const coverSecsAll = (S.parsed.covers || []).filter((s) => !(layoutOpts.excluded || []).includes(s.key));
     const coverHasText = coverSecsAll.some((s) => (s.blocks || []).length) || layoutOpts.coverOverlay;
     if (coverHasImg || coverHasText) {
+      // 🔍 표지 이미지 재검증 — 첨부 시점이 아니라 "최종 쪽수로 계산된 스프레드" 기준으로 다시 확인.
+      //   (원고 수정으로 쪽수·책등이 변하면 첨부 때 맞았던 이미지도 어긋남 — 무경고 스트레치 방지)
+      if (coverHasImg) {
+        try {
+          const { readImageSize } = require('./vrew/vrew-builder');
+          const dim = readImageSize(S.parsed.coverImagePath); // {w,h}
+          if (dim && dim.w) {
+            const chk = SC.validateCoverImage({ imgW: dim.w, imgH: dim.h, spread });
+            S.parsed._coverCheck = { ...chk, imgW: dim.w, imgH: dim.h };
+            if (!chk.ok) log(`⚠ 표지 치수 불일치(최종 쪽수 기준): ${dim.w}×${dim.h}px — 기대 ${chk.expected.widthPx}×${chk.expected.heightPx}px (${chk.expected.widthMm}×${chk.expected.heightMm}mm). 그대로 진행하면 이미지가 강제로 늘어나 책등이 어긋날 수 있습니다.`);
+          }
+        } catch (_) {}
+      }
       let barcode = null;
       if (layoutOpts.coverBarcode !== false && meta.isbn) {
-        try { barcode = require('./core/book/isbn-barcode').isbnBarcodeSvg(meta.isbn, meta.isbnAddon || ''); } catch (_) {}
+        // 바 높이 200px(≈17.6mm@80%배율) — 표준 스캔 높이 확보. quiet 11모듈 = GS1 좌측 최소.
+        try { barcode = require('./core/book/isbn-barcode').isbnBarcodeSvg(meta.isbn, meta.isbnAddon || '', { height: 200, quiet: 11 }); } catch (_) {}
+        if (!barcode) log(`⚠ ISBN 체크섬/형식 오류 — 표지에 바코드가 포함되지 않습니다: ${meta.isbn}`);
       }
       const coverPdf = path.join(outRoot, `${base}_표지.pdf`);
       coverResult = await PB.buildCoverPdf({
@@ -2849,11 +2864,18 @@ ipcMain.handle('book-build-pdf', async (_e, args = {}) => {
     } else {
       log('ℹ 표지 이미지·문구 없음 — 내지만 생성. 우측 패널에서 이미지 첨부 또는 [뒷표지]·[책등] 섹션을 추가하세요.');
     }
+    // 판권지 존재 확인 — [판권] 마커 섹션이 없으면(또는 구조 패널에서 제외되면) 내지에 판권지가
+    // 아예 없음(출판문화산업진흥법 기재사항 누락 위험) → 무경고 입고 방지.
+    try {
+      const hasColophon = (S.parsed.back || []).some((s) => s.key === 'colophon') && !(layoutOpts.excluded || []).includes('colophon');
+      if (!hasColophon) log('⚠ 판권지 없음 — 내지에 판권지가 포함되지 않습니다. 원고에 `## [판권]` 을 추가하세요(내용 비우면 메타로 자동 생성).');
+    } catch (_) {}
     S.timings.make = Math.round((Date.now() - t0) / 1000);
-    log(`📕 출판 PDF 완료 — 내지 ${S.parsed._lastPages}쪽${coverResult && coverResult.success ? ' + 표지' : ''} (${S.timings.make}초) → ${outRoot}`);
+    const coverFailed = coverResult && !coverResult.success;
+    log(`📕 출판 PDF 완료 — 내지 ${S.parsed._lastPages}쪽${coverResult && coverResult.success ? ' + 표지' : (coverFailed ? ' (⚠ 표지 실패 — 로그 확인)' : '')} (${S.timings.make}초) → ${outRoot}`);
     try { shell.openPath(outRoot); } catch {}
     storeActive();
-    return { dto: currentDTO(), pages: S.parsed._lastPages, interiorPdf, coverPdf: coverResult && coverResult.success ? coverResult.pdfPath : null };
+    return { dto: currentDTO(), pages: S.parsed._lastPages, interiorPdf, coverPdf: coverResult && coverResult.success ? coverResult.pdfPath : null, coverError: coverFailed ? coverResult.error : null };
   } catch (e) {
     log('✗ 출판 PDF 오류: ' + e.message);
     return { dto: currentDTO(), error: e.message };
@@ -2864,25 +2886,27 @@ ipcMain.handle('book-build-pdf', async (_e, args = {}) => {
 ipcMain.handle('book-attach-cover', async () => {
   if (!S.parsed || S.parsed.kind !== 'book') return currentDTO();
   const r = await dialog.showOpenDialog(win, {
+    // ⚠ TIFF 는 Chromium <img> 렌더 불가(표지가 빈 흰색으로 인쇄됨) → 필터에서 제외.
     title: '표지 이미지(앞표지+책등+뒷표지 통합 스프레드) 첨부',
-    properties: ['openFile'], filters: [{ name: '이미지', extensions: ['png', 'jpg', 'jpeg', 'webp', 'tif', 'tiff'] }],
+    properties: ['openFile'], filters: [{ name: '이미지 (PNG/JPG/WebP)', extensions: ['png', 'jpg', 'jpeg', 'webp'] }],
   });
   if (r.canceled || !r.filePaths[0]) return currentDTO();
   const fp = r.filePaths[0];
   S.parsed.coverImagePath = fp;
-  // 치수 검증 (이미지 헤더에서 px 읽기 — vrew-builder 의 readImageSize 재사용)
+  // 치수 검증 (이미지 헤더에서 px 읽기 — readImageSize 는 {w,h} 반환. width/height 아님 주의!)
   try {
     const { readImageSize } = require('./vrew/vrew-builder');
     const dim = readImageSize ? readImageSize(fp) : null;
-    if (dim && dim.width) {
+    if (dim && dim.w) {
       const d = bookDTO(S.parsed);
       const SC = require('./core/book/spine-calc');
-      S.parsed._coverCheck = { ...SC.validateCoverImage({ imgW: dim.width, imgH: dim.height, spread: d.spread }), imgW: dim.width, imgH: dim.height };
+      S.parsed._coverCheck = { ...SC.validateCoverImage({ imgW: dim.w, imgH: dim.h, spread: d.spread }), imgW: dim.w, imgH: dim.h };
       const c = S.parsed._coverCheck;
       log(c.ok
-        ? `🖼 표지 첨부: ${path.basename(fp)} (${dim.width}×${dim.height}px${c.lowDpi ? ' · ⚠ 실효 ' + c.effectiveDpi + 'dpi < 300' : ''})`
-        : `⚠ 표지 치수 불일치: ${dim.width}×${dim.height}px — 기대 ${c.expected.widthPx}×${c.expected.heightPx}px (${c.expected.widthMm}×${c.expected.heightMm}mm)`);
-    } else { S.parsed._coverCheck = null; log(`🖼 표지 첨부: ${path.basename(fp)}`); }
+        ? `🖼 표지 첨부: ${path.basename(fp)} (${dim.w}×${dim.h}px${c.lowDpi ? ' · ⚠ 실효 ' + c.effectiveDpi + 'dpi < 300' : ''})`
+        : `⚠ 표지 치수 불일치: ${dim.w}×${dim.h}px — 기대 ${c.expected.widthPx}×${c.expected.heightPx}px (${c.expected.widthMm}×${c.expected.heightMm}mm)`);
+      if ((S.parsed._lastPages || 0) <= 0) log('ℹ 아직 쪽수 미확정(미리보기/PDF 전) — 조판 후 쪽수가 정해지면 표지 치수를 다시 확인하세요.');
+    } else { S.parsed._coverCheck = null; log(`🖼 표지 첨부: ${path.basename(fp)} (치수 확인 불가 형식 — PNG/JPG 권장)`); }
   } catch (_) { S.parsed._coverCheck = null; log(`🖼 표지 첨부: ${path.basename(fp)}`); }
   rememberBookLayout({ coverImage: fp });
   storeActive();
@@ -3050,10 +3074,13 @@ ipcMain.handle('book-build-epub', async (_e, args = {}) => {
     const paperId = meta.paper && PP.PAPERS[meta.paper] ? meta.paper : pf.defaultPaper;
     const flaps = !!(meta.flaps && !/^(없음|no|off|false|x)$/i.test(String(meta.flaps).trim()));
     const spread = SC.coverSpread({ platformId, trimId, paperId, totalPages: S.parsed._lastPages || 0, flaps });
+    // 쪽수 미확정(책등 0mm)이면 인쇄 표지 크롭 위치가 어긋남 → 표지 크롭 생략(전자책표지 메타가 있으면 그걸 사용).
+    const pagesKnown = (S.parsed._lastPages || 0) > 0;
+    if (!pagesKnown && S.parsed.coverImagePath) log('ℹ 쪽수 미확정 — 인쇄 표지에서 앞표지 자동 크롭을 건너뜁니다(미리보기/PDF 후 다시 만들면 포함). `> 전자책표지:` 메타가 있으면 그걸 사용합니다.');
     const r = await buildEpub(S.parsed, {
       outPath: path.join(outRoot, `${base}.epub`),
       baseDir: S.scriptPath ? path.dirname(S.scriptPath) : outRoot,
-      coverImagePath: S.parsed.coverImagePath || null,
+      coverImagePath: pagesKnown ? (S.parsed.coverImagePath || null) : null,
       spread, log,
     });
     if (r.success) { try { shell.openPath(outRoot); } catch {} }
@@ -3070,7 +3097,7 @@ ipcMain.handle('book-export-barcode', (_e) => {
   const meta = S.parsed.meta || {};
   if (!meta.isbn) return { error: 'ISBN 이 없습니다 — 책 정보에서 ISBN 을 입력하세요.' };
   const { isbnBarcodeSvg } = require('./core/book/isbn-barcode');
-  const r = isbnBarcodeSvg(meta.isbn, meta.isbnAddon || '');
+  const r = isbnBarcodeSvg(meta.isbn, meta.isbnAddon || '', { height: 200, quiet: 11 }); // 표지 자동조판과 동일 규격(GS1)
   if (!r) return { error: 'ISBN 형식 오류(체크 자릿수 불일치): ' + meta.isbn };
   const outRoot = S.outRoot || bookOutRoot('book.md', S.preset);
   try { fs.mkdirSync(outRoot, { recursive: true }); } catch {}

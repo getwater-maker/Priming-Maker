@@ -20,7 +20,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { getTrim, getPlatform } = require('./platform-presets');
+const { getTrim, getPlatform, TRIM_SIZES } = require('./platform-presets');
 
 const THEME_CSS_PATH = path.join(__dirname, 'book-theme.css');
 
@@ -367,7 +367,10 @@ nav.toc a::after {
 function buildBookHtml(book, opts = {}) {
   const meta = book.meta || {};
   const platform = getPlatform(opts.platformId || metaPlatformId(meta));
-  const trimId = meta.trim || opts.trimId || platform.defaultTrim;
+  // 판형 결정 — main.js(표지·책등 계산)와 동일한 검증식으로 통일. 미등록 판형(오타 등)이면
+  // 플랫폼 기본 판형으로 폴백(예전엔 getTrim 이 A5 로 떨어져 내지=A5·표지=신국판 불일치 위험).
+  const trimId = (meta.trim && TRIM_SIZES[meta.trim]) ? meta.trim
+    : ((opts.trimId && TRIM_SIZES[opts.trimId]) ? opts.trimId : platform.defaultTrim);
   const trim = getTrim(trimId);
 
   const o = {

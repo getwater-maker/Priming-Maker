@@ -109,7 +109,9 @@ function isbnBarcodeSvg(isbn, addon, o = {}) {
     `<text x="${(quiet - 1) * scale}" y="${textY}" ${mono} text-anchor="end">${d13[0]}</text>`,
     `<text x="${(quiet + 3 + 21) * scale}" y="${textY}" ${mono} text-anchor="middle">${d13.slice(1, 7)}</text>`,
     `<text x="${(quiet + 50 + 21) * scale}" y="${textY}" ${mono} text-anchor="middle">${d13.slice(7)}</text>`,
-    `<text x="${(quiet + 47) * scale}" y="${textY + fontH + Math.round(fontH * 0.2)}" ${mono} text-anchor="middle">ISBN ${d13.slice(0, 3)}-${d13.slice(3, 5)}-${d13.slice(5, 9)}-${d13.slice(9, 12)}-${d13[12]}</text>`,
+    // 하이픈 병기: 한국 ISBN 발행자번호는 2~6자리 가변 — 사용자가 입력한 하이픈 표기가 있으면 그대로,
+    // 없을 때만 3-2-4-3-1 고정 분할 폴백(발행자 4자리 가정).
+    `<text x="${(quiet + 47) * scale}" y="${textY + fontH + Math.round(fontH * 0.2)}" ${mono} text-anchor="middle">ISBN ${/-/.test(String(isbn)) ? String(isbn).trim().replace(/^ISBN\s*/i, '') : `${d13.slice(0, 3)}-${d13.slice(3, 5)}-${d13.slice(5, 9)}-${d13.slice(9, 12)}-${d13[12]}`}</text>`,
   ];
   if (d5) texts.push(`<text x="${(addStart + add.length / 2) * scale}" y="${fontH - Math.round(fontH * 0.2)}" ${mono} text-anchor="middle">${d5}</text>`);
 

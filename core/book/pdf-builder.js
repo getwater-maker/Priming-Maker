@@ -270,7 +270,9 @@ img.bg { position:absolute; left:0; top:0; width:${spread.widthMm}mm; height:${s
 .area p.b { font-weight: 700; font-family: ${GOTHIC_STACK}; }
 .back { display:flex; flex-direction:column; }
 .back .bc { margin-top:auto; align-self:flex-end; text-align:center; background:#fff; padding:2mm; }
-.back .bc svg { display:block; width:32mm; height:auto; }
+/* 바코드 실물 폭 = 모듈수 × 0.264mm (GS1 80% 배율 하한). 고정 32mm 는 부가기호(EAN-5) 포함 시
+   배율 ~57% 로 서점 스캐너 인식 불가 수준이라 모듈수 비례로 변경(부가기호 포함 ≈ 45mm). */
+.back .bc svg { display:block; width:${(c.barcode && c.barcode.widthPx) ? Math.max(30, Math.ceil((c.barcode.widthPx / 3) * 0.264)) : 32}mm; height:auto; }
 .back .price { font-family:${GOTHIC_STACK}; font-size:9pt; margin-top:1mm; color:#000; }
 .spine { position:absolute; display:flex; align-items:center; justify-content:center; }
 .spine span { writing-mode: vertical-rl; font-size:${spread.spineMm >= 10 ? 11 : 8.5}pt; font-weight:700; letter-spacing:0.12em; white-space:nowrap; }
