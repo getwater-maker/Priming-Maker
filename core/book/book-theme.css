@@ -117,6 +117,9 @@ blockquote {
   font-size: 0.95em;
   color: #111;
   white-space: pre-line;
+  /* 시·인용은 양쪽정렬 금지 — 본문 justify 를 상속하면 pre-line 강제 줄바꿈 행이
+     전폭으로 찢어짐(단어 사이 대공백, 삼국지 시 구절 실측). */
+  text-align: left;
 }
 div.verse {
   margin: 1.6em auto;

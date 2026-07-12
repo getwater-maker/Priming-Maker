@@ -292,7 +292,8 @@ h1 .ver{font-size:11px;font-weight:600;color:#a89878;margin-left:6px;vertical-al
 .bkwrap{display:flex;gap:12px;align-items:stretch;padding:6px 2px 20px;height:calc(100vh - 130px);min-height:480px}
 .bkpanel{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px;overflow-y:auto}
 .bkleft{flex:0 0 235px}
-.bkright{flex:0 0 315px}
+/* 우측 설정 패널 하단 여백 — 떠 있는 로그창(우하단 330×230)에 내용이 가려 답답하지 않게 */
+.bkright{flex:0 0 315px;padding-bottom:250px}
 .bkcenter{flex:1;min-width:0;display:flex;flex-direction:column;background:var(--card);border:1px solid var(--line);border-radius:10px;overflow:hidden}
 .bktitle{font-size:15px;font-weight:800;color:var(--strong);margin-bottom:10px}
 .bkzone{font-size:12px;font-weight:700;color:var(--accent-d);border-bottom:1px solid var(--line);margin:12px 0 6px;padding-bottom:3px}

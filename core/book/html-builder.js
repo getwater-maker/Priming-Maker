@@ -280,13 +280,15 @@ function pageCss(o) {
   //   width:100% 무시하고 가운데 배치 — 실측). 판면 폭을 mm 로 명시해 text-align 이 작동하게 한다.
   const bodyW = o.trimW - m.inner - m.outer; // 판면(글상자) 폭
   const headerBoxes = (kind, align) => {
-    const line = o.headerLine ? ' border-bottom: 0.4pt solid #dddddd; margin-bottom: 3pt;' : '';
+    // 밑줄 간격: 글자는 밑줄에 붙고(vertical-align:bottom + padding 2pt), 밑줄과 본문 사이는
+    //   margin-bottom 7pt 로 띄운다(관행 — 이전엔 반대로 글자가 위·밑줄이 본문에 붙어 있었음).
+    const line = o.headerLine ? ' border-bottom: 0.4pt solid #cccccc; padding-bottom: 2pt; margin-bottom: 7pt;' : '';
     if (kind === 'none' && !o.headerLine) return '';
     const content = kind === 'none' ? '""' : rhContent(kind);
     // 단일 @top-center 박스(판면 폭 명시) + text-align — 모든 정렬 공통.
     //   ⚠ @top-left 와 @top-center 를 함께 쓰면 두 박스가 공간을 나눠 가져 왼쪽 글이
     //   중앙으로 밀리는 충돌(실측) → 박스는 하나만 쓴다.
-    return `@top-center { content: ${content}; width: ${bodyW}mm; text-align: ${align}; ${rh}${line} }`;
+    return `@top-center { content: ${content}; width: ${bodyW}mm; text-align: ${align}; vertical-align: bottom; ${rh}${line} }`;
   };
   const headerEvenBox = headerBoxes(o.headerEven, o.headerEvenAlign);
   const headerOddBox = headerBoxes(o.headerOdd, o.headerOddAlign);
@@ -452,6 +454,12 @@ function buildBookHtml(book, opts = {}) {
 <h2${o.sourceMap ? ` data-src-line="${s.lineStart}" data-src-end="${s.lineStart}"` : ''}>${esc(s.title)}</h2>
 ${blocksHtml(s.blocks, book, ctx, srcAttr)}
 </section>`);
+  }
+
+  // 목차 자동 생성 — 원고에 [목차] 섹션이 없으면 프로그램이 만들어 제공(원고에 있으면 그 위치가 우선).
+  //   구조 패널에서 '목차' 체크 해제(excluded)하면 자동 생성도 생략.
+  if (!book.front.some((s) => s.key === 'toc') && !o.excluded.includes('toc')) {
+    bodyParts.push(tocHtml(book, '목차', o.excluded));
   }
 
   // 본문 — 부 표제지 + 장

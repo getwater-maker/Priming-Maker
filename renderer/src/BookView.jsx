@@ -52,14 +52,16 @@ const LAYOUT_DEFAULTS = {
 // 구조 패널 체크박스 한 줄 — 원고에 있으면 포함/제외 토글(비파괴), 없으면 체크 시 템플릿 삽입.
 function SectionChk({ r, presentKeys, layout, toggleSection, cover }) {
   const present = presentKeys.has(r.key);
-  const checked = present && !(layout.excluded || []).includes(r.key);
+  // 목차는 원고에 없어도 프로그램이 자동 생성 — 체크 상태로 보여주고, 해제하면 자동 생성도 끔.
+  const autoGen = r.key === 'toc' && !present;
+  const checked = (present || autoGen) && !(layout.excluded || []).includes(r.key);
   return (
-    <label className="chk" style={present ? undefined : { opacity: 0.55 }}
+    <label className="chk" style={(present || autoGen) ? undefined : { opacity: 0.55 }}
       title={present
         ? (cover ? '체크 해제 = 표지 PDF 에서 제외 (원고 보존)' : '체크 해제 = 책에서 제외 (원고 보존 — 다시 체크하면 복원)')
-        : '체크 = 원고에 이 섹션 템플릿을 추가'}>
-      <input type="checkbox" checked={checked} onChange={(e) => toggleSection(r.key, e.target.checked, present)} /> {r.label}
-      {!present && <span className="meta"> (원고에 없음)</span>}
+        : (autoGen ? '원고에 [목차]가 없어 프로그램이 자동 생성합니다 — 체크 해제 = 목차 없이' : '체크 = 원고에 이 섹션 템플릿을 추가')}>
+      <input type="checkbox" checked={checked} onChange={(e) => toggleSection(r.key, e.target.checked, present || autoGen)} /> {r.label}
+      {autoGen ? <span className="meta"> (자동 생성)</span> : (!present && <span className="meta"> (원고에 없음)</span>)}
     </label>
   );
 }
@@ -130,19 +132,29 @@ export default function BookView({ dto, setDto, setStatus, logline }) {
     fdoc.open();
     fdoc.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><style>
 html,body{margin:0;padding:0;background:#8a8177}
+body{overflow-y:scroll}
+::-webkit-scrollbar{width:14px}
+::-webkit-scrollbar-track{background:#6f675e}
+::-webkit-scrollbar-thumb{background:#c9b48a;border-radius:7px;border:3px solid #6f675e}
+::-webkit-scrollbar-thumb:hover{background:#d4a574}
 [data-src-line]:hover{outline:2px solid rgba(212,165,116,.9);outline-offset:1px;cursor:pointer}
 </style></head><body><div id="vp"></div></body></html>`);
     fdoc.close();
     fdoc.addEventListener('click', (e) => onPreviewClickRef.current(e));
-    // 마우스 휠 = 펼침면 넘기기 (스로틀 250ms — 트랙패드 관성 스크롤 과속 방지)
-    let lastWheel = 0;
-    fdoc.addEventListener('wheel', (e) => {
-      e.preventDefault();
-      const now = Date.now();
-      if (now - lastWheel < 250 || Math.abs(e.deltaY) < 4) return;
-      lastWheel = now;
-      try { viewerRef.current && viewerRef.current.navigateToPage(e.deltaY > 0 ? Navigation.NEXT : Navigation.PREVIOUS); } catch (_) {}
-    }, { passive: false });
+    // ⌨ 키보드 페이지 이동 — ←→/PgUp·PgDn/Space = 펼침면 넘기기, Home/End = 처음/끝.
+    //   (휠은 하이재킹하지 않음 — 네이티브 스크롤 + 우측 스크롤바로 빠르게 이동)
+    fdoc.addEventListener('keydown', (e) => {
+      const v = viewerRef.current; if (!v) return;
+      const k = e.key;
+      try {
+        if (k === 'ArrowRight' || k === 'PageDown' || k === ' ') { e.preventDefault(); v.navigateToPage(Navigation.NEXT); }
+        else if (k === 'ArrowLeft' || k === 'PageUp') { e.preventDefault(); v.navigateToPage(Navigation.PREVIOUS); }
+        else if (k === 'Home') { e.preventDefault(); v.navigateToPage(Navigation.FIRST); }
+        else if (k === 'End') { e.preventDefault(); v.navigateToPage(Navigation.LAST); }
+      } catch (_) {}
+    });
+    // iframe 이 포커스를 받아야 키가 먹음 — 클릭 시 body 포커스
+    try { fdoc.body.tabIndex = -1; fdoc.addEventListener('mousedown', () => { try { fdoc.body.focus(); } catch (_) {} }); } catch (_) {}
     const vp = fdoc.getElementById('vp');
     const viewer = new CoreViewer({ viewportElement: vp, window: iframe.contentWindow }, {
       renderAllPages: true, pageViewMode: PageViewMode.SPREAD, fitToScreen: true, autoResize: true,
@@ -157,6 +169,8 @@ html,body{margin:0;padding:0;background:#8a8177}
         const total = Math.max(0, (viewer.getPageSizes() || []).length - 1);
         setPageInfo((pi) => ({ ...pi, total }));
         setPreviewBusy(false); setStatus(`조판 완료 — 내지 ${total}쪽`);
+        try { fdoc.body.style.zoom = zoomRef.current; } catch (_) {}
+        alignSingleSpreads(fdoc); // 홀로 있는 페이지(표지안내·마지막 홀수쪽)를 펼침면과 같은 위치(오른쪽/왼쪽)에 고정
         // 쪽수가 실제로 바뀔 때만 dto 갱신(책등·규격 재계산). 같은 값이면 불필요한 재렌더 회피.
         if (total > 0 && total !== lastPagesRef.current) {
           lastPagesRef.current = total;
@@ -166,6 +180,43 @@ html,body{margin:0;padding:0;background:#8a8177}
     });
     viewer.loadDocument(previewUrl, {}, {});
   }, [previewUrl]);
+
+  // 홀로 놓인 페이지를 펼침면 좌/우 자리에 정렬 — recto(홀수쪽)는 오른쪽 자리, verso 는 왼쪽 자리.
+  function alignSingleSpreads(fdoc) {
+    try {
+      fdoc.querySelectorAll('[data-vivliostyle-spread-container]').forEach((sc) => {
+        const pages = sc.querySelectorAll('[data-vivliostyle-page-container]');
+        if (pages.length !== 1) return;
+        const p = pages[0];
+        const side = p.getAttribute('data-vivliostyle-page-side');
+        const w = p.offsetWidth;
+        if (side === 'right') { p.style.marginLeft = w + 'px'; p.style.marginRight = ''; }
+        else if (side === 'left') { p.style.marginRight = w + 'px'; p.style.marginLeft = ''; }
+      });
+    } catch (_) {}
+  }
+  // 🔍 돋보기(줌) — CSS zoom 은 스크롤 크기까지 함께 조정됨(Chromium)
+  const zoomRef = useRef(1);
+  const [zoomPct, setZoomPct] = useState(100);
+  function applyZoom(z) {
+    z = Math.min(4, Math.max(0.3, z));
+    zoomRef.current = z; setZoomPct(Math.round(z * 100));
+    try {
+      const fdoc = viewportRef.current && viewportRef.current.contentDocument;
+      if (fdoc && fdoc.body) { fdoc.body.style.zoom = z; alignSingleSpreads(fdoc); }
+    } catch (_) {}
+  }
+  // ⛶ 맞춤 — 펼침면 높이를 뷰포트 높이에 맞춤
+  function fitZoom() {
+    try {
+      const iframe = viewportRef.current; const fdoc = iframe.contentDocument;
+      const page = fdoc.querySelector('[data-vivliostyle-page-container]');
+      if (!page) return;
+      const cur = zoomRef.current || 1;
+      const pageH = page.getBoundingClientRect().height / cur;
+      if (pageH > 10) applyZoom((iframe.clientHeight - 28) / pageH);
+    } catch (_) {}
+  }
 
   // ── 문단 클릭 → 편집 ── (iframe 내부 click 리스너가 ref 를 통해 항상 최신 핸들러 호출)
   const onPreviewClick = useCallback(async (e) => {
@@ -193,9 +244,19 @@ html,body{margin:0;padding:0;background:#8a8177}
     } catch (e) { logline('수정 저장 오류: ' + e.message); }
   }
 
+  // 생성(빌드) 중 경과 시간 — 중앙 진행 모달 표시용
+  const [buildMsg, setBuildMsg] = useState('');
+  const [buildElapsed, setBuildElapsed] = useState(0);
+  useEffect(() => {
+    if (!building) { setBuildElapsed(0); return; }
+    const t0 = Date.now();
+    const t = setInterval(() => setBuildElapsed(Math.round((Date.now() - t0) / 1000)), 1000);
+    return () => clearInterval(t);
+  }, [building]);
+
   // ── 액션 ──
   async function buildPdf() {
-    setBuilding(true); setStatus('PDF 생성 중… (내지 조판 + 표지)');
+    setBuilding(true); setBuildMsg('📕 PDF 생성 중 — 내지 조판 + 표지'); setStatus('PDF 생성 중… (내지 조판 + 표지)');
     try {
       const r = await api.bookBuildPdf({ layout });
       if (r && r.dto) setDto(r.dto);
@@ -206,7 +267,7 @@ html,body{margin:0;padding:0;background:#8a8177}
     setBuilding(false);
   }
   async function buildEpubFile() {
-    setBuilding(true); setStatus('ePub 생성 중…');
+    setBuilding(true); setBuildMsg('📱 ePub 생성 중'); setStatus('ePub 생성 중…');
     try {
       const r = await api.bookBuildEpub({});
       if (r && r.dto) setDto(r.dto);
@@ -315,6 +376,16 @@ html,body{margin:0;padding:0;background:#8a8177}
 
   return (
     <div className="bkwrap">
+      {/* 생성 진행 모달 — 화면 중앙, 경과 시간 표시 */}
+      {building && (
+        <div className="modal-bg show" style={{ zIndex: 90 }}>
+          <div className="modal-card" style={{ width: 400, textAlign: 'center' }}>
+            <div className="spin" style={{ width: 38, height: 38, border: '4px solid #eee', borderTopColor: 'var(--accent)', borderRadius: '50%', margin: '0 auto 14px', animation: 'spin 1s linear infinite' }} />
+            <div style={{ fontWeight: 700, color: 'var(--strong)', marginBottom: 6 }}>{buildMsg || '생성 중…'}</div>
+            <div className="meta">내지 조판(Vivliostyle)은 원고 길이에 따라 수 분 걸릴 수 있습니다 · 경과 {buildElapsed}초</div>
+          </div>
+        </div>
+      )}
       {/* ── 좌: 책 구조 ── */}
       <div className="bkpanel bkleft">
         <div className="bktitle">📚 책 구조</div>
@@ -351,8 +422,14 @@ html,body{margin:0;padding:0;background:#8a8177}
           <span className="bkpage" title="1번째 화면은 표지 안내(내지 아님)">{pageInfo.cur === 1 ? '표지' : (pageInfo.cur > 1 ? pageInfo.cur - 1 : '–')} / {pageInfo.total || '–'}쪽</span>
           <button className="ghost" onClick={() => nav(Navigation.NEXT)} title="다음 펼침면">▶</button>
           <button className="ghost" onClick={() => nav(Navigation.LAST)} title="마지막 페이지">⏭</button>
+          <span className="hdiv" />
+          <button className="ghost" onClick={() => applyZoom(zoomRef.current / 1.2)} title="축소">🔍−</button>
+          <span className="meta" style={{ minWidth: 42, textAlign: 'center' }}>{zoomPct}%</span>
+          <button className="ghost" onClick={() => applyZoom(zoomRef.current * 1.2)} title="확대">🔍＋</button>
+          <button className="ghost" onClick={() => applyZoom(1)} title="원래 크기">1:1</button>
+          <button className="ghost" onClick={fitZoom} title="펼침면 높이를 화면에 맞춤">⛶ 맞춤</button>
           <span className="grow" />
-          <span className="meta">{previewBusy ? '⏳ 조판 중…' : '문단을 클릭하면 수정할 수 있습니다'}</span>
+          <span className="meta">{previewBusy ? '⏳ 조판 중…' : '클릭=수정 · ←→=넘기기 · 우측 스크롤바=빠른 이동'}</span>
           <button className="ghost" onClick={refreshPreview} title="원고를 다시 조판">🔄 미리보기 갱신</button>
         </div>
         <iframe className="bkviewport" ref={viewportRef} title="페이지 미리보기" />
