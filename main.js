@@ -2794,6 +2794,19 @@ ipcMain.handle('book-report-pages', (_e, args = {}) => {
 // PDF 생성 — 내지.pdf (+표지 이미지 있으면 표지.pdf). 완료 후 출력폴더 열기.
 ipcMain.handle('book-build-pdf', async (_e, args = {}) => {
   if (!S.parsed || S.parsed.kind !== 'book') { log('열린 출판 원고가 없습니다.'); return { dto: currentDTO() }; }
+  // 구버전 설치본 가드 — vivliostyle CLI(또는 중첩 archiver)가 없으면 크래시 덤프 대신 재설치 안내.
+  //   (라이트 업데이트는 node_modules 를 못 바꾸므로, deps 포함 릴리스는 설치파일 재설치가 필요)
+  try {
+    const cliPkg = require.resolve('@vivliostyle/cli/package.json');
+    const cliDir = path.dirname(cliPkg);
+    const hasArchiver = fs.existsSync(path.join(cliDir, 'node_modules', 'archiver'))
+      || (() => { try { require.resolve('archiver'); return true; } catch { return false; } })();
+    if (!hasArchiver) throw new Error('archiver 미포함');
+  } catch (e) {
+    const msg = '이 설치본에는 PDF 조판 모듈이 없습니다(구버전 설치) — 새 설치파일 Priming-Setup-0.2.8.exe 로 재설치하세요.';
+    log('✗ ' + msg);
+    return { dto: currentDTO(), error: msg };
+  }
   const t0 = Date.now();
   try {
     const { buildBookHtml, metaPlatformId } = require('./core/book/html-builder');

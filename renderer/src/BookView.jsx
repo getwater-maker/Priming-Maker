@@ -141,8 +141,20 @@ body{overflow-y:scroll}
 </style></head><body><div id="vp"></div></body></html>`);
     fdoc.close();
     fdoc.addEventListener('click', (e) => onPreviewClickRef.current(e));
+    // 🖱 휠 = 적응형 — 문서가 실제로 스크롤 가능하면(확대 상태 등) 네이티브 스크롤에 맡기고,
+    //   스크롤할 게 없으면(맞춤 보기) 펼침면 넘기기로 동작. (스로틀 250ms)
+    let lastWheel = 0;
+    fdoc.addEventListener('wheel', (e) => {
+      const de = fdoc.documentElement, bd = fdoc.body;
+      const scrollable = (de && de.scrollHeight > de.clientHeight + 8) || (bd && bd.scrollHeight > bd.clientHeight + 8);
+      if (scrollable) return; // 확대로 내용이 화면보다 크면 네이티브 스크롤(+스크롤바)
+      e.preventDefault();
+      const now = Date.now();
+      if (now - lastWheel < 250 || Math.abs(e.deltaY) < 4) return;
+      lastWheel = now;
+      try { viewerRef.current && viewerRef.current.navigateToPage(e.deltaY > 0 ? Navigation.NEXT : Navigation.PREVIOUS); } catch (_) {}
+    }, { passive: false });
     // ⌨ 키보드 페이지 이동 — ←→/PgUp·PgDn/Space = 펼침면 넘기기, Home/End = 처음/끝.
-    //   (휠은 하이재킹하지 않음 — 네이티브 스크롤 + 우측 스크롤바로 빠르게 이동)
     fdoc.addEventListener('keydown', (e) => {
       const v = viewerRef.current; if (!v) return;
       const k = e.key;
@@ -429,7 +441,7 @@ body{overflow-y:scroll}
           <button className="ghost" onClick={() => applyZoom(1)} title="원래 크기">1:1</button>
           <button className="ghost" onClick={fitZoom} title="펼침면 높이를 화면에 맞춤">⛶ 맞춤</button>
           <span className="grow" />
-          <span className="meta">{previewBusy ? '⏳ 조판 중…' : '클릭=수정 · ←→=넘기기 · 우측 스크롤바=빠른 이동'}</span>
+          <span className="meta">{previewBusy ? '⏳ 조판 중…' : '클릭=수정 · 휠/←→=넘기기 · 확대 시 휠=스크롤'}</span>
           <button className="ghost" onClick={refreshPreview} title="원고를 다시 조판">🔄 미리보기 갱신</button>
         </div>
         <iframe className="bkviewport" ref={viewportRef} title="페이지 미리보기" />
