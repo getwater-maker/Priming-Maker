@@ -963,6 +963,8 @@ async function runGeminiImages(project, imagesDir, logger, styleId, onlyNums) {
 }
 
 async function runRotatingImages(project, imagesDir, logger, styleId, startEngine, onlyNums) {
+  // 유료(나노바나나 API) 선택 시 순환을 건너뛰고 Gemini API 로 직접 생성.
+  if (startEngine === 'gemini') return runGeminiImages(project, imagesDir, logger, styleId, onlyNums);
   const Rot = require('./core/image-rotation');
   const order = Rot.activeOrder(startEngine);
   if (!order.length) { logger('⚠ 순환 엔진이 비어있음 — ⚙ 순환 설정 확인'); return; }

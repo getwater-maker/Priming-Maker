@@ -936,7 +936,6 @@ export default function App() {
     if (ch.seed !== '' && ch.seed != null) patch.seed = parseInt(ch.seed, 10);
     try {
       await api.savePreset({ name: ch.name, patch });
-      try { await api.setGeminiKey(ch.gemini); } catch (_) {}
       await loadPresets(); setPresetName(ch.name); await loadStyles();
       setChOpen(false); setStatus('채널 설정 저장됨');
     } catch (e) { logline('저장 오류: ' + e.message); }
@@ -1170,8 +1169,11 @@ export default function App() {
               {styles.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
             <button className="ghost" title="이미지 스타일 편집(추가·수정·삭제·프롬프트 복사)" style={{ padding: '6px 9px' }} onClick={() => setStyleEditOpen(true)}>✎ 스타일</button>
-            <span className="meta" title="이미지 = 설정한 순서대로 생성(Genspark → Flow → 나노바나나2 Lite)">이미지: 순환</span>
-            <button className="ghost" title="이미지 생성 순서·엔진·키 설정" style={{ padding: '6px 9px' }} onClick={openImgRotation}>⚙ 이미지</button>
+            <select title="이미지 생성 방식 — 순환(무료 브라우저) 또는 유료(나노바나나2 Lite API)" value={imgEngine} onChange={(e) => setImgEngine(e.target.value)}>
+              <option value="rotate">이미지: 순환(무료)</option>
+              <option value="gemini">이미지: 유료(나노바나나2 Lite)</option>
+            </select>
+            <button className="ghost" title="이미지 순환 순서·계정 · 나노바나나 키/모델 설정" style={{ padding: '6px 9px' }} onClick={openImgRotation}>⚙ 이미지</button>
             <button className="ghost" disabled={!loaded} onClick={() => runImg(null)}>🖼 이미지</button>
             <span className="hdiv" />
             <select title="i2v 비디오 엔진" value={videoEngine} onChange={(e) => setVideoEngine(e.target.value)}>
@@ -1370,7 +1372,6 @@ export default function App() {
             <div className="frow"><label>대본 폴더</label><input placeholder="롱폼·쇼츠 공유" value={ch.scriptFolder} onChange={(e) => setCh({ ...ch, scriptFolder: e.target.value })} /><button className="ghost" style={{ flex: '0 0 auto' }} onClick={pickScript}>찾기</button></div>
             <div className="frow"><label>롱폼 출력</label><input placeholder="롱폼 .vrew 출력 폴더" value={ch.outLong} onChange={(e) => setCh({ ...ch, outLong: e.target.value })} /><button className="ghost" style={{ flex: '0 0 auto' }} onClick={pickOutLong}>찾기</button></div>
             <div className="frow"><label>쇼츠 출력</label><input placeholder="쇼츠 .vrew 출력 폴더" value={ch.outShort} onChange={(e) => setCh({ ...ch, outShort: e.target.value })} /><button className="ghost" style={{ flex: '0 0 auto' }} onClick={pickOutShort}>찾기</button></div>
-            <div className="frow"><label>Gemini 키</label><input placeholder="제미나이 음성 + 나노바나나2 이미지 공용 API 키" value={ch.gemini} onChange={(e) => setCh({ ...ch, gemini: e.target.value })} /><span className="meta" style={{ flex: '0 0 auto' }}>이미지(나노바나나2)도 이 키 사용</span></div>
             <div className="frow chk"><label>AI 고지</label><input type="checkbox" style={{ flex: '0 0 auto', width: 'auto' }} checked={ch.aiNotice} onChange={(e) => setCh({ ...ch, aiNotice: e.target.checked })} /> <span className="meta">실제 표시는 작업바의 <b>'AI 고지'</b> 토글로 결정 — 기본값 <b>롱폼 표시 · 쇼츠 미표시</b> (언제든 변경)</span></div>
             <div className="mbtns"><button onClick={saveChannel}>저장</button><button className="ghost" title="이 채널 삭제" style={{ color: '#c0392b' }} onClick={deleteChannel}>🗑 채널 삭제</button><span style={{ flex: 1 }} /><button className="ghost" onClick={() => setChOpen(false)}>취소</button></div>
           </div>
@@ -1532,14 +1533,21 @@ export default function App() {
           <div className="modal-card">
             <h3>⚙ 이미지 설정 (순환 · 나노바나나2 Lite)</h3>
             {giCfg ? (
-              <div className="frow" style={{ background: '#fbf6ee', border: '1px solid var(--line)', borderRadius: 8, padding: '8px 10px', margin: '0 0 10px', flexWrap: 'wrap' }}>
-                <label style={{ width: 'auto', fontWeight: 700, color: 'var(--hook)' }}>🍌 나노바나나2 Lite</label>
-                <input style={{ flex: 1, minWidth: 200 }} value={giCfg.model || ''} placeholder="gemini-3.1-flash-lite-image"
-                  onChange={(e) => setGiCfg({ ...giCfg, model: e.target.value })} onBlur={() => saveGiCfg({ model: (giCfg.model || '').trim() })} />
-                <label className="chk" style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-                  <input type="checkbox" style={{ width: 'auto' }} checked={giCfg.sendAspect !== false} onChange={(e) => saveGiCfg({ sendAspect: e.target.checked })} />비율 전송
-                </label>
-                <div className="meta" style={{ width: '100%', marginTop: 4 }}>API 키는 아래 「🍌 나노바나나2 Lite」 줄에서 입력. 모델명이 안 맞으면(404 오류) 여기서 고치세요. 비율(aspectRatio) 미지원 모델이면 「비율 전송」을 끄세요.</div>
+              <div style={{ background: '#fbf6ee', border: '1px solid var(--line)', borderRadius: 8, padding: '8px 10px', margin: '0 0 10px' }}>
+                <div className="frow" style={{ flexWrap: 'wrap' }}>
+                  <label style={{ width: 'auto', fontWeight: 700, color: 'var(--hook)' }}>🍌 유료 나노바나나2 Lite</label>
+                  <input type="password" placeholder="🔑 Gemini API 키" value={giKey} style={{ flex: 1, minWidth: 180 }}
+                    onChange={(e) => setGiKey(e.target.value)} onBlur={() => saveGiKey(giKey.trim())} />
+                </div>
+                <div className="frow" style={{ flexWrap: 'wrap', marginTop: 4 }}>
+                  <label style={{ width: 'auto' }}>모델</label>
+                  <input style={{ flex: 1, minWidth: 200 }} value={giCfg.model || ''} placeholder="gemini-3.1-flash-lite-image"
+                    onChange={(e) => setGiCfg({ ...giCfg, model: e.target.value })} onBlur={() => saveGiCfg({ model: (giCfg.model || '').trim() })} />
+                  <label className="chk" style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                    <input type="checkbox" style={{ width: 'auto' }} checked={giCfg.sendAspect !== false} onChange={(e) => saveGiCfg({ sendAspect: e.target.checked })} />비율 전송
+                  </label>
+                </div>
+                <div className="meta" style={{ marginTop: 4 }}>헤더에서 <b>「이미지: 유료」</b>를 고르면 이 키로 나노바나나가 이미지를 만듭니다(유료, ~$0.034/장). 모델명이 안 맞으면(404) 여기서 고치고, 비율 오류면 「비율 전송」을 끄세요.</div>
               </div>
             ) : null}
             <div className="meta" style={{ marginBottom: 8 }}>위에서부터 순서대로 시도하고, 한 엔진이 <b>한도</b>(Genspark가 보내는 휴식/한도 메시지, Flow 계정한도)에 걸리면 <b>다음 엔진</b>이 남은 이미지를 이어 만듭니다. 체크 해제 시 순환에서 제외. (ComfyUI는 순환과 별개 단독)</div>
@@ -1562,12 +1570,6 @@ export default function App() {
                   )}
                   {id === 'flow' && <button className="ghost" style={{ flex: '0 0 auto' }} onClick={() => { setImgRotOpen(false); openFlowAcc(); }}>🔑 Flow 계정</button>}
                   {id === 'genspark' && <button className="ghost" style={{ flex: '0 0 auto' }} onClick={() => { setImgRotOpen(false); openGsAcc(); }}>🔑 Genspark 계정</button>}
-                  {id === 'gemini' && (
-                    <span style={{ flex: '0 0 auto', display: 'flex', gap: 4, alignItems: 'center' }}>
-                      <input type="password" placeholder="🔑 Gemini API 키" value={giKey} style={{ width: 150 }}
-                        onChange={(e) => setGiKey(e.target.value)} onBlur={() => saveGiKey(giKey.trim())} />
-                    </span>
-                  )}
                 </div>
               ))}
             </div>
