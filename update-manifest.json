@@ -1,5 +1,5 @@
 {
-  "version": "0.2.7",
+  "version": "0.2.8",
   "deps": "0a1409dd7b6c37e6b850a8223ac05d93b0380d94",
   "files": {
     "AGENTS.md": "1a0fd73c104ff40f5cce110a3ffac07a7aa77205",
@@ -12,9 +12,9 @@
     "CLAUDE.md": "53bd9984e9510e0a4824892ba2d4905fd6de9fdf",
     "core/accounts.js": "e36e07bbbf9eec4d56b584c3add8a1077fbe0cec",
     "core/ace-step.js": "8d259d5e809d59154b0f4009e47e7e8dfca19f08",
-    "core/book/book-theme.css": "475f1d50abbf7faf71f544a041b4f32496018552",
+    "core/book/book-theme.css": "cf5e7b4cb1ece5f43b58251ddc59f963e0e55665",
     "core/book/epub-builder.js": "b7dd470c96ac0d9b01e85aea5a9d59623dc4b7fc",
-    "core/book/html-builder.js": "76d68bfd4e29be5f6cf54888278774d37708b9e5",
+    "core/book/html-builder.js": "bf0329f13baa82ee33a20123db2dd56b41b570b3",
     "core/book/isbn-barcode.js": "394648624d8ec51109c32b958945877e61e1714f",
     "core/book/pdf-builder.js": "a2e0609a0ee0c0460dce945fe2fced68e3d628aa",
     "core/book/platform-presets.js": "ccf25e780cc7a1ce390e16f2caec6271a84d2bdf",
@@ -61,7 +61,7 @@
     "light-updater.js": "c9be26807112942a9cf4a88dfcd14a1004634762",
     "main.js": "9abefea19baeb64574798fcec00495a19e17f313",
     "package-lock.json": "7c46c6c7a08739e1e28df9c9286a860c70cd6760",
-    "package.json": "c835c13a4e84ff153d5c897d090156819064f7b6",
+    "package.json": "3eb1b6bb5a1c58ee380fa13717a375ba5858931f",
     "preload.js": "60e64f16e49bc0d377cc52c6efc9e4727406609c",
     "renderer/dist/assets/index-C2ndxR_a.js": "92fecc49f84ca530e3e416f7f267d6bbf5238e1c",
     "renderer/dist/assets/index-CyleVltf.css": "3dd5ab7c23151ec908795fba6ac504e394fa281e",

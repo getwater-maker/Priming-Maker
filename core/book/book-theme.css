@@ -101,12 +101,6 @@ p.chapter-lead {
   margin: -3.2em 0 4em;
   break-after: avoid;
 }
-/* 판권 자유 문구 모드 — 문단 간격을 촘촘하게 */
-section.colophon.cp-free .cp-wrap { margin-top: 30%; }
-section.colophon.cp-free p { text-indent: 0; margin: 0.25em 0; }
-section.colophon.cp-free hr.scene { margin: 1em 0; }
-section.colophon.cp-free hr.scene::after { content: ""; }
-section.colophon.cp-free h3 { font-size: 1em; margin: 1.2em 0 0.4em; }
 section.chapter h3 { font-size: 1.1em; font-weight: 700; margin: 2.2em 0 1em; break-after: avoid; }
 section.chapter h4 { font-size: 1em; font-weight: 700; margin: 1.8em 0 0.8em; break-after: avoid; }
 
@@ -151,24 +145,33 @@ section.endnotes ol { font-size: 0.9em; line-height: 1.6; padding-left: 1.5em; }
 section.endnotes li { margin: 0.4em 0; }
 sup.enref { font-size: 0.65em; }
 
-/* ── 판권지 ── */
+/* ── 판권지 — 사용자 확정 레이아웃(하단 배치·라벨｜값·구분선·고지·QR중앙·ⓒ), 고딕 ── */
 section.colophon {
   page: display;
   break-before: recto;
-  font-size: 0.82em;
-  line-height: 1.7;
+  font-family: 'KoPubWorld Dotum', 'NanumGothic', 'Dotum', sans-serif;
+  font-size: 0.8em;
+  line-height: 1.75;
+  text-align: left;
 }
-section.colophon .cp-wrap { margin-top: 55%; }
-section.colophon.cp-front .cp-wrap { margin-top: 10%; }
-section.colophon .cp-title { font-weight: 700; font-size: 1.15em; margin-bottom: 0.2em; text-indent: 0; }
-section.colophon .cp-subtitle { color: #222; margin-bottom: 1.4em; text-indent: 0; }
-section.colophon table { border-collapse: collapse; }
-section.colophon td { padding: 0.06em 0; vertical-align: top; }
-section.colophon td.k { white-space: nowrap; padding-right: 1.2em; color: #333; }
-section.colophon .cp-legal { margin-top: 1.4em; color: #333; text-indent: 0; }
-section.colophon .cp-legal p { text-indent: 0; margin: 0.2em 0; }
-section.colophon img.cp-qr { width: 16mm; height: 16mm; margin-top: 1em; }
-section.colophon .cp-qrlabel { font-size: 0.85em; color: #333; }
+section.colophon .cp-wrap { margin-top: 38%; }
+section.colophon.cp-front .cp-wrap { margin-top: 8%; }
+section.colophon .cp-title { font-weight: 700; font-size: 1.2em; margin-bottom: 0.9em; text-indent: 0; }
+section.colophon .cp-subtitle { font-weight: 400; font-size: 0.85em; color: #333; }
+section.colophon .cp-row { text-indent: 0; }
+section.colophon .cp-row .k { display: inline-block; min-width: 4.6em; color: #111; }
+section.colophon .cp-row .sep { margin: 0 0.55em; color: #999; }
+section.colophon .cp-gap { height: 0.9em; }
+section.colophon hr.cp-rule { border: none; border-top: 0.4pt solid #bbbbbb; margin: 1.2em 0 1em; }
+section.colophon .cp-notes p { text-indent: 0; margin: 0.22em 0; }
+section.colophon .cp-notes hr.scene { margin: 0.9em 0; }
+section.colophon .cp-notes hr.scene::after { content: ""; }
+section.colophon .cp-notes h3 { font-size: 1em; margin: 1em 0 0.3em; }
+section.colophon .cp-qrbox { text-align: center; margin: 1.5em 0 0.2em; text-indent: 0; }
+section.colophon img.cp-qr { width: 16mm; height: 16mm; }
+section.colophon .cp-qrlabel { font-size: 0.85em; color: #888; margin-top: 0.3em; }
+section.colophon .cp-legal { margin-top: 1.5em; color: #222; text-indent: 0; }
+section.colophon .cp-legal p { text-indent: 0; margin: 0.15em 0; }
 
 /* ── 저자소개 등 뒷부속 본문 ── */
 section.back-section p { text-indent: 0; margin-bottom: 0.6em; }

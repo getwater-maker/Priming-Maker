@@ -35,8 +35,9 @@ const OUT = path.join(__dirname, '..', 'output', '_book-multi');
   const work = prepareWorkAssets(path.join(OUT, 'work'));
   const { html } = buildBookHtml(book, { fontCss: work.fontCss, imageUrl: work.imageUrl, baseDir: DATA, sourceMap: true });
   fs.writeFileSync(path.join(OUT, 'book.html'), html, 'utf8');
-  // 판권 자유문·리드문 마크업 확인
-  if (!html.includes('cp-free')) { console.error('❌ 판권 자유문 미적용'); process.exit(1); }
+  // 판권 자유문(고지 블록)·리드문 마크업 확인 — v0.2.8 부터 자유문은 cp-notes 로 메타 행과 병합 조판
+  if (!html.includes('cp-notes')) { console.error('❌ 판권 자유문(cp-notes) 미적용'); process.exit(1); }
+  if (!html.includes('cp-rows')) { console.error('❌ 판권 메타 행(cp-rows) 미적용'); process.exit(1); }
   if (!html.includes('chapter-lead')) { console.error('❌ 장 리드문 미적용'); process.exit(1); }
   console.log('· HTML: 판권 자유문 + 장 리드문 마크업 OK');
 

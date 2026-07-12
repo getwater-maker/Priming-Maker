@@ -127,55 +127,46 @@ const COLOPHON_FIELDS = [
   ['copyright', 'ⓒ 저작권 문구'], ['legal', '무단복제 금지 문구'], ['exchange', '파본 교환 안내'],
 ];
 
+// 판권지 — 사용자 확정 레이아웃(구 Book Publishing 앱 실물과 동일):
+//   하단 배치 · 책제목(볼드) · 「라벨 ｜ 값」 행을 3그룹(발행/발행처/ISBN·가격)으로 · 가는 구분선 ·
+//   자유문 고지([판권] 섹션 내용 — AI 활용·편집 저작권 등) · QR(중앙)+라벨 · ⓒ + 재사용 안내.
+//   자유문이 있어도 메타 행과 "병합"해 조판(예전엔 자유문이 전체를 대체 → ISBN 등 법정 항목 누락 위험).
 function colophonHtml(meta, ctx, isFront, section, book, srcAttr, fields) {
-  // [판권] 섹션에 자유 문구가 있으면(예: AI 활용 고지·편역 저작권 안내) 그걸 그대로 조판 —
-  //   자동 테이블·고정 법정 문구는 생략(중복 방지). 없으면 메타로 자동 생성.
-  if (section && section.blocks && section.blocks.length) {
-    const qrIsImg2 = meta.qr && /\.(png|jpe?g|svg|webp)$/i.test(meta.qr);
-    return `<section class="colophon cp-free${isFront ? ' cp-front' : ''}">
-  <div class="cp-wrap">
-${blocksHtml(section.blocks, book, ctx, srcAttr)}
-    ${qrIsImg2 ? `<img class="cp-qr" src="${esc(ctx.resolveImage(meta.qr))}" alt="QR" />` : ''}
-    ${meta.qrLabel ? `<div class="cp-qrlabel">${esc(meta.qrLabel)}${!qrIsImg2 && meta.qr ? ' — ' + esc(meta.qr) : ''}</div>` : ''}
-  </div>
-</section>`;
-  }
-  // 항목 선택 — fields 배열(체크박스)이 오면 그 항목만, null 이면 전부
-  const on = (key) => !Array.isArray(fields) || fields.includes(key);
-  const rows = [];
-  const add = (fieldKey, label, v) => { if (v && on(fieldKey)) rows.push(`<tr><td class="k">${esc(label)}</td><td>${esc(v)}</td></tr>`); };
-  add('issueDate', '초판 1쇄 발행', meta.issueDate);
-  add('author', '지은이', meta.author);
-  add('translator', '옮긴이', meta.translator);
-  add('issuer', '펴낸이', meta.issuer);
-  add('publisher', '펴낸곳', meta.publisher);
-  add('regNo', '출판등록', meta.regNo);
-  add('address', '주소', meta.address);
-  add('phone', '전화', meta.phone);
-  add('fax', '팩스', meta.fax);
-  add('homepage', '홈페이지', meta.homepage);
-  add('email', '이메일', meta.email);
-  add('isbn', 'ISBN', meta.isbn);
-  add('price', '정가', meta.price);
-  add('ebookPrice', '전자책', meta.ebookPrice);
-  for (const [k, v] of Object.entries(meta.extra || {})) { if (v) rows.push(`<tr><td class="k">${esc(k)}</td><td>${esc(v)}</td></tr>`); }
+  const row = (label, v) => (v ? `<div class="cp-row"><span class="k">${esc(label)}</span><span class="sep">｜</span><span class="v">${esc(v)}</span></div>` : '');
+  const g1 = [row('발행일', meta.issueDate), row('지은이', meta.author), row('옮긴이', meta.translator)].join('');
+  const g2 = [row('발행인', meta.issuer), row('발행처', meta.publisher), row('출판등록', meta.regNo),
+    row('주  소', meta.address), row('대표전화', meta.phone), row('팩스', meta.fax),
+    row('홈페이지', meta.homepage), row('이메일', meta.email)].join('');
+  const isbnStr = meta.isbn ? (meta.isbn + (meta.isbnAddon ? ` (부가기호 ${meta.isbnAddon})` : '')) : '';
+  const g3 = [row('ISBN', isbnStr), row('가격', meta.price), row('전자책', meta.ebookPrice)].join('')
+    + Object.entries(meta.extra || {}).map(([k, v]) => row(k, v)).join('');
+  const groups = [g1, g2, g3].filter(Boolean).join('<div class="cp-gap"></div>');
 
-  const year = (String(meta.issueDate || '').match(/\d{4}/) || [new Date().getFullYear()])[0];
-  const cline = meta.copyright || (meta.author ? `ⓒ ${meta.author}, ${year}` : '');
+  const notes = (section && section.blocks && section.blocks.length)
+    ? `<hr class="cp-rule" /><div class="cp-notes">${blocksHtml(section.blocks, book, ctx, srcAttr)}</div>`
+    : '';
+
   const qrIsImg = meta.qr && /\.(png|jpe?g|svg|webp)$/i.test(meta.qr);
-  return `<section class="colophon${isFront ? ' cp-front' : ''}">
-  <div class="cp-wrap">
-    <div class="cp-title">${esc(meta.title || '')}</div>
-    ${meta.subtitle ? `<div class="cp-subtitle">${esc(meta.subtitle)}</div>` : ''}
-    <table>${rows.join('')}</table>
-    <div class="cp-legal">
-      ${cline && on('copyright') ? `<p>${esc(cline)}</p>` : ''}
-      ${on('legal') ? '<p>이 책은 저작권법에 따라 보호받는 저작물이므로 무단 전재와 복제를 금합니다.</p>' : ''}
-      ${on('exchange') ? '<p>잘못된 책은 구입하신 곳에서 바꾸어 드립니다.</p>' : ''}
-    </div>
+  const qrBlock = (qrIsImg || meta.qrLabel || meta.qr)
+    ? `<div class="cp-qrbox">
     ${qrIsImg ? `<img class="cp-qr" src="${esc(ctx.resolveImage(meta.qr))}" alt="QR" />` : ''}
     ${meta.qrLabel ? `<div class="cp-qrlabel">${esc(meta.qrLabel)}${!qrIsImg && meta.qr ? ' — ' + esc(meta.qr) : ''}</div>`
       : (!qrIsImg && meta.qr ? `<div class="cp-qrlabel">${esc(meta.qr)}</div>` : '')}
+  </div>` : '';
+
+  const year = (String(meta.issueDate || '').match(/\d{4}/) || [new Date().getFullYear()])[0];
+  const owner = meta.copyright || (meta.author ? `ⓒ ${meta.author} ${year}. All rights reserved.` : '');
+  const legal = owner
+    ? `<div class="cp-legal"><p>${esc(owner)}</p><p>이 책의 내용 중 전부 또는 일부를 재사용하려면 반드시 저작권자의 서면 동의를 얻어야 합니다.</p></div>`
+    : '';
+
+  return `<section class="colophon${isFront ? ' cp-front' : ''}">
+  <div class="cp-wrap">
+    <div class="cp-title">${esc(meta.title || '')}${meta.subtitle ? ` <span class="cp-subtitle">${esc(meta.subtitle)}</span>` : ''}</div>
+    <div class="cp-rows">${groups}</div>
+    ${notes}
+    ${qrBlock}
+    ${legal}
   </div>
 </section>`;
 }
