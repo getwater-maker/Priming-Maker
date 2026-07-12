@@ -50,11 +50,14 @@ section.front-section, section.back-section {
   page: front;
   break-before: recto;
 }
+/* 부속물 제목 — 최종본 스타일: 중앙 제목 + 아래 가는 회색 밑줄(판면 전체폭) */
 section.front-section > h2, section.back-section > h2 {
   font-size: 1.35em;
   font-weight: 700;
   text-align: center;
-  margin: 18% 0 3em;
+  margin: 14% 0 1.6em;
+  padding-bottom: 0.9em;
+  border-bottom: 0.5pt solid #cccccc;
   break-after: avoid;
 }
 /* 헌사·제사 — 제목 없이 본문만 가운데 배치 */
@@ -62,16 +65,13 @@ section.sec-dedication > h2, section.sec-epigraph > h2 { display: none; }
 section.sec-dedication, section.sec-epigraph { text-align: center; }
 section.sec-dedication p, section.sec-epigraph p { text-indent: 0; margin-top: 40%; font-size: 1.05em; }
 
-/* ── 목차 ── */
+/* ── 목차 — 최종본 스타일: 본문 장만, 제목+점선리더+쪽번호 ── */
 nav.toc { page: front; break-before: recto; }
-nav.toc h2 { font-size: 1.35em; text-align: center; margin: 18% 0 3em; }
+nav.toc h2 { font-size: 1.35em; text-align: center; margin: 16% 0 2.6em; }
 nav.toc ol { list-style: none; margin: 0; padding: 0; }
-nav.toc li { margin: 0.35em 0; text-indent: 0; }
+nav.toc li { margin: 0.65em 0; text-indent: 0; }
 nav.toc li.toc-part { font-weight: 700; margin-top: 1.2em; }
-nav.toc li.toc-front, nav.toc li.toc-back { color: #222; }
-nav.toc li.toc-chapter { padding-left: 1em; }
-nav.toc a { text-decoration: none; color: inherit; }
-/* 쪽번호(+점선 리더)는 html-builder pageCss 가 폴백 포함으로 생성 */
+/* 행 구조(flex·점선·쪽번호)는 html-builder pageCss 가 생성 */
 
 /* ── 부(部) 표제지 ── */
 section.part-title {
@@ -85,20 +85,24 @@ section.part-title h2 { font-size: 1.7em; font-weight: 700; margin-top: 1.2em; }
 
 /* ── 장(章) ── */
 section.chapter { page: main; break-before: var(--chapter-break); }
+/* 장 표제 — 최종본 스타일: '제N회'(윗줄)·제목(아랫줄) 중앙, 위 여백 크게 */
 section.chapter > h2.chapter-title {
-  font-size: 1.5em;
+  font-size: 1.7em;
   font-weight: 700;
-  line-height: 1.5;
-  margin: 14% 0 4em;
-  text-align: left;
+  line-height: 1.45;
+  margin: 16% 0 2.6em;
+  text-align: center;
   break-after: avoid;
 }
-/* 장 리드문(*이탤릭 한 줄*) — 제목 아래 붙는 장 부제/도입 문구 */
+h2.chapter-title .ch-no { display: block; font-size: 0.88em; letter-spacing: 0.12em; margin-bottom: 0.4em; }
+/* 장 리드문(*이탤릭*) — 제목 아래 중앙, 본문과 넉넉히 이격 */
 p.chapter-lead {
   font-style: italic;
-  color: #333;
-  font-size: 0.95em;
-  margin: -3.2em 0 4em;
+  color: #555;
+  font-size: 0.92em;
+  line-height: 1.9;
+  text-align: center;
+  margin: -1.2em 0 3.2em;
   break-after: avoid;
 }
 section.chapter h3 { font-size: 1.1em; font-weight: 700; margin: 2.2em 0 1em; break-after: avoid; }
@@ -154,16 +158,19 @@ section.colophon {
   line-height: 1.75;
   text-align: left;
 }
-section.colophon .cp-wrap { margin-top: 38%; }
-section.colophon.cp-front .cp-wrap { margin-top: 8%; }
+/* 목표 최종본: 내용이 페이지 하단쪽(제목 시작 ≈ 판면 34% 지점) — flex 하단정렬은
+   vivliostyle 조각화에서 height:100% 미해석이라 고정 마진 사용(전 항목 기입 기준 실측) */
+section.colophon .cp-wrap { margin-top: 44%; }
+/* 앞 판권(판권위치=앞)은 관행상 속표지 '뒷면'(verso) — recto 강제하면 백면 끼고 홀수쪽으로 밀림 */
+section.colophon.cp-front { break-before: page; }
 section.colophon .cp-title { font-weight: 700; font-size: 1.2em; margin-bottom: 0.9em; text-indent: 0; }
 section.colophon .cp-subtitle { font-weight: 400; font-size: 0.85em; color: #333; }
 section.colophon .cp-row { text-indent: 0; }
-section.colophon .cp-row .k { display: inline-block; min-width: 4.6em; color: #111; }
-section.colophon .cp-row .sep { margin: 0 0.55em; color: #999; }
+section.colophon .cp-row .k { color: #111; }
+section.colophon .cp-row .sep { margin: 0 0.45em; color: #999; }
 section.colophon .cp-gap { height: 0.9em; }
 section.colophon hr.cp-rule { border: none; border-top: 0.4pt solid #bbbbbb; margin: 1.2em 0 1em; }
-section.colophon .cp-notes p { text-indent: 0; margin: 0.22em 0; }
+section.colophon .cp-notes p { text-indent: 0; margin: 0.22em 0; white-space: pre-line; text-align: left; }
 section.colophon .cp-notes hr.scene { margin: 0.9em 0; }
 section.colophon .cp-notes hr.scene::after { content: ""; }
 section.colophon .cp-notes h3 { font-size: 1em; margin: 1em 0 0.3em; }

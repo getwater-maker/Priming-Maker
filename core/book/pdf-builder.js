@@ -139,6 +139,8 @@ async function buildInteriorPdf(a) {
   const log = a.log || (() => {});
   try {
     if (!fs.existsSync(CLI_JS)) return { success: false, error: 'vivliostyle CLI 미설치 (node_modules/@vivliostyle/cli)' };
+    // 절대경로 강제 — CLI 를 cwd=workDir 로 띄우므로(크로스드라이브 오탐 방지) 상대경로가 오면 이중 결합됨.
+    a = { ...a, workDir: path.resolve(a.workDir), outPdf: path.resolve(a.outPdf) };
     fs.mkdirSync(a.workDir, { recursive: true });
     fs.mkdirSync(path.dirname(a.outPdf), { recursive: true });
     const htmlPath = path.join(a.workDir, 'book.html');
@@ -173,6 +175,7 @@ async function buildInteriorPdf(a) {
 async function buildCoverPdf({ imagePath, spread, outPdf, workDir, log, timeoutSec, compose }) {
   const L = log || (() => {});
   try {
+    workDir = path.resolve(workDir); outPdf = path.resolve(outPdf); // cwd=workDir 스폰이라 절대경로 강제
     const hasImg = imagePath && fs.existsSync(imagePath);
     const c = compose || {};
     const hasText = !!(c.overlay || (c.covers && c.covers.length) || c.barcode);

@@ -37,7 +37,7 @@ function svgToPngDataUrl(svg, w, h) {
 // 조판 옵션 기본값 — 구 Book Publishing 앱에서 사용자가 쓰던 값 그대로
 const LAYOUT_DEFAULTS = {
   fontKey: 'kopub', fontSizePt: 10, lineHeight: 1.8, fontWeight: 300,
-  letterSpacingPt: -0.4, indentPt: 15, paragraphSpacingPt: 0, // 관행 = 들여쓰기만, 문단 간격 0
+  letterSpacingPt: -0.4, indentPt: 15, paragraphSpacingPt: 5, // 최종본([POD] 삼국지 1권) 실측 — 들여쓰기 + 문단 간격 5pt
   marginsMm: { top: 20, bottom: 15, inner: 20, outer: 17 },
   chapterStart: 'recto',
   headerEven: 'title', headerOdd: 'chapter', headerEvenAlign: 'left', headerOddAlign: 'right',

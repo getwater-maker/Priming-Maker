@@ -114,7 +114,7 @@ function titlePageHtml(meta, ctx, fallbackTitle) {
     <h1 class="tp-title">${esc(meta.title || fallbackTitle || '')}</h1>
     ${meta.subtitle ? `<div class="tp-subtitle">${esc(meta.subtitle)}</div>` : ''}
     <div class="tp-author">${esc(meta.author || '')}${meta.author ? ' 지음' : ''}</div>
-    ${meta.translator ? `<div class="tp-translator">${esc(meta.translator)} 옮김</div>` : ''}
+    ${meta.translator ? `<div class="tp-translator">${esc(meta.translator)} ${meta.translatorLabel === '편역이' ? '편역' : '옮김'}</div>` : ''}
   </div>
   <div class="tp-publisher">${logo}${esc(meta.publisher || '')}</div>
 </section>`;
@@ -133,10 +133,12 @@ const COLOPHON_FIELDS = [
 //   자유문이 있어도 메타 행과 "병합"해 조판(예전엔 자유문이 전체를 대체 → ISBN 등 법정 항목 누락 위험).
 function colophonHtml(meta, ctx, isFront, section, book, srcAttr, fields) {
   const row = (label, v) => (v ? `<div class="cp-row"><span class="k">${esc(label)}</span><span class="sep">｜</span><span class="v">${esc(v)}</span></div>` : '');
-  const g1 = [row('발행일', meta.issueDate), row('지은이', meta.author), row('옮긴이', meta.translator)].join('');
-  const g2 = [row('발행인', meta.issuer), row('발행처', meta.publisher), row('출판등록', meta.regNo),
+  const g1 = [row('발행일', meta.issueDate), row('지은이', meta.author),
+    row(meta.translatorLabel || '옮긴이', meta.translator),
+    row('발행인', meta.issuer), row('발행처', meta.publisher), row('출판등록', meta.regNo),
     row('주  소', meta.address), row('대표전화', meta.phone), row('팩스', meta.fax),
     row('홈페이지', meta.homepage), row('이메일', meta.email)].join('');
+  const g2 = '';
   const isbnStr = meta.isbn ? (meta.isbn + (meta.isbnAddon ? ` (부가기호 ${meta.isbnAddon})` : '')) : '';
   const g3 = [row('ISBN', isbnStr), row('가격', meta.price), row('전자책', meta.ebookPrice)].join('')
     + Object.entries(meta.extra || {}).map(([k, v]) => row(k, v)).join('');
@@ -155,7 +157,9 @@ function colophonHtml(meta, ctx, isFront, section, book, srcAttr, fields) {
   </div>` : '';
 
   const year = (String(meta.issueDate || '').match(/\d{4}/) || [new Date().getFullYear()])[0];
-  const owner = meta.copyright || (meta.author ? `ⓒ ${meta.author} ${year}. All rights reserved.` : '');
+  // 편역서는 편집 저작권자 = 편역자(목표 최종본: ⓒ 로이(한득수)) — translator 우선
+  const cpName = meta.translator || meta.author;
+  const owner = meta.copyright || (cpName ? `ⓒ ${cpName} ${year}. All rights reserved.` : '');
   const legal = owner
     ? `<div class="cp-legal"><p>${esc(owner)}</p><p>이 책의 내용 중 전부 또는 일부를 재사용하려면 반드시 저작권자의 서면 동의를 얻어야 합니다.</p></div>`
     : '';
@@ -170,23 +174,19 @@ function colophonHtml(meta, ctx, isFront, section, book, srcAttr, fields) {
   </div>
 </section>`;
 }
+// 목차 — 사용자 최종본([POD] 원고_고전의뜰 삼국지_01.pdf p.11)과 동일: **본문 장(제N회)만** 나열
+//   (서문·프롤로그 등 부속물 제외), 각 행 = 제목 + 점선 리더 + 우측 쪽번호.
+//   점선은 leader() 대신 flex 빈칸의 border-bottom(dotted) — 미리보기(코어)·CLI 양쪽 동일 렌더.
 function tocHtml(book, tocTitle, excluded = []) {
   const items = [];
-  for (const s of book.front) {
-    if (s.key === 'toc' || s.key === 'dedication' || s.key === 'epigraph') continue;
-    if (excluded.includes(s.key)) continue;
-    items.push(`<li class="toc-front"><a href="#sec-${s.key}">${esc(s.title)}</a></li>`);
-  }
   for (const p of book.parts) {
-    if (p.title) items.push(`<li class="toc-part"><a href="#part-${p.num || p.lineStart}">${esc(p.title)}</a></li>`);
-    for (const c of p.chapters) items.push(`<li class="toc-chapter"><a href="#ch-${c.num}">${esc(c.title)}</a></li>`);
+    if (p.title) items.push(`<li class="toc-part"><span class="tt">${esc(p.title)}</span></li>`);
+    for (const c of p.chapters) {
+      if (!c.title) continue;
+      items.push(`<li class="toc-chapter"><a href="#ch-${c.num}"><span class="tt">${esc(c.title)}</span><span class="dots"></span></a></li>`);
+    }
   }
-  for (const s of book.back) {
-    if (s.key === 'colophon') continue;
-    if (excluded.includes(s.key)) continue;
-    items.push(`<li class="toc-back"><a href="#sec-${s.key}">${esc(s.title)}</a></li>`);
-  }
-  return `<nav class="toc"><h2>${esc(tocTitle || '차례')}</h2><ol>${items.join('\n')}</ol></nav>`;
+  return `<nav class="toc"><h2>${esc(tocTitle || '목차')}</h2><ol>${items.join('\n')}</ol></nav>`;
 }
 // 표지 안내 페이지 — 미리보기 전용 1쪽(내지 PDF 에는 넣지 않음).
 //   스프레드 치수 전부 + 축소 다이어그램(재단선·안전선·책등·날개 구획). 표지 이미지가 첨부돼 있으면
@@ -263,7 +263,8 @@ function pageCss(o) {
   const rh = `font-family: ${GOTHIC_STACK}; font-size: 9pt; color: #595959;`;
   const fo = `font-family: ${GOTHIC_STACK}; font-size: 9pt; font-weight: 700; color: #000;`;
   // 머리글 내용 — 책제목/부제/장제목(first-except: 장 시작 페이지 생략)/소제목(절)
-  const rhContent = (kind) => kind === 'title' ? 'string(book-title)'
+  // 최종본 스타일: 책제목 헤더는 부제가 있으면 '제목 / 부제' 병기.
+  const rhContent = (kind) => kind === 'title' ? (o.hasSubtitle ? 'string(book-title) " / " string(book-subtitle)' : 'string(book-title)')
     : kind === 'subtitle' ? 'string(book-subtitle)'
     : kind === 'chapter' ? 'string(chapter-title, first-except)'
     : kind === 'section' ? 'string(sec-title)' : 'none';
@@ -343,13 +344,14 @@ div.special-sec {
 }
 div.special-sec h3 { margin: 0 0 8pt !important; }
 div.special-sec p { text-indent: 0; margin-bottom: 5pt; }
-/* 목차 쪽번호 — 우측 고정(absolute). leader()는 미리보기(코어)와 CLI 지원이 달라
-   양쪽 동일하게 나오는 방식으로 통일. */
-nav.toc li { position: relative; padding-right: 2.2em; }
+/* 목차 행 — 제목 + 점선 리더(flex 빈칸의 dotted 밑줄) + 우측 쪽번호(target-counter).
+   leader()는 미리보기(코어)와 CLI 렌더가 달라 폐기 — 이 방식은 양쪽 동일(실측). */
+nav.toc a { display: flex; align-items: baseline; text-decoration: none; color: inherit; }
+nav.toc a .tt { flex: 0 1 auto; }
+nav.toc a .dots { flex: 1 1 auto; min-width: 1.5em; margin: 0 0.55em; border-bottom: 1.3px dotted #aaaaaa; transform: translateY(-0.28em); }
 nav.toc a::after {
   content: target-counter(attr(href url), page);
-  position: absolute; right: 0; top: 0; font-weight: 400;
-  font-family: ${GOTHIC_STACK}; font-size: 0.9em;
+  font-weight: 400; font-family: ${GOTHIC_STACK}; font-size: 0.95em;
 }
 `;
 }
@@ -378,7 +380,7 @@ function buildBookHtml(book, opts = {}) {
     letterSpacingPt: numAllowNeg(opts.letterSpacingPt, -0.4),
     indentPt: numAllowZero(opts.indentPt, 15),
     // 문단 간격 — 한국 단행본 관행 = 들여쓰기만 하고 문단 간격 0 (간격은 장면 전환 등 의도적 구분에만).
-    paragraphSpacingPt: numAllowZero(opts.paragraphSpacingPt, 0),
+    paragraphSpacingPt: numAllowZero(opts.paragraphSpacingPt, 5), // 최종본 실측 — 문단 사이 뚜렷한 간격
     // ── 여백(mm) — 구 앱: 위20 / 아래15 / 안쪽20 / 바깥17 ──
     marginsMm: Object.assign({ top: 20, bottom: 15, inner: 20, outer: 17 }, opts.marginsMm || {}),
     chapterStart: opts.chapterStart === 'page' ? 'page' : 'recto',
@@ -409,6 +411,7 @@ function buildBookHtml(book, opts = {}) {
     sourceMap: opts.sourceMap !== false,
   };
   o.fontStack = FONT_STACKS[o.fontKey];
+  o.hasSubtitle = !!(meta.subtitle && String(meta.subtitle).trim()); // 헤더 '제목 / 부제' 병기용
 
   const baseDir = opts.baseDir || process.cwd();
   const imageUrl = typeof opts.imageUrl === 'function' ? opts.imageUrl : (abs) => 'file:///' + abs.replace(/\\/g, '/');
@@ -461,7 +464,12 @@ ${blocksHtml(s.blocks, book, ctx, srcAttr)}
     }
     for (const c of p.chapters) {
       bodyParts.push(`<section class="chapter" id="ch-${c.num}">
-${c.title ? `<h2 class="chapter-title"${o.sourceMap ? ` data-src-line="${c.lineStart}" data-src-end="${c.lineStart}"` : ''}>${esc(c.title)}</h2>` : ''}
+${c.title ? (() => {
+        // 최종본 스타일: '제N회'와 제목을 2줄로 분리(중앙 정렬). 헤더 러닝타이틀은 content() 로 전체 텍스트 사용.
+        const mCh = /^(제\s*\d+\s*회)[.,]?\s*(.+)$/.exec(c.title);
+        const inner = mCh ? `<span class="ch-no">${esc(mCh[1])}</span>${esc(mCh[2])}` : esc(c.title);
+        return `<h2 class="chapter-title"${o.sourceMap ? ` data-src-line="${c.lineStart}" data-src-end="${c.lineStart}"` : ''}>${inner}</h2>`;
+      })() : ''}
 ${chapterBlocksHtml(c.blocks, book, ctx, srcAttr, o.specialKeywords)}
 </section>`);
     }

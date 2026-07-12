@@ -66,6 +66,8 @@ const META_KEYS = {
   '부제': 'subtitle', '부제목': 'subtitle',
   '저자': 'author', '지은이': 'author', '글': 'author',
   '옮긴이': 'translator', '역자': 'translator',
+  '편역': 'translator', '편역자': 'translator', '편역이': 'translator', // 라벨 표기는 translatorLabel 로 보존
+  '번역': 'translator', '엮은이': 'translator',
   '출판사': 'publisher', '발행처': 'publisher', '펴낸곳': 'publisher',
   '발행인': 'issuer', '펴낸이': 'issuer',
   '발행일': 'issueDate', '초판발행': 'issueDate', '초판 1쇄': 'issueDate', '초판1쇄': 'issueDate',
@@ -98,6 +100,7 @@ function parseBookText(text, fallbackTitle) {
   let fileTitle = fallbackTitle || '책';
   const front = [];   // { key, label, title, blocks }
   const back = [];
+  let lastZone = 'front'; // 비예약 [섹션]의 존 상속용 — 직전 예약 섹션 존(에필로그 뒤 커스텀=back)
   const covers = []; // 표지 구성([뒷표지]/[앞날개]/[뒷날개]/[책등]) — 내지 제외, 표지 PDF 조판용
   const parts = [];   // { title:null|string, lineStart, chapters: [{num,title,lineStart,blocks}] }
   const footnotes = {}; // id → { text, line }
@@ -113,7 +116,8 @@ function parseBookText(text, fallbackTitle) {
   };
   const flushPara = (endLine) => {
     if (!para || !cur) { para = null; return; }
-    const t = para.lines.join(' ').trim();
+    // [판권] 자유문은 줄 단위 고지문 — 문단 병합 대신 개행 보존(cp-notes pre-line 조판)
+    const t = para.lines.join(cur.key === 'colophon' ? '\n' : ' ').trim();
     if (t) cur.blocks.push({ type: 'p', text: t, lineStart: para.lineStart, lineEnd: endLine });
     para = null;
   };
@@ -137,6 +141,8 @@ function parseBookText(text, fallbackTitle) {
         const val = m[2].trim();
         if (stdKey) meta[stdKey] = val;
         else meta.extra[m[1].trim()] = val;
+        // 편역서 판권 라벨(편역이) 보존 — 목표 최종본은 '옮긴이' 아닌 '편역이'로 표기
+        if (stdKey === 'translator' && /편역|엮/.test(m[1])) meta.translatorLabel = '편역이';
       }
       continue;
     }
@@ -151,6 +157,7 @@ function parseBookText(text, fallbackTitle) {
         const r = reservedByName(br[1]);
         if (r) {
           seenHeading = true;
+          lastZone = r.zone === 'back' ? 'back' : (r.zone === 'front' ? 'front' : lastZone);
           cur = { key: r.key, label: r.label, title: br[2].trim() || r.label, lineStart: i, blocks: [] };
           // ignore 존(속표지·표제지 지시문) = 내용 버림 — 컨테이너를 어디에도 안 붙임
           if (r.zone === 'front') front.push(cur);
@@ -158,7 +165,13 @@ function parseBookText(text, fallbackTitle) {
           else if (r.zone === 'cover') covers.push(cur);
           continue;
         }
-        // 모르는 대괄호 섹션 → 본문 장으로 취급 (제목에 대괄호 유지)
+        // 비예약 대괄호 섹션(구 앱 자유 부속물 — '다음 이야기' 등) → 커스텀 섹션.
+        //   존은 직전 예약 섹션의 존 상속(에필로그 뒤면 back, 서문·프롤로그 사이면 front).
+        seenHeading = true;
+        const ckey = 'custom-' + br[1].replace(/\s+/g, '-').replace(/[^\w가-힣-]/g, '').slice(0, 24);
+        cur = { key: ckey, label: br[1], title: br[2].trim() || br[1], lineStart: i, blocks: [] };
+        (lastZone === 'back' ? back : front).push(cur);
+        continue;
       }
       seenHeading = true;
       const pm = title.match(/^(?:제\s*)?(\d+)\s*부[.·]?\s*(.*)$/);
@@ -215,6 +228,20 @@ function parseBookText(text, fallbackTitle) {
       while (i + 1 < lines.length && /^>\s?/.test(lines[i + 1].trim()) &&
              !IMG_PROMPT_RE.test(lines[i + 1].trim()) && !VID_PROMPT_RE.test(lines[i + 1].trim())) {
         i++; qlines.push(lines[i].trim().replace(/^>\s?/, ''));
+      }
+      // `> 라벨: 값` 줄들이 전부 메타 키(플랫폼·각주방식·판권위치·날개 등)면 인용이 아니라 메타로 흡수 —
+      //   구 앱 회차 파일은 장 헤딩 아래에 이런 메타 줄(연속 여러 줄)을 두어, 본문에 인용으로 찍히고
+      //   장의 첫 블록을 차지해 리드문(*이탤릭*) 감지까지 깨뜨렸음.
+      {
+        const qmetas = qlines.map((l) => {
+          const m = l.match(/^([^:：]{1,12})\s*[:：]\s*(.*)$/);
+          const k = m && (META_KEYS[m[1].trim().toLowerCase()] || META_KEYS[m[1].trim()]);
+          return k ? { k, v: m[2].trim() } : null;
+        });
+        if (qmetas.length && qmetas.every(Boolean)) {
+          for (const { k, v } of qmetas) if (meta[k] == null || meta[k] === '') meta[k] = v;
+          continue;
+        }
       }
       cur.blocks.push({ type: 'quote', text: qlines.join('\n').trim(), lineStart: start, lineEnd: i });
       continue;
@@ -284,6 +311,9 @@ function sectionTemplate(key) {
 function detectBookFileKind(text) {
   const head = String(text || '').slice(0, 4000);
   if (/^===.*(앞부속물|뒷부속물|본문).*===$/m.test(head) || /^(책제목|제목)\s*[:：]/m.test(head)) return 'essential';
+  // 구 앱(PrimingBook) 회차 파일: H1 이 '제N회/장/화' — 안에 '## [목차]' 마커·평문 메타가 섞여 있어도 회차.
+  //   (이 규칙이 native 판정보다 먼저 — 실측: 02_출판용 세트가 native 로 오판돼 소제목이 장으로 승격되던 문제)
+  if (/^#\s+제?\s*\d+\s*[회장화부]/m.test(head)) return 'chapter';
   if (/^##\s+\[/m.test(head) || /^>\s*(저자|책제목|부제|출판사)\s*[:：]/m.test(head)) return 'native';
   return 'chapter';
 }
@@ -300,7 +330,9 @@ function normalizeEssentialFile(text) {
       seenHeading = true;
       const name = h1[1].trim();
       const r = reservedByName(name);
-      return r ? `## [${name}]` : `## ${name}`;        // 예약명 → [섹션] / 그 외 → 본문 장
+      // 필수파일의 H1 은 전부 부속물 — 비예약 이름('다음 이야기' 등)도 [섹션] 마커로(커스텀 섹션,
+      //   parseBookText 가 직전 예약 섹션의 존을 상속). 본문 장은 회차 파일에서만 온다.
+      return `## [${name}]`;
     }
     if (/^#{2,}\s+/.test(t)) { seenHeading = true; return line; }
     // 평문 메타 (첫 헤딩 전, `라벨: 값`) → `> 라벨: 값`
@@ -313,18 +345,24 @@ function normalizeEssentialFile(text) {
 }
 
 // 회차 파일 → 우리 형식 — 모든 헤딩 레벨 +1 (H1=장 → H2, H2=절 → H3, H3 → H4).
+//   구 앱(PrimingBook) 회차 지원: 첫 헤딩 전 평문 `라벨: 값`(메타 키만) → `> 라벨: 값`,
+//   회차 안의 `## [목차]` 같은 예약 마커 줄은 제거(부속물의 마커가 정본 — 남기면 목차 중복).
 //   첫 비공백 줄이 헤딩 없는 평문 제목(예: `제9회 여포의 칼…`)이면 장 헤딩으로 승격.
 function normalizeChapterFile(text) {
   const lines = String(text || '').replace(/\r\n/g, '\n').split('\n');
-  let first = true;
+  let seenHeading = false;
   return lines.map((line) => {
     const t = line.trim();
     if (!t) return line;
-    if (first) {
-      first = false;
-      if (!/^#/.test(t) && !/^[*>!\[`-]/.test(t) && t.length <= 60) return '## ' + t;
+    if (/^#{1,3}\s+\[.+\]\s*$/.test(t)) { seenHeading = true; return ''; } // 구 앱 잔재 예약 마커 제거
+    if (/^#{1,3}\s+/.test(t)) { seenHeading = true; return '#' + line.trimStart(); }
+    if (!seenHeading) {
+      const m = t.match(/^([^:：#>\-*\s][^:：]{0,11})\s*[:：]\s*(.*)$/);
+      if (m && (META_KEYS[m[1].trim().toLowerCase()] || META_KEYS[m[1].trim()])) return `> ${m[1].trim()}: ${m[2]}`;
+      if (!/^[*>!\[`-]/.test(t) && t.length <= 60) { seenHeading = true; return '## ' + t; } // 평문 제목 승격(1회)
+      seenHeading = true; // 긴 평문 = 본문 시작 — 이후 승격·메타 변환 안 함
     }
-    return /^#{1,3}\s+/.test(t) ? '#' + line.trimStart() : line;
+    return line;
   }).join('\n');
 }
 
