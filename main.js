@@ -2506,8 +2506,10 @@ ipcMain.handle('playlist-clear-bg', () => {
 
 // 플리 「🎬 만들기」 — 음악(ACE-Step, 없는 곡만) ∥ 배경(순환 이미지 → Grok i2v 짧은 클립) 병렬 →
 //   부메랑 seamless 루프를 곡 길이만큼 곡마다 반복 → 곡=클립[ 곡 오디오 + 배경 루프 + 곡 제목 자막 ] 로 .vrew.
-ipcMain.handle('make-playlist-video', async () => {
+ipcMain.handle('make-playlist-video', async (_e, args = {}) => {
   if (!S.parsed || S.parsed.kind !== 'playlist') { log('열린 플리가 없습니다 — 스펙을 먼저 여세요.'); return currentDTO(); }
+  const bgImgEngine = args.imgEngine === 'gemini' ? 'gemini' : null; // 배경 이미지: 순환(null) | 유료 나노바나나('gemini')
+  const bgVideoOn = args.videoEngine !== 'none';                     // 배경 영상: Grok 심리스(기본) | 없음=이미지 고정
   S.abort = false;
   const PV = require('./core/playlist-video');
   const outRoot = S.outRoot || playlistOutRoot(S.scriptPath || 'playlist.md', S.preset);
@@ -2531,15 +2533,16 @@ ipcMain.handle('make-playlist-video', async () => {
     if (bgImg) { bgProj.groups[0].imagePath = bgImg; log(`🖼 첨부된 배경 이미지 사용: ${path.basename(bgImg)}`); }
     else {
       try {
-        log(`🖼 배경 이미지 생성(순환 엔진: Flow/Genspark) — 스타일은 배경 프롬프트가 제어 — "${bgRaw.slice(0, 60)}"`);
-        await runRotatingImages(bgProj, bgWork, log, null, null, [1]);   // styleId=null → 스펙 배경 프롬프트가 스타일 제어
+        log(`🖼 배경 이미지 생성(${bgImgEngine === 'gemini' ? '유료 나노바나나2 Lite API' : '순환: Genspark/Flow'}) — 스타일은 배경 프롬프트가 제어 — "${bgRaw.slice(0, 60)}"`);
+        await runRotatingImages(bgProj, bgWork, log, null, bgImgEngine, [1]);   // styleId=null → 스펙 배경 프롬프트가 스타일 제어
         bgImg = bgProj.groups[0].imagePath || null;
         if (bgImg) { S.parsed.bgImagePath = bgImg; pushDtoUpdate(); log(`  ✓ 배경 이미지: ${path.basename(bgImg)}`); }
         else log('  ✗ 배경 이미지 생성 실패');
       } catch (e) { log('  ✗ 배경 이미지 오류: ' + (e && e.message || e)); }
     }
-    // 이미지 나오면 바로 영상(Grok i2v) — 심리스 무한루프용 짧은 클립
-    if (bgImg && !S.abort) {
+    // 이미지 나오면 바로 영상(Grok i2v) — 심리스 무한루프용 짧은 클립. '없음' 선택 시 이미지 고정 배경.
+    if (!bgVideoOn) { if (bgImg) log('ℹ 배경 영상 「없음」 선택 — 이미지 고정 배경으로 진행'); }
+    else if (bgImg && !S.abort) {
       try {
         log('🎬 배경 영상(Grok i2v)…');
         await P.generateHookVideosGrok(bgProj, bgWork, log, () => S.abort, 0, pushDtoUpdate, [1], 6);

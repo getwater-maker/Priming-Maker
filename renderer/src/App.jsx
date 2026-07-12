@@ -1189,7 +1189,16 @@ export default function App() {
         <div className="hrow">
           <div className="hright">
             <span className="meta" style={{ marginRight: 'auto' }}>{dto && dto.kind === 'playlist' ? `${dto.tracks.length}곡` : '플리 스펙(.md)을 여세요 — 클로드가 채팅에서 만들어 줍니다'}</span>
-            <button disabled={!(dto && dto.kind === 'playlist' && dto.tracks.length)} title="음악(ACE-Step) + 배경(심리스 반복 영상) + 곡 제목 자막 → .vrew 까지 한 번에. Vrew 에서 마무리·내보내기" onClick={runMakePlaylistVideo}>🎬 만들기</button>
+            <select title="배경 이미지 생성 방식" value={imgEngine} onChange={(e) => setImgEngine(e.target.value)}>
+              <option value="rotate">배경이미지: 순환(무료)</option>
+              <option value="gemini">배경이미지: 유료(나노바나나2 Lite)</option>
+            </select>
+            <select title="배경 영상 — Grok 심리스 반복 영상 또는 이미지 고정" value={videoEngine} onChange={(e) => setVideoEngine(e.target.value)}>
+              <option value="grok">배경영상: Grok(심리스 반복)</option>
+              <option value="none">배경영상: 없음(이미지 고정)</option>
+            </select>
+            <button className="ghost" title="이미지 순환 순서·계정 · 나노바나나 키/모델 설정" style={{ padding: '6px 9px' }} onClick={openImgRotation}>⚙ 이미지</button>
+            <button disabled={!(dto && dto.kind === 'playlist' && dto.tracks.length)} title="음악(ACE-Step) + 배경(이미지→심리스 반복 영상) + 곡 제목 자막 → .vrew 까지 한 번에. Vrew 에서 마무리·내보내기" onClick={runMakePlaylistVideo}>🎬 만들기</button>
             <button className="ghost" title="진행 중인 생성 중단" onClick={abort}>■ 중단</button>
             <button className="ghost" disabled={!(dto && dto.kind === 'playlist')} onClick={() => api.openFolder()}>📁 출력폴더</button>
           </div>
@@ -1693,7 +1702,7 @@ export default function App() {
   async function runMakePlaylistVideo() {
     try {
       setStatus('만들기 진행 중… (음악 + 배경 + .vrew)');
-      const d = await api.makePlaylistVideo();
+      const d = await api.makePlaylistVideo({ imgEngine, videoEngine });
       if (d) setDto(d);
       setStatus('만들기 완료');
     } catch (e) { logline('만들기 오류: ' + e.message); }
@@ -1726,8 +1735,9 @@ function PlaylistView({ dto, onMakeOne, onPreview, onPreviewMedia, onAttachBg, o
         {dto.concept ? <span className="meta">{dto.concept}</span> : null}
         <span className="meta">· {dto.tracks.length}곡</span>
       </div>
-      <div className="plmain">
-        <div className="plbg" style={{ marginBottom: 14 }}>
+      {/* 배경(왼쪽 고정) + 곡 리스트(오른쪽) — 리스트만 스크롤되고 배경은 화면에 남음 */}
+      <div className="plmain" style={{ display: 'flex', gap: 18, alignItems: 'flex-start' }}>
+        <div className="plbg" style={{ flex: '0 0 auto', width: 452, position: 'sticky', top: 8 }}>
           <div className="lab" style={{ fontWeight: 600, marginBottom: 6 }}>🎬 배경 (전 곡 공통)</div>
           <Thumb c={{ videoPath: dto.bgVideoPath, imagePath: dto.bgImagePath }} isLf={true}
             onAttach={onAttachBg} onClear={onClearBg} onPreview={onPreviewMedia || onPreview} />
@@ -1735,7 +1745,7 @@ function PlaylistView({ dto, onMakeOne, onPreview, onPreviewMedia, onAttachBg, o
             클릭해 이미지/영상 첨부(＋) · 삭제(✕). 첨부하면 그걸 배경으로, 비우면 배경 프롬프트로 자동 생성(심리스 반복 영상).
           </div>
         </div>
-        <div className="pltracks">
+        <div className="pltracks" style={{ flex: 1, minWidth: 0 }}>
         {dto.tracks.map((t) => (
           <div key={t.num} className={'pltrack s-' + t.status}>
             <div className="plnum">{String(t.num).padStart(2, '0')}</div>
