@@ -325,16 +325,6 @@ ipcMain.handle('dict-save', (_e, entries = []) => {
     return clean;
   } catch (e) { return null; }
 });
-// ComfyUI(i2v) 설정 get/set + 연결 테스트
-ipcMain.handle('get-comfy-config', () => require('./core/comfy-config').load());
-ipcMain.handle('set-comfy-config', (_e, patch = {}) => require('./core/comfy-config').save(patch || {}));
-ipcMain.handle('test-comfy', async () => {
-  const cfg = require('./core/comfy-config').load();
-  const { ComfyEngine } = require('./comfy-engine');
-  const ok = await new ComfyEngine(cfg, log).health();
-  log(ok ? `✓ ComfyUI 연결 OK (${cfg.baseUrl})` : `✗ ComfyUI 연결 실패 (${cfg.baseUrl})`);
-  return { ok, baseUrl: cfg.baseUrl };
-});
 // Ollama(LLM 프롬프트 자동작성) 설정 get/set + 연결 테스트 + 모델 목록
 ipcMain.handle('get-ollama-config', () => require('./core/ollama-config').load());
 ipcMain.handle('set-ollama-config', (_e, patch = {}) => require('./core/ollama-config').save(patch || {}));
@@ -765,8 +755,8 @@ function resolveBgmPath(pr) {
   if (pr._bgmPath && fs.existsSync(pr._bgmPath)) return pr._bgmPath;
   try {
     const mediaDir = shortsDirs(S.outRoot, pr.shortsNum).media;
-    const files = fs.readdirSync(mediaDir).filter((f) => /^bgm_.*\.mp3$/i.test(f));
-    const pick = files.find((f) => /_loop\.mp3$/i.test(f)) || files[0]; // 루프(전체 길이) 우선
+    const files = fs.readdirSync(mediaDir).filter((f) => /^bgm_.*\.(mp3|wav)$/i.test(f));
+    const pick = files.find((f) => /_loop\.mp3$/i.test(f)) || files[0]; // 루프(전체 길이) 우선 — 원본(.wav)은 폴백
     if (pick) return path.join(mediaDir, pick);
   } catch {}
   return null;
@@ -1804,8 +1794,7 @@ async function runMakeAllCore(opts = {}) {
   const projects = S.parsed.projects.filter((pr) => !shortsNum || pr.shortsNum === shortsNum);
 
   // ── 1·2단계: 음성(TTS) + 이미지 ──
-  //   이미지가 로컬 GPU 를 안 쓰면(Genspark/Flow 브라우저, 또는 ComfyUI 클라우드) TTS(로컬 GPU)와 '병렬' → 더 빠름.
-  //   로컬 ComfyUI(로컬 GPU)면 TTS(OmniVoice GPU)와 VRAM 충돌 → '순차'.
+  //   이미지가 로컬 GPU 를 안 쓰므로(Genspark/Flow 브라우저, 나노바나나 API) TTS(로컬 GPU)와 '병렬' → 더 빠름.
   //   또한 cut/prose 처럼 TTS 후 그룹 재구성이 일어나면 이미지가 그룹에 의존 → 안전하게 순차.
   const willRegroup = (pr) => (!dry && clipMaxSec && getModeProfile(currentMode()).grouping.strategy === 'tts-greedy' && pr.format !== 'grouped');
   // 이미지 = Flow+Genspark 순환(브라우저) — 로컬 GPU 미사용 → TTS(로컬 GPU)와 병렬 안전.
@@ -1946,38 +1935,42 @@ async function runMakeAllCore(opts = {}) {
     }
   }
 
-  // ── 3.5단계: 배경음(BGM, ACE-Step) — 대본 무드 자동/수동 → 전체 길이 루프. (dry·중단·미설정이면 생략) ──
+  // ── 3.5단계: 배경음(BGM) — ACE-Step 독립 서버(플리 음악과 동일 경로, ComfyUI 불필요).
+  //   대본 무드 자동/수동 → ≤180초 생성 → 전체 길이 루프. (dry·중단·미설정·미설치면 생략) ──
   const bgmOn = !dry && bgm && bgm.enabled;
   if (bgmOn && !S.abort) {
     log('🎵 3.5단계 — 배경음(BGM) 생성…');
-    try {
-      const cfg = require('./core/comfy-config').load();
-      const acfg = (cfg.audioBaseUrl && cfg.audioBaseUrl.trim())
-        ? { ...cfg, cloud: false, apiKey: '', baseUrl: cfg.audioBaseUrl.trim() } // 음악만 로컬 서버 (플리 패턴)
-        : cfg;
-      const { ComfyEngine } = require('./comfy-engine');
-      const eng = new ComfyEngine(acfg, log);
-      if (!(await eng.health())) { log(`⚠ 음악 서버 연결 실패 (${acfg.baseUrl}) — BGM 없이 진행`); }
-      else {
-        const MU = require('./core/media-utils');
-        for (const pr of projects) {
-          if (S.abort) break;
-          const totalSec = pr.sentences.reduce((a, s) => a + (s.ttsDurationSec || 0), 0);
-          if (!totalSec) continue;
-          const tags = await deriveBgmMood(pr, bgm.moodOverride, log);
-          pr._bgmUsedMood = tags; // UI 표시용 — 실제 사용된 BGM 무드
-          const dirs = shortsDirs(S.outRoot, pr.shortsNum);
-          const raw = path.join(dirs.media, `bgm_${vrewBaseName(pr)}.mp3`);
-          log(`  ▶ ${prLabel(pr)} BGM (${Math.round(totalSec)}초 분량, 무드: ${tags.slice(0, 50)})`);
-          const r = await eng.textToAudio({ tags, lyrics: '', durationSec: Math.min(Math.ceil(totalSec), 180), outputPath: raw, abortSignal: () => S.abort });
-          if (!r.success) { log(`  ⚠ BGM 생성 실패: ${r.error} — 이 편은 BGM 없이`); continue; }
-          pr._bgmPath = await MU.loopAudioTo(r.audioPath, totalSec, log);
-          pr._bgmVolume = (bgm.volume != null ? bgm.volume : 0.15); // 💾 재export 에서 재사용
-          log(`  ✓ ${prLabel(pr)} BGM`);
-          pushDtoUpdate();
+    const AS = require('./core/ace-step');
+    if (!AS.isInstalled()) { log('⚠ ACE-Step 미설치(ace-step/1_최초설치.bat) — BGM 없이 진행'); }
+    else if (S.voiceDesignActive) { log('⚠ 보이스디자인 사용 중 — BGM 없이 진행'); }
+    else {
+      S.musicActive = true; // BGM 생성 중 TTS·보이스디자인 차단(VRAM 뮤텍스)
+      try {
+        const st = await AS.start(log);
+        if (!st.ok) { log(`⚠ ACE-Step 시작 실패: ${st.error} — BGM 없이 진행`); }
+        else {
+          const MU = require('./core/media-utils');
+          for (const pr of projects) {
+            if (S.abort) break;
+            const totalSec = pr.sentences.reduce((a, s) => a + (s.ttsDurationSec || 0), 0);
+            if (!totalSec) continue;
+            const tags = await deriveBgmMood(pr, bgm.moodOverride, log);
+            pr._bgmUsedMood = tags; // UI 표시용 — 실제 사용된 BGM 무드
+            const dirs = shortsDirs(S.outRoot, pr.shortsNum);
+            const raw = path.join(dirs.media, `bgm_${vrewBaseName(pr)}.wav`);
+            log(`  ▶ ${prLabel(pr)} BGM (${Math.round(totalSec)}초 분량, 무드: ${tags.slice(0, 50)})`);
+            const r = await AS.generate({ tags, lyrics: '', durationSec: Math.min(Math.ceil(totalSec), 180) }, log);
+            if (!r.ok) { log(`  ⚠ BGM 생성 실패: ${r.error} — 이 편은 BGM 없이`); continue; }
+            fs.writeFileSync(raw, r.buffer);
+            pr._bgmPath = await MU.loopAudioTo(raw, totalSec, log);
+            pr._bgmVolume = (bgm.volume != null ? bgm.volume : 0.15); // 💾 재export 에서 재사용
+            log(`  ✓ ${prLabel(pr)} BGM`);
+            pushDtoUpdate();
+          }
         }
-      }
-    } catch (e) { log(`⚠ BGM 단계 오류: ${e.message} — BGM 없이 진행`); }
+      } catch (e) { log(`⚠ BGM 단계 오류: ${e.message} — BGM 없이 진행`); }
+      finally { try { await AS.stop(log); } catch {} S.musicActive = false; }
+    }
   }
 
   // ── 4단계: .vrew — 전 쇼츠. (중단 시엔 .vrew 생성·이후 작업 모두 생략 — 사용자가 멈췄으면 뒤 작업 안 함) ──
@@ -2131,6 +2124,7 @@ ipcMain.handle('set-queue-settings', (_e, args = {}) => {
 
 // 그룹 1개만 TTS 변환 (그 그룹의 문장들)
 ipcMain.handle('tts-group', async (_e, args = {}) => {
+  { const _b = gpuBusyReason(); if (_b) { log(`⚠ ${_b} 중에는 음성변환을 할 수 없습니다. 끝난 뒤 다시 시도하세요.`); return currentDTO(); } }
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
   const { shortsNum, groupNum, presetName = null, speed = null } = args;
   const pr = S.parsed.projects.find((p) => p.shortsNum === shortsNum);
@@ -2407,7 +2401,7 @@ ipcMain.handle('open-playlist-spec', async (_e, args = {}) => {
 });
 
 // 플리 전체 생성 — 곡마다 ComfyUI ACE-Step API 호출 → 출력폴더에 저장.
-// 음악 없는 곡만 로컬 ComfyUI(ACE-Step)로 생성 — 「🎬 만들기」(이미지+음악+vrew) 앞단계에서 사용.
+// 음악 없는 곡만 ACE-Step 독립 서버로 생성 — 「🎬 만들기」(이미지+음악+vrew) 앞단계에서 사용.
 //   반환 { done, fail, serverDown }. 이미 mp3 있는 곡은 건너뜀(재생성은 ⚡음악 버튼이 담당).
 // 오디오 끝 페이드아웃 — ACE-Step 은 곡 끝이 갑자기 뚝 끊기는 경향 → ffmpeg afade 로 자연스럽게.
 function fadeOutAudioFile(wavPath, durSec, fadeSec = 3) {
@@ -2510,9 +2504,8 @@ ipcMain.handle('playlist-clear-bg', () => {
   return currentDTO();
 });
 
-// 플리 배경 영상(무한루프) + .vrew 생성 — 음악(mp3) 이 있는 곡들로 영상화.
-//   배경 1개(Krea2 이미지 → LTX 짧은 클립 → 부메랑 seamless 루프) 를 곡 길이만큼 곡마다 반복 →
-//   곡=클립[ 곡 mp3 + 배경 루프 + 곡 제목 자막 ] 로 .vrew. Vrew 에서 마무리·내보내기.
+// 플리 「🎬 만들기」 — 음악(ACE-Step, 없는 곡만) ∥ 배경(순환 이미지 → Grok i2v 짧은 클립) 병렬 →
+//   부메랑 seamless 루프를 곡 길이만큼 곡마다 반복 → 곡=클립[ 곡 오디오 + 배경 루프 + 곡 제목 자막 ] 로 .vrew.
 ipcMain.handle('make-playlist-video', async () => {
   if (!S.parsed || S.parsed.kind !== 'playlist') { log('열린 플리가 없습니다 — 스펙을 먼저 여세요.'); return currentDTO(); }
   S.abort = false;

@@ -7,6 +7,21 @@
 **편별 Vrew 4.0.1 .vrew 파일**을 자동 생성하는 Electron 앱. PrimingFlow(D:\PrimingFlow)의 엔진을
 복사·재활용한 독립 클론.
 
+## 🧹 코드 정비 — ComfyUI 완전 제거·BGM ACE-Step 이관 (2026-07-12, v0.2.3)
+> 전수 감사(IPC 사슬·죽은 코드·낡은 문구) 후 확정분만 반영. IPC main↔preload↔renderer 115:115 일치 확인.
+- **BGM 3.5단계 → ACE-Step 독립 서버**(core/ace-step.js, 플리 음악과 동일 경로): 기존엔 comfy-engine
+  textToAudio(127.0.0.1:8188)로 가서 **항상 "음악 서버 연결 실패"로 죽던 상태**를 해소. 생성 중
+  `S.musicActive` 뮤텍스(TTS·보이스디자인 차단), 출력 `bgm_*.wav` → loopAudioTo. resolveBgmPath 폴백이
+  `.wav` 도 잡도록 확장.
+- **ComfyUI 흔적 완전 제거**: comfy-engine.js·core/comfy-config.js **파일 삭제**(참조 0 확인),
+  get/set/test-comfy IPC + preload API + ⚙ Comfy 모달(도달 불가 죽은 UI 4천자) 제거.
+  ENGINE_META 의 comfy 항목, "(ComfyUI는 순환과 별개)" 등 낡은 문구 정리.
+- **가드 보강**: `tts-group`(그룹 단건 재변환)에 gpuBusyReason 뮤텍스 추가(음악/디자인 중 차단).
+- **잔재 정리**: 채널편집의 ch.gemini/gkey 데이터 배관(UI 필드는 이미 제거됨), runTts 의 사장된
+  force 파라미터(구 '다시 변환' 전용), make-all 1·2단계 주석의 "로컬 ComfyUI 순차" 서술 갱신.
+- ⚠ 남은 것: ace-step/qwen-design 폴더의 venv 는 로컬 전용(매니페스트·git 제외). BGM 이 이제
+  ACE-Step 를 쓰므로 첫 BGM 생성 시 모델 로딩(~30초) 후 곡 생성. 미설치면 "BGM 없이 진행" graceful.
+
 ## 🎞 프리미어 XML 3종 수정 (2026-07-04, v0.1.79)
 - **오디오**: `s.ttsAudioPath` 가 캐시/임시 경로면 프리미어가 엉뚱한 파일을 물거나(존재 시) 조용히 건너뜀(부재 시 무음).
   → `buildPremiereXml(a.ttsDir)` 로 **tts-N 폴더 정본(`<num>.mp3/wav`) 우선** 참조 + 못 찾으면 컷 번호 경고 로그.

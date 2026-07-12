@@ -38,7 +38,7 @@ function phaseBadge(p, isLf) {
 }
 
 const QSTATUS = { idle: '대기', running: '진행중', done: '완료', failed: '실패' };
-const ENGINE_META = { genspark: { name: 'Genspark (Nano Banana 2)' }, flow: { name: 'Google Flow' }, gemini: { name: '🍌 나노바나나2 Lite (Gemini API)' }, comfy: { name: 'ComfyUI (Krea2 Turbo)' } };
+const ENGINE_META = { genspark: { name: 'Genspark (Nano Banana 2)' }, flow: { name: 'Google Flow' } };
 
 // 스타일 편집 모달의 한 행 — 기본 스타일은 읽기전용(복사만), 사용자 스타일은 이름·프롬프트 수정/삭제.
 function StyleRow({ s, index, total, onCopy, onSave, onDelete, onMove }) {
@@ -127,8 +127,6 @@ export default function App() {
   const [playerOpen, setPlayerOpen] = useState(false);
   const [scriptEditOpen, setScriptEditOpen] = useState(false);
   const [scriptText, setScriptText] = useState('');
-  const [comfyOpen, setComfyOpen] = useState(false);
-  const [comfy, setComfy] = useState(null);
   const [styleEditOpen, setStyleEditOpen] = useState(false); // 이미지 스타일 편집 모달
   const [newStyle, setNewStyle] = useState({ name: '', prompt: '' }); // 새 스타일 입력 버퍼
   const [dictOpen, setDictOpen] = useState(false);   // 발음사전 모달
@@ -371,11 +369,10 @@ export default function App() {
       setStatus(`STT 완료 (${okN}/${tot}) — 원본 폴더에 .txt 생성`);
     } catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
   }
-  async function runTts(shortsNum, force = false) {
-    if (force && !window.confirm('현재 대본의 모든 음성을 새로 변환합니다.\n기존 음성과 캐시를 무시하고 다시 합성합니다. 진행할까요?')) return;
-    setStatus(force ? 'TTS 다시 변환중…' : 'TTS 생성중…');
+  async function runTts(shortsNum) {
+    setStatus('TTS 생성중…');
     try {
-      const d = await api.ttsBuild({ shortsNum, dry: false, presetName: presetName || null, speed: ttsSpeed || null, clipMaxSec: _clipMaxSec(), force });
+      const d = await api.ttsBuild({ shortsNum, dry: false, presetName: presetName || null, speed: ttsSpeed || null, clipMaxSec: _clipMaxSec() });
       setDto(d); setStatus('오디오 완료');
     } catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
   }
@@ -635,20 +632,6 @@ export default function App() {
   function addDictRow() { setDictRows((rs) => [...rs, { source: '', pron: '', enabled: true }]); }
   function setDictRow(i, patch) { setDictRows((rs) => rs.map((r, j) => (j === i ? { ...r, ...patch } : r))); }
   function delDictRow(i) { setDictRows((rs) => rs.filter((_, j) => j !== i)); }
-  async function openComfy() {
-    try { const c = await api.getComfyConfig(); setComfy(c || {}); setComfyOpen(true); }
-    catch (e) { logline('Comfy 설정 읽기 오류: ' + e.message); }
-  }
-  async function saveComfy() {
-    try { await api.setComfyConfig(comfy); setComfyOpen(false); setStatus('ComfyUI 설정 저장됨'); }
-    catch (e) { logline('저장 오류: ' + e.message); }
-  }
-  async function testComfyConn() {
-    setStatus('ComfyUI 연결 테스트…');
-    try { const r = await api.testComfy(); setStatus(r.ok ? `✓ 연결 OK (${r.baseUrl})` : `✗ 연결 실패 (${r.baseUrl})`); }
-    catch (e) { logline('테스트 오류: ' + e.message); setStatus('테스트 오류'); }
-  }
-  async function pickAudioWorkflow() { const f = await api.pickFile({ filters: [{ name: 'ComfyUI 워크플로(API json)', extensions: ['json'] }] }); if (f) setComfy((c) => ({ ...c, audioWorkflowPath: f })); }
   function showPrompt(shortsNum, c, label) {
     // 편집 대상 = 대본 이미지/비디오 프롬프트(raw). 스타일은 생성 시 앞에 자동으로 붙는다(stylePfx 는 안내용).
     const st = styles.find((x) => x.id === styleId);
@@ -798,8 +781,6 @@ export default function App() {
     if (!useName) { logline('채널을 먼저 선택하세요'); return; }
     const p = await api.getPresetDetail(useName);
     if (!p) { logline('채널 정보를 찾을 수 없습니다'); return; }
-    let gkey = '';
-    try { gkey = await api.getGeminiKey(); } catch (_) {}
     const ss = await api.listStyles();
     setChStyles(ss || []);
     try { setChRefList(await api.listRefAudio() || []); } catch (_) { setChRefList([]); }
@@ -821,7 +802,7 @@ export default function App() {
       name: p.name || '', engine: p.engine || 'omnivoice', startMode: p.startMode || 'longform', voice: p.voice || '',
       voiceCloneRefAudio: p.voiceCloneRefAudio || '', voiceCloneRefText: p.voiceCloneRefText || '',
       scriptFolder: p.scriptFolder || '', seed: p.seed != null ? p.seed : '',
-      gemini: gkey, aiNotice: !!(p.aiNotice && p.aiNotice.enabled),
+      aiNotice: !!(p.aiNotice && p.aiNotice.enabled),
       presetPrompt: p.presetPrompt || '', language: p.language || 'ko',
       silenceSec: p.silenceSec != null ? p.silenceSec : 0,
       cfgValue: p.cfgValue != null ? p.cfgValue : 2,
@@ -1456,33 +1437,6 @@ export default function App() {
           </div>
         </div>
       )}
-      {comfyOpen && comfy && (
-        <div className="modal-bg show" onClick={(e) => { if (e.target.classList.contains('modal-bg')) setComfyOpen(false); }}>
-          <div className="modal-card comfymodal">
-            <h3>⚙ ComfyUI 설정 (ACE-Step 음악 — '플리' · BGM)</h3>
-            <div className="meta" style={{ marginBottom: 8 }}>로컬 PC / RunPod / <b>ComfyUI 클라우드(comfy.org)</b>. 음악(ACE-Step) 생성 전용. <b>음악만 로컬</b>로 분리 가능(아래 음악 서버).</div>
-            <div className="cgrid">
-              <div className="frow full"><label>클라우드 모드</label><label style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1 }}><input type="checkbox" style={{ width: 'auto' }} checked={!!comfy.cloud} onChange={(e) => setComfy({ ...comfy, cloud: e.target.checked, baseUrl: e.target.checked && /127\.0\.0\.1|localhost/.test(comfy.baseUrl || '') ? 'https://cloud.comfy.org' : comfy.baseUrl })} /><span className="meta">comfy.org 공식 클라우드 사용 (Standard 이상 구독 필요)</span></label></div>
-              {comfy.cloud && (
-                <div className="frow full"><label>API 키</label><input type="password" placeholder="X-API-Key (계정 대시보드에서 발급)" value={comfy.apiKey || ''} onChange={(e) => setComfy({ ...comfy, apiKey: e.target.value })} /></div>
-              )}
-              <div className="frow full"><label>서버 주소</label><input placeholder={comfy.cloud ? 'https://cloud.comfy.org' : 'http://127.0.0.1:8188'} value={comfy.baseUrl} onChange={(e) => setComfy({ ...comfy, baseUrl: e.target.value })} /><button className="ghost" style={{ flex: '0 0 auto' }} onClick={testComfyConn}>연결테스트</button></div>
-
-              <div className="subhead">🎵 음악 (ACE-Step · '플리' 모드)</div>
-              <div className="frow full"><label>음악 서버</label><input placeholder="음악만 로컬로 돌리려면 여기에 (예: http://127.0.0.1:8188). 비우면 위 공통 서버 사용" value={comfy.audioBaseUrl || ''} onChange={(e) => setComfy({ ...comfy, audioBaseUrl: e.target.value })} /></div>
-              <div className="meta" style={{ marginTop: -2, marginBottom: 4 }}>💡 이미지·영상은 클라우드, <b>음악만 로컬 GPU(무료)</b>로 돌리려면 이 칸에 로컬 ComfyUI 주소(클라우드 설정 무시).</div>
-              <div className="frow full"><label>음악 워크플로</label><input placeholder="ComfyUI '저장(API 포맷)' JSON 경로 (ACE-Step)" value={comfy.audioWorkflowPath || ''} onChange={(e) => setComfy({ ...comfy, audioWorkflowPath: e.target.value })} /><button className="ghost" style={{ flex: '0 0 auto' }} onClick={pickAudioWorkflow}>찾기</button></div>
-              <div className="frow"><label>태그 노드</label><input placeholder="비우면 tags 자동탐지" value={comfy.audioTagsNodeId || ''} onChange={(e) => setComfy({ ...comfy, audioTagsNodeId: e.target.value })} /></div>
-              <div className="frow"><label>가사 노드</label><input placeholder="비우면 lyrics 자동탐지" value={comfy.audioLyricsNodeId || ''} onChange={(e) => setComfy({ ...comfy, audioLyricsNodeId: e.target.value })} /></div>
-              <div className="frow full"><label>길이 노드</label><input placeholder="비우면 seconds 자동탐지 (EmptyAceStepLatentAudio)" value={comfy.audioDurationNodeId || ''} onChange={(e) => setComfy({ ...comfy, audioDurationNodeId: e.target.value })} /><input className="n" type="number" style={{ width: 70 }} title="곡 1개 최대 대기(초)" value={comfy.audioTimeoutSec || 600} onChange={(e) => setComfy({ ...comfy, audioTimeoutSec: e.target.value })} /></div>
-              <div className="frow full chk"><label>무음 자동 제거</label><label style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1 }}><input type="checkbox" style={{ width: 'auto' }} checked={comfy.audioTrimSilence !== false} onChange={(e) => setComfy({ ...comfy, audioTrimSilence: e.target.checked })} /><span className="meta">생성 후 앞/뒤 무음을 잘라 <b>실제 음악 길이</b>로 저장 (ACE-Step가 요청 길이를 못 채워 남기는 꼬리 무음 제거)</span></label></div>
-              <div className="meta">⚠ 음악 출력은 <b>SaveAudio(MP3/FLAC)</b> 노드 필요. 스타일은 곡별 <b>tags</b>, 길이는 <b>seconds</b> 에 자동 주입. 연주곡은 가사를 비웁니다.</div>
-            </div>
-            <div className="mbtns"><button onClick={saveComfy}>저장</button><button className="ghost" onClick={() => setComfyOpen(false)}>취소</button></div>
-          </div>
-        </div>
-      )}
-
       {ollamaOpen && ollama && (
         <div className="modal-bg show" onClick={(e) => { if (e.target.classList.contains('modal-bg')) setOllamaOpen(false); }}>
           <div className="modal-card">
@@ -1550,7 +1504,7 @@ export default function App() {
                 <div className="meta" style={{ marginTop: 4 }}>헤더에서 <b>「이미지: 유료」</b>를 고르면 이 키로 나노바나나가 이미지를 만듭니다(유료, ~$0.034/장). 모델명이 안 맞으면(404) 여기서 고치고, 비율 오류면 「비율 전송」을 끄세요.</div>
               </div>
             ) : null}
-            <div className="meta" style={{ marginBottom: 8 }}>위에서부터 순서대로 시도하고, 한 엔진이 <b>한도</b>(Genspark가 보내는 휴식/한도 메시지, Flow 계정한도)에 걸리면 <b>다음 엔진</b>이 남은 이미지를 이어 만듭니다. 체크 해제 시 순환에서 제외. (ComfyUI는 순환과 별개 단독)</div>
+            <div className="meta" style={{ marginBottom: 8 }}>위에서부터 순서대로 시도하고, 한 엔진이 <b>한도</b>(Genspark가 보내는 휴식/한도 메시지, Flow 계정한도)에 걸리면 <b>다음 엔진</b>이 남은 이미지를 이어 만듭니다. 체크 해제 시 순환에서 제외. (유료 나노바나나는 순환과 별개 — 헤더에서 선택)</div>
             <div style={{ margin: '8px 0' }}>
               {(imgRot.order || []).map((id, i) => (
                 <div key={id} className="frow" style={{ alignItems: 'center', gap: 4 }}>
@@ -1580,7 +1534,7 @@ export default function App() {
                   <input type="checkbox" checked={lora.enabled !== false} onChange={(e) => saveLora({ enabled: e.target.checked })} />
                   📦 LoRA 학습용 이미지 수집 <span className="meta">(Genspark/Flow만 · 누적 {lora.count || 0}장)</span>
                 </label>
-                <div className="meta" style={{ marginTop: 4 }}>한국사 이미지를 모아 → 나중에 LoRA 학습용. ComfyUI 결과는 제외.</div>
+                <div className="meta" style={{ marginTop: 4 }}>한국사 이미지를 모아 → 나중에 LoRA 학습용.</div>
                 <div className="frow" style={{ marginTop: 4 }}>
                   <label>트리거</label>
                   <input style={{ width: 110 }} value={lora.trigger || 'joseon'} onChange={(e) => setLora({ ...lora, trigger: e.target.value })} onBlur={(e) => saveLora({ trigger: e.target.value })} />
