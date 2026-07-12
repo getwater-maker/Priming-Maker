@@ -23,6 +23,15 @@ header{background:var(--bg);border-bottom:1px solid var(--line);padding:8px 16px
 .topsticky{position:sticky;top:0;z-index:50;background:var(--bg)}
 /* 2영역 구분자 — TTS 다음·이미지 다음 세로선 */
 .hdiv{width:1px;align-self:stretch;min-height:20px;background:var(--line);margin:0 3px}
+/* 헤더 기능 그룹 — 라벨 붙은 박스로 묶어 통일성·가시성 확보 (①음성→②이미지→③비디오→④완성) */
+.hgroup{display:inline-flex;align-items:center;gap:6px;border:1px solid #e2d5c0;background:#fffdf9;border-radius:11px;padding:5px 9px 5px 6px}
+.hgroup .glabel{font-size:11.5px;font-weight:800;color:#8a6f45;background:#f3ead9;border:1px solid #e8dcc4;border-radius:7px;padding:3px 8px;white-space:nowrap;letter-spacing:.2px}
+.hgroup button{padding:5px 10px;font-size:12.5px}
+.hgroup select{padding:5px 6px;font-size:12.5px}
+.hgroup input[type=number]{padding:4px 5px;font-size:12.5px;border:1px solid var(--line);border-radius:6px}
+button.cta{font-size:14px;font-weight:800;padding:8px 18px}
+button.stop{background:#fff;color:#c0392b;border-color:#e3b8b1}
+button.stop:hover{background:#c0392b;border-color:#c0392b;color:#fff}
 h1{font-size:17px;color:var(--strong);margin:0;font-weight:700}
 .grow{flex:1}
 button{font-family:inherit;font-size:13px;border:1px solid var(--accent);background:var(--accent);color:#fff;

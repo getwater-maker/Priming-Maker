@@ -1119,15 +1119,28 @@ export default function App() {
             </select>
             <button className="ghost" title="채널(프리셋) 설정 편집" style={{ padding: '6px 9px' }} onClick={openChannelEditor}>⚙</button>
             <button className="ghost" title="새 채널 추가 (현재 채널 설정을 복사해서 시작)" style={{ padding: '6px 9px' }} onClick={addChannel}>＋ 채널</button>
-            {!isPl && !isBk && <button onClick={openScript}>📂 대본 열기</button>}
+            {!isPl && !isBk && (<>
+              <span className="hgroup">
+                <span className="glabel">대본</span>
+                <button onClick={openScript}>📂 열기</button>
+                <button className="ghost" disabled={!loaded} title="대본 내용 수정 → 재파싱(원본 .md 갱신)" onClick={openScriptEdit}>✏ 수정</button>
+                <button className="ghost" title="음성·영상 파일을 텍스트로 변환(STT) → 원본과 같은 폴더에 같은 이름 .txt 생성 (OmniVoice Whisper)" onClick={runStt}>🎧 STT</button>
+              </span>
+              <span className="hgroup">
+                <span className="glabel">작업</span>
+                <button className="ghost" disabled={!loaded} title="수동 저장(자동저장도 항상 켜져 있음)" onClick={saveProject}>💾 저장</button>
+                <button className="ghost" title="저장한 프로젝트 불러오기" onClick={loadProject}>📂 불러오기</button>
+                <button className="ghost" title="새 작업 — 현재 화면 비우기" onClick={resetProject}>🆕 초기화</button>
+              </span>
+            </>)}
             {isPl && <button onClick={openPlaylist}>🎵 플리 스펙 열기</button>}
-            {isBk && <button onClick={openBook}>📖 원고 열기</button>}
-            {isBk && <button className="ghost" title="원고를 어떻게 작성하는지 규약 설명이 담긴 샘플 .md 저장 — 복사해서 내용만 바꾸면 바로 책이 됩니다" onClick={async () => { try { const r = await api.bookSaveGuide(); if (r) setStatus('가이드 저장: ' + r.path); } catch (e) { logline(e.message); } }}>📄 작성 가이드</button>}
-            {!isPl && <button className="ghost" disabled={!loaded} title="대본 내용 수정 → 재파싱(원본 .md 갱신)" onClick={openScriptEdit}>✏ 대본수정</button>}
-            {!isPl && !isBk && <button className="ghost" disabled={!loaded} title="수동 저장(자동저장도 항상 켜져 있음)" onClick={saveProject}>💾 작업저장</button>}
-            {!isPl && !isBk && <button className="ghost" title="저장한 프로젝트 불러오기" onClick={loadProject}>📂 불러오기</button>}
-            <button className="ghost" title="새 작업 — 현재 화면 비우기" onClick={resetProject}>🆕 초기화</button>
-            {!isPl && !isBk && <button className="ghost" title="음성·영상 파일을 텍스트로 변환(STT) → 원본과 같은 폴더에 같은 이름 .txt 생성 (OmniVoice Whisper)" onClick={runStt}>🎧 STT</button>}
+            {isPl && <button className="ghost" title="새 작업 — 현재 화면 비우기" onClick={resetProject}>🆕 초기화</button>}
+            {isBk && (<>
+              <button onClick={openBook}>📖 원고 열기</button>
+              <button className="ghost" title="원고를 어떻게 작성하는지 규약 설명이 담긴 샘플 .md 저장 — 복사해서 내용만 바꾸면 바로 책이 됩니다" onClick={async () => { try { const r = await api.bookSaveGuide(); if (r) setStatus('가이드 저장: ' + r.path); } catch (e) { logline(e.message); } }}>📄 작성 가이드</button>
+              <button className="ghost" disabled={!loaded} title="원고 내용 수정 → 재파싱(원본 .md 갱신)" onClick={openScriptEdit}>✏ 수정</button>
+              <button className="ghost" title="새 작업 — 현재 화면 비우기" onClick={resetProject}>🆕 초기화</button>
+            </>)}
             {loaded && (
               <span className="autosave-ind" title="작업은 자동으로 수시 저장됩니다. 같은 대본을 다시 열면 이어서 작업할 수 있어요.">
                 {autoSavedAt ? `✓ 자동저장 ${new Date(autoSavedAt).toLocaleTimeString()}` : '자동저장 켜짐'}
@@ -1135,72 +1148,79 @@ export default function App() {
             )}
           </div>
         </div>
-        {!isPl && !isBk && (<>
-        {/* 생성·제작 행 — 가운데: TTS·이미지·비디오 생성컨트롤 / 오른쪽: 프롬프트·미리보기·만들기·출력 */}
-        <div className="hrow hrow3">
-          <div className="hside" />
-          <div className="hcenter">
-            <span title="음성 배속 (합성 1.0 → atempo 변환)">🎤 배속 <input type="number" value={ttsSpeed} step="0.05" min="0.5" max="2" style={{ width: 52 }} onChange={(e) => setTtsSpeed(e.target.value)} /></span>
-            <button className="ghost" disabled={!loaded} onClick={() => runTts(null)}>🎤 TTS</button>
-            <button className="ghost" disabled={!loaded} title="이미 만든 음성 파일·재활용 캐시를 삭제하고 화면의 시간기록도 지웁니다 (다음 변환은 전부 새로 합성)" onClick={deleteTtsAll}>🗑 TTS삭제</button>
-            <button className="ghost" title="발음사전 — TTS가 잘못 읽는 단어를 발음대로 교정(자막은 대본 그대로)" style={{ padding: '6px 9px' }} onClick={openDict}>📖 발음사전</button>
-            <span className="hdiv" />
+        {/* 제작 파이프라인 행 — 작업 순서대로 ①음성 → ②이미지 → ③비디오 → ④완성 그룹 */}
+        {!isPl && !isBk && (
+        <div className="hrow" style={{ justifyContent: 'flex-start' }}>
+          <span className="hgroup">
+            <span className="glabel">① 음성</span>
+            <span title="음성 배속 (합성 1.0 → atempo 변환)">배속 <input type="number" value={ttsSpeed} step="0.05" min="0.5" max="2" style={{ width: 52 }} onChange={(e) => setTtsSpeed(e.target.value)} /></span>
+            <button disabled={!loaded} title="대본 전체 음성 합성 (이미 있는 문장은 건너뜀)" onClick={() => runTts(null)}>🎤 TTS</button>
+            <button className="ghost" disabled={!loaded} title="이미 만든 음성 파일·재활용 캐시를 삭제하고 화면의 시간기록도 지웁니다 (다음 변환은 전부 새로 합성)" onClick={deleteTtsAll}>🗑 삭제</button>
+            <button className="ghost" title="발음사전 — TTS가 잘못 읽는 단어를 발음대로 교정(자막은 대본 그대로)" onClick={openDict}>📖 발음사전</button>
+          </span>
+          <span className="hgroup">
+            <span className="glabel">② 이미지</span>
+            <button className="ghost" disabled={!loaded || impBusy} title="각 그룹 내용을 분석해 이미지 프롬프트를 자동 작성·적용 (Ollama)" onClick={runMakePrompts}>{impBusy ? '⏳ 작성중…' : '✍ 프롬프트'}</button>
+            <button className="ghost" disabled={!loaded} title="Ollama 서버·모델 설정 / 웹 LLM 답변 붙여넣기(고급)" onClick={openOllama}>⚙</button>
             <select title="이미지 스타일" value={styleId} onChange={(e) => setStyleId(e.target.value)}>
               <option value="">스타일 없음</option>
               {styles.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
-            <button className="ghost" title="이미지 스타일 편집(추가·수정·삭제·프롬프트 복사)" style={{ padding: '6px 9px' }} onClick={() => setStyleEditOpen(true)}>✎ 스타일</button>
+            <button className="ghost" title="이미지 스타일 편집(추가·수정·삭제·프롬프트 복사)" onClick={() => setStyleEditOpen(true)}>✎</button>
             <select title="이미지 생성 방식 — 순환(무료 브라우저) 또는 유료(나노바나나2 Lite API)" value={imgEngine} onChange={(e) => setImgEngine(e.target.value)}>
-              <option value="rotate">이미지: 순환(무료)</option>
-              <option value="gemini">이미지: 유료(나노바나나2 Lite)</option>
+              <option value="rotate">순환(무료)</option>
+              <option value="gemini">유료(나노바나나2)</option>
             </select>
-            <button className="ghost" title="이미지 순환 순서·계정 · 나노바나나 키/모델 설정" style={{ padding: '6px 9px' }} onClick={openImgRotation}>⚙ 이미지</button>
-            <button className="ghost" disabled={!loaded} onClick={() => runImg(null)}>🖼 이미지</button>
-            <span className="hdiv" />
+            <button className="ghost" title="이미지 순환 순서·계정 · 나노바나나 키/모델 설정" onClick={openImgRotation}>⚙</button>
+            <button disabled={!loaded} title="프롬프트 있는 그룹의 이미지 생성 (이미 있는 그룹은 건너뜀)" onClick={() => runImg(null)}>🖼 이미지</button>
+          </span>
+          <span className="hgroup">
+            <span className="glabel">③ 비디오</span>
             <select title="i2v 비디오 엔진" value={videoEngine} onChange={(e) => setVideoEngine(e.target.value)}>
               <option value="grok">Grok</option><option value="none">없음 (이미지만)</option>
             </select>
-            {videoEngine === 'grok' && <button className="ghost" title="Grok(X) 멀티계정 등록·로그인·한도" style={{ padding: '6px 9px' }} onClick={openGrokAcc}>⚙ 계정</button>}
+            {videoEngine === 'grok' && <button className="ghost" title="Grok(X) 멀티계정 등록·로그인·한도" onClick={openGrokAcc}>⚙ 계정</button>}
             {videoEngine === 'none'
-              ? <span className="meta" title="비디오 없이 이미지만으로 .vrew 생성 (켄번스)">비디오 없음 — 이미지만</span>
+              ? <span className="meta" title="비디오 없이 이미지만으로 .vrew 생성 (켄번스)">이미지만(켄번스)</span>
               : (<>
-                  <span title="영상으로 만들 그룹 범위 (N번~N번). 롱폼 기본=도입부 그룹만">🎬 <input type="number" min="1" style={{ width: 44 }} value={vidFrom} onChange={(e) => setVidFrom(e.target.value)} />~<input type="number" min="1" style={{ width: 44 }} value={vidTo} onChange={(e) => setVidTo(e.target.value)} /></span>
-                  <button className="ghost" disabled={!loaded} title={`G${vidFrom}~G${vidTo} 그룹을 i2v 비디오로 변환 (이미지 있는 것만)`} onClick={() => runVid(null)}>비디오</button>
+                  <span title="영상으로 만들 그룹 범위 (N번~N번). 롱폼 기본=도입부 그룹만">범위 <input type="number" min="1" style={{ width: 44 }} value={vidFrom} onChange={(e) => setVidFrom(e.target.value)} />~<input type="number" min="1" style={{ width: 44 }} value={vidTo} onChange={(e) => setVidTo(e.target.value)} /></span>
+                  <button disabled={!loaded} title={`G${vidFrom}~G${vidTo} 그룹을 i2v 비디오로 변환 (이미지 있는 것만)`} onClick={() => runVid(null)}>🎬 비디오</button>
                 </>)}
-          </div>
-          <div className="hside" />
-        </div>
-        {/* 제작 액션 행 — 한 줄, 오른쪽 정렬 */}
-        <div className="hrow">
-          <div className="hright">
-            <button className="ghost" disabled={!loaded || impBusy} title="각 그룹 내용을 분석해 이미지 프롬프트를 자동 작성·적용 (Ollama)" onClick={runMakePrompts}>{impBusy ? '⏳ 작성중…' : '✍ 프롬프트작성'}</button>
-            <button className="ghost" disabled={!loaded} title="Ollama 서버·모델 설정 / 웹 LLM 답변 붙여넣기(고급)" style={{ padding: '6px 9px' }} onClick={openOllama}>⚙</button>
+          </span>
+          <span className="hgroup" style={{ marginLeft: 'auto' }}>
+            <span className="glabel">④ 완성</span>
             <button className="ghost" disabled={!loaded} title="모든 편을 이어서 미리보기 재생" onClick={() => playShorts(null)}>▶ 미리보기</button>
             {(() => { const qc = (queue && queue.longform ? queue.longform.items.length : 0) + (queue && queue.shorts ? queue.shorts.items.length : 0); return (
-              <button disabled={qc < 1} title={qc > 1 ? `큐 ${qc}개 대본을 교차 순서(롱1→쇼1→롱2→쇼2…)로 순차 제작` : '현재 대본 TTS+이미지 → 영상 → .vrew → 폴더열기'} onClick={runMakeOrBatch}>⚡ 만들기{qc > 1 ? ` (${qc})` : ''}</button>
+              <button className="cta" disabled={qc < 1} title={qc > 1 ? `큐 ${qc}개 대본을 교차 순서(롱1→쇼1→롱2→쇼2…)로 순차 제작` : '현재 대본 TTS+이미지 → 영상 → .vrew → 폴더열기'} onClick={runMakeOrBatch}>⚡ 만들기{qc > 1 ? ` (${qc})` : ''}</button>
             ); })()}
-            <button className="ghost" title="진행 중인 작업 중단" onClick={abort}>■ 중단</button>
-            <button disabled={!loaded} onClick={() => runVrew(null)}>💾 .vrew</button>
+            <button className="ghost stop" title="진행 중인 작업 중단" onClick={abort}>■ 중단</button>
+            <button disabled={!loaded} title=".vrew 만 다시 내보내기 (이미 만든 음성·이미지 사용)" onClick={() => runVrew(null)}>💾 .vrew</button>
             <button className="ghost" disabled={!loaded} onClick={() => api.openFolder()}>📁 출력폴더</button>
-          </div>
+          </span>
         </div>
-        </>)}
+        )}
         {isPl && (
         <div className="hrow">
           <div className="hright">
             <span className="meta" style={{ marginRight: 'auto' }}>{dto && dto.kind === 'playlist' ? `${dto.tracks.length}곡` : '플리 스펙(.md)을 여세요 — 클로드가 채팅에서 만들어 줍니다'}</span>
-            <select title="배경 이미지 생성 방식" value={imgEngine} onChange={(e) => setImgEngine(e.target.value)}>
-              <option value="rotate">배경이미지: 순환(무료)</option>
-              <option value="gemini">배경이미지: 유료(나노바나나2 Lite)</option>
-            </select>
-            <select title="배경 영상 — Grok 심리스 반복 영상 또는 이미지 고정" value={videoEngine} onChange={(e) => setVideoEngine(e.target.value)}>
-              <option value="grok">배경영상: Grok(심리스 반복)</option>
-              <option value="none">배경영상: 없음(이미지 고정)</option>
-            </select>
-            <button className="ghost" title="이미지 순환 순서·계정 · 나노바나나 키/모델 설정" style={{ padding: '6px 9px' }} onClick={openImgRotation}>⚙ 이미지</button>
-            <button disabled={!(dto && dto.kind === 'playlist' && dto.tracks.length)} title="음악(ACE-Step) + 배경(이미지→심리스 반복 영상) + 곡 제목 자막 → .vrew 까지 한 번에. Vrew 에서 마무리·내보내기" onClick={runMakePlaylistVideo}>🎬 만들기</button>
-            <button className="ghost" title="진행 중인 생성 중단" onClick={abort}>■ 중단</button>
-            <button className="ghost" disabled={!(dto && dto.kind === 'playlist')} onClick={() => api.openFolder()}>📁 출력폴더</button>
+            <span className="hgroup">
+              <span className="glabel">배경</span>
+              <select title="배경 이미지 생성 방식" value={imgEngine} onChange={(e) => setImgEngine(e.target.value)}>
+                <option value="rotate">이미지: 순환(무료)</option>
+                <option value="gemini">이미지: 유료(나노바나나2)</option>
+              </select>
+              <select title="배경 영상 — Grok 심리스 반복 영상 또는 이미지 고정" value={videoEngine} onChange={(e) => setVideoEngine(e.target.value)}>
+                <option value="grok">영상: Grok(심리스)</option>
+                <option value="none">영상: 없음(이미지 고정)</option>
+              </select>
+              <button className="ghost" title="이미지 순환 순서·계정 · 나노바나나 키/모델 설정" onClick={openImgRotation}>⚙</button>
+            </span>
+            <span className="hgroup">
+              <span className="glabel">완성</span>
+              <button className="cta" disabled={!(dto && dto.kind === 'playlist' && dto.tracks.length)} title="음악(ACE-Step) + 배경(이미지→심리스 반복 영상) + 곡 제목 자막 → .vrew 까지 한 번에. Vrew 에서 마무리·내보내기" onClick={runMakePlaylistVideo}>🎬 만들기</button>
+              <button className="ghost stop" title="진행 중인 생성 중단" onClick={abort}>■ 중단</button>
+              <button className="ghost" disabled={!(dto && dto.kind === 'playlist')} onClick={() => api.openFolder()}>📁 출력폴더</button>
+            </span>
           </div>
         </div>
         )}
