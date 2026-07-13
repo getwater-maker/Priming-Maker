@@ -344,6 +344,7 @@ function pageCss(o) {
   const numOdd = o.pageNum === 'outer' ? `@bottom-right { content: counter(page); ${fo} }`
     : o.pageNum === 'center' ? `@bottom-center { content: counter(page); ${fo} }` : '';
   return `
+:root { --content-h: ${(o.trimH - m.top - m.bottom).toFixed(1)}mm; }  /* 판면(글상자) 높이 — 헌사·제사 세로중앙용 */
 @page {
   size: ${o.trimW}mm ${o.trimH}mm;
   margin-top: ${m.top}mm; margin-bottom: ${m.bottom}mm;

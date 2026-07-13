@@ -60,10 +60,19 @@ section.front-section > h2, section.back-section > h2 {
   border-bottom: 0.5pt solid #cccccc;
   break-after: avoid;
 }
-/* 헌사·제사 — 제목 없이 본문만 가운데 배치 */
+/* 헌사·제사 — 제목 없이 본문만, 판면 세로 ~42% 지점에 블록 중앙 배치.
+   (margin-top:% 는 '폭' 기준이라 세로중앙이 안 됨 → 판면 높이(--content-h) 안에서
+    flex 42:58 스페이서로 짧은 블록을 세로 약 42% 지점에 앉힌다.) */
 section.sec-dedication > h2, section.sec-epigraph > h2 { display: none; }
-section.sec-dedication, section.sec-epigraph { text-align: center; }
-section.sec-dedication p, section.sec-epigraph p { text-indent: 0; margin-top: 40%; font-size: 1.05em; }
+section.sec-dedication, section.sec-epigraph {
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  min-height: var(--content-h, 170mm);
+}
+section.sec-dedication::before, section.sec-epigraph::before { content: ""; flex: 42 0 0; }
+section.sec-dedication::after,  section.sec-epigraph::after  { content: ""; flex: 58 0 0; }
+section.sec-dedication p, section.sec-epigraph p { text-indent: 0; margin: 0; font-size: 1.05em; line-height: 1.9; }
 
 /* ── 목차 — 최종본 스타일: 본문 장만, 제목+점선리더+쪽번호 ── */
 nav.toc { page: front; break-before: recto; }
