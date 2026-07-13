@@ -3018,8 +3018,11 @@ ipcMain.handle('book-set-meta', (_e, args = {}) => {
   const label = key === 'title' ? '책제목' : BOOK_META_LABELS[key];
   if (!label) return currentDTO();
   // 이 표준키에 매핑되는 기존 메타 줄 탐색 — `> 라벨:` 과 평문 `라벨:`(필수파일) 둘 다 인식
+  // ⚠ H1(# 책제목)은 메타 영역보다 앞에 오는 '제목'이라 body 시작이 아님 — H2 이상(##)부터 body.
+  //   (H1 을 body 로 치면 탐색 범위가 0줄 → 기존 메타 줄을 못 찾고 맨 앞에 중복 삽입 →
+  //    파서는 아래(원래) 값을 쓰므로 규격 패널 변경이 전부 안 먹던 버그)
   const { parseBookText } = require('./core/parsers/book-parser');
-  let bodyStart = lines.findIndex((l) => /^#{1,6}\s+/.test(l.trim()) || /^===.*===$/.test(l.trim()));
+  let bodyStart = lines.findIndex((l) => /^#{2,6}\s+/.test(l.trim()) || /^===.*===$/.test(l.trim()));
   if (bodyStart < 0) bodyStart = lines.length;
   let found = -1, hadArrow = false;
   for (let i = 0; i < bodyStart; i++) {
