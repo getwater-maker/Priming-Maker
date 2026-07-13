@@ -1068,6 +1068,30 @@ export default function App() {
     if (stageTitleRef.current) stageTitleRef.current.innerHTML = '';
     setPlayerOpen(false);
   }
+  // 팝업/모달 닫기 = 바깥 클릭이 아니라 ESC 또는 취소·닫기 버튼으로만 (실수 클릭에 입력 유실 방지).
+  //   여러 개가 겹쳐 떠 있어도 최상단(가장 나중에 연) 하나만 닫는다.
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key !== 'Escape') return;
+      if (preview) { setPreview(null); return; }
+      if (playerOpen) { stopPlayer(); return; }
+      if (promptView) { setPromptView(null); return; }
+      if (impOpen) { setImpOpen(false); return; }
+      if (scriptEditOpen) { setScriptEditOpen(false); return; }
+      if (grokAccOpen) { setGrokAccOpen(false); return; }
+      if (gsAccOpen) { setGsAccOpen(false); return; }
+      if (imgRotOpen) { setImgRotOpen(false); return; }
+      if (flowAccOpen) { setFlowAccOpen(false); return; }
+      if (ollamaOpen) { setOllamaOpen(false); return; }
+      if (vdOpen) { closeVoiceDesign(); return; }
+      if (dictOpen) { setDictOpen(false); return; }
+      if (styleEditOpen) { setStyleEditOpen(false); return; }
+      if (chOpen) { setChOpen(false); return; }
+      if (newChanOpen) { setNewChanOpen(false); return; }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [preview, playerOpen, promptView, impOpen, scriptEditOpen, grokAccOpen, gsAccOpen, imgRotOpen, flowAccOpen, ollamaOpen, vdOpen, dictOpen, styleEditOpen, chOpen, newChanOpen]);
   // 자막 옵션 변경 시 재생 중이면 즉시 반영
   useEffect(() => { if (playerOpen) applyCaptionStyle(); /* eslint-disable-next-line */ }, [capPos, capFine, capAlign, capSize, capYAlign, playerOpen]);
   // 헤더 생성설정 변경 → 현재 활성 큐 항목에 저장(디바운스). 대본별 개별 설정 보존.
@@ -1286,7 +1310,7 @@ export default function App() {
       </div>
 
       {preview && (
-        <div id="preview" className="show" onClick={(e) => { if (e.target.id === 'preview' || e.target.classList.contains('close')) setPreview(null); }}>
+        <div id="preview" className="show" onClick={(e) => { if (e.target.classList.contains('close')) setPreview(null); }}>
           <button className="close">✕</button>
           <div id="previewBody">
             {preview.kind === 'vid'
@@ -1298,7 +1322,7 @@ export default function App() {
         </div>
       )}
 
-      <div id="player" className={playerOpen ? 'show' : ''} onClick={(e) => { if (e.target.id === 'player') stopPlayer(); }}>
+      <div id="player" className={playerOpen ? 'show' : ''}>
         <div id="stage" className={isLf ? 'lf' : ''}>
           <div id="stageVisual" ref={stageVisualRef} />
           <div id="stageTitle" ref={stageTitleRef} />
@@ -1308,7 +1332,7 @@ export default function App() {
       </div>
 
       {newChanOpen && (
-        <div className="modal-bg show" onClick={(e) => { if (e.target.classList.contains('modal-bg')) setNewChanOpen(false); }}>
+        <div className="modal-bg show">
           <div className="modal-card" style={{ maxWidth: 420 }}>
             <h3>＋ 새 채널 추가</h3>
             <div className="meta" style={{ marginBottom: 8 }}>현재 채널 <b>「{presetName || '-'}」</b>의 설정을 복사해 새 채널을 만듭니다. 만든 뒤 편집창에서 세부 설정을 바꾸세요.</div>
@@ -1321,7 +1345,7 @@ export default function App() {
       )}
 
       {chOpen && ch && (
-        <div className="modal-bg show" onClick={(e) => { if (e.target.classList.contains('modal-bg')) setChOpen(false); }}>
+        <div className="modal-bg show">
           <div className="modal-card wide">
             <h3>⚙ 채널(프리셋) 편집 — {ch.name}</h3>
             <div className="frow"><label>시작 화면</label>
@@ -1389,7 +1413,7 @@ export default function App() {
       )}
 
       {styleEditOpen && (
-        <div className="modal-bg show" onClick={(e) => { if (e.target.classList.contains('modal-bg')) setStyleEditOpen(false); }}>
+        <div className="modal-bg show">
           <div className="modal-card wide" style={{ maxHeight: '82vh', display: 'flex', flexDirection: 'column' }}>
             <h3>🎨 이미지 스타일 편집</h3>
             <div className="meta" style={{ marginBottom: 8 }}>기본 스타일은 <b>읽기전용</b>(프롬프트 복사만 가능). 사용자 스타일은 이름·프롬프트 수정·삭제·순서변경 가능. 최종 이미지 프롬프트 = <b>선택한 스타일 + 대본 프롬프트</b>.</div>
@@ -1412,7 +1436,7 @@ export default function App() {
         </div>
       )}
       {dictOpen && (
-        <div className="modal-bg show" onClick={(e) => { if (e.target.classList.contains('modal-bg')) setDictOpen(false); }}>
+        <div className="modal-bg show">
           <div className="modal-card wide" style={{ maxHeight: '82vh', display: 'flex', flexDirection: 'column' }}>
             <h3>📖 발음사전 (TTS 교정)</h3>
             <div className="meta" style={{ marginBottom: 8 }}>TTS가 잘못 읽는 단어를 <b>발음대로</b> 교정합니다. <b>자막·대본은 그대로</b>이고 <b>음성 합성에만</b> 적용됩니다.
@@ -1441,8 +1465,8 @@ export default function App() {
         </div>
       )}
       {vdOpen && (
-        <div className="modal-bg show" onClick={(e) => { if (e.target.classList.contains('modal-bg')) closeVoiceDesign(); }}>
-          <div className="modal-card wide" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-bg show">
+          <div className="modal-card wide">
             <h3>🎨 보이스디자인 — 텍스트 설명으로 새 목소리</h3>
             <p className="meta" style={{ margin: '0 0 12px' }}>목소리를 글로 설명 → <b>생성</b>해서 들어보고 → 마음에 들면 <b>파일명을 입력해 저장</b>하면 참조음성 목록에 추가돼 어느 채널에서든 쓸 수 있습니다. (창을 닫으면 디자인 서버는 자동으로 꺼집니다)</p>
             <div className="frow" style={{ alignItems: 'flex-start' }}><label>목소리 설명</label>
@@ -1467,7 +1491,7 @@ export default function App() {
         </div>
       )}
       {ollamaOpen && ollama && (
-        <div className="modal-bg show" onClick={(e) => { if (e.target.classList.contains('modal-bg')) setOllamaOpen(false); }}>
+        <div className="modal-bg show">
           <div className="modal-card">
             <h3>⚙ Ollama LLM 설정 (프롬프트 자동작성)</h3>
             <div className="meta" style={{ marginBottom: 8 }}>GPU PC 의 Ollama 로 그룹 내용에 맞는 이미지 프롬프트를 <b>무료·자동</b> 생성합니다. 다른 PC/외부에선 <b>서버 주소</b>만 GPU PC 의 LAN/Tailscale IP 로 바꾸세요.</div>
@@ -1488,7 +1512,7 @@ export default function App() {
       )}
 
       {flowAccOpen && flowAcc && (
-        <div className="modal-bg show" onClick={(e) => { if (e.target.classList.contains('modal-bg')) setFlowAccOpen(false); }}>
+        <div className="modal-bg show">
           <div className="modal-card">
             <h3>⚙ Flow 멀티계정</h3>
             <div className="meta" style={{ marginBottom: 8 }}>계정마다 <b>🔑 로그인</b>으로 한 번씩 로그인하세요(쿠키 저장). 생성 시 <b>오늘 한도 안 찬 계정</b>부터 사용하고, 한도에 도달하면 다음 계정으로 넘어갑니다.</div>
@@ -1512,7 +1536,7 @@ export default function App() {
       )}
 
       {imgRotOpen && imgRot && (
-        <div className="modal-bg show" onClick={(e) => { if (e.target.classList.contains('modal-bg')) setImgRotOpen(false); }}>
+        <div className="modal-bg show">
           <div className="modal-card">
             <h3>⚙ 이미지 설정 (순환 · 나노바나나2 Lite)</h3>
             {giCfg ? (
@@ -1581,7 +1605,7 @@ export default function App() {
       )}
 
       {gsAccOpen && gsAcc && (
-        <div className="modal-bg show" onClick={(e) => { if (e.target.classList.contains('modal-bg')) setGsAccOpen(false); }}>
+        <div className="modal-bg show">
           <div className="modal-card">
             <h3>⚙ Genspark 멀티계정</h3>
             <div className="meta" style={{ marginBottom: 8 }}>계정마다 <b>🔑 로그인</b>으로 한 번씩 로그인(쿠키 저장). 생성 시 한도 안 찬 계정부터, 한도 도달 시 다음 계정으로.</div>
@@ -1605,7 +1629,7 @@ export default function App() {
       )}
 
       {grokAccOpen && grokAcc && (
-        <div className="modal-bg show" onClick={(e) => { if (e.target.classList.contains('modal-bg')) setGrokAccOpen(false); }}>
+        <div className="modal-bg show">
           <div className="modal-card">
             <h3>⚙ Grok(X) 멀티계정 — 영상</h3>
             <div className="meta" style={{ marginBottom: 8 }}>Grok 영상 생성용 X(트위터) 계정. <b>🔑 로그인</b>으로 한 번씩 로그인(쿠키 저장).</div>
@@ -1629,7 +1653,7 @@ export default function App() {
       )}
 
       {scriptEditOpen && (
-        <div className="modal-bg show" onClick={(e) => { if (e.target.classList.contains('modal-bg')) setScriptEditOpen(false); }}>
+        <div className="modal-bg show">
           <div className="modal-card" style={{ width: 820, maxWidth: '94vw' }}>
             <h3>✏ 대본 수정</h3>
             <div className="meta" style={{ marginBottom: 8 }}>대본 내용을 수정하고 [적용]하면 재파싱됩니다(원본 .md 파일도 갱신). ⚠ 기존 TTS/이미지는 초기화됩니다.</div>
@@ -1640,7 +1664,7 @@ export default function App() {
       )}
 
       {impOpen && (
-        <div className="modal-bg show" onClick={(e) => { if (e.target.classList.contains('modal-bg')) setImpOpen(false); }}>
+        <div className="modal-bg show">
           <div className="modal-card" style={{ maxWidth: 680 }}>
             <h3>📥 복사·붙여넣기로 프롬프트 만들기</h3>
             <div className="meta" style={{ marginBottom: 8 }}>GPU(Ollama)에 연결되면 <b>✍ 프롬프트작성</b>이 자동으로 처리합니다. <b>GPU가 꺼져 있거나 출장(원격)·다른 PC라 연결이 안 될 때</b>는 이 방법을 쓰세요: ① <b>📤 요청서 복사</b> → 챗GPT·클로드·제미나이 등 <b>아무 LLM</b>에 붙여넣기 → ② 받은 답변 전체를 아래에 붙여넣고 [적용].</div>
@@ -1652,7 +1676,7 @@ export default function App() {
       )}
 
       {promptView && (
-        <div className="modal-bg show" onClick={(e) => { if (e.target.classList.contains('modal-bg')) setPromptView(null); }}>
+        <div className="modal-bg show">
           <div className="modal-card" style={{ maxWidth: 620 }}>
             <h3>📝 {promptView.label} — 프롬프트 수정</h3>
             <div className="meta" style={{ marginBottom: 6 }}>대본 프롬프트를 직접 고쳐 이미지·비디오를 다시 만들 수 있습니다. 수정 후 아래 <b>생성</b> 버튼을 누르면 이 그룹만 새로 생성됩니다.</div>

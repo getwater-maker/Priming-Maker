@@ -84,6 +84,13 @@ export default function BookView({ dto, setDto, setStatus, logline }) {
   const [building, setBuilding] = useState(false);
   const [pageInfo, setPageInfo] = useState({ cur: 0, total: 0 });
   const [edit, setEdit] = useState(null); // { lineStart, lineEnd, text, file }
+  // 문단 수정창은 ESC 로도 닫는다(취소 버튼과 동일) — 앱 전체 팝업 닫기 규칙과 일관.
+  useEffect(() => {
+    if (!edit) return;
+    const onKey = (e) => { if (e.key === 'Escape') setEdit(null); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [edit]);
   const viewerRef = useRef(null);   // CoreViewer 인스턴스
   const viewportRef = useRef(null); // 뷰포트 DOM
   const loadedForRef = useRef('');  // 마지막으로 로드한 url (중복 로드 방지)
