@@ -58,6 +58,19 @@ ${para}
     const pageTxt = await win.locator('.bkpage').innerText();
     console.log('· 미리보기 조판 OK —', pageTxt.trim());
 
+    // 목차 쪽번호 — target-counter 가 해석돼 숫자가 나와야 한다('??' = anchor 불일치 회귀).
+    //   (미리보기 URL 에 쿼리 캐시버스터를 붙이면 vivliostyle 같은문서 판정이 깨져 '??' 가 남)
+    const tocTxt = await win.evaluate(() => {
+      const f = document.querySelector('.bkviewport');
+      const toc = f && f.contentDocument && f.contentDocument.querySelector('nav.toc');
+      return toc ? toc.innerText : '';
+    });
+    if (tocTxt) {
+      if (/\?\?/.test(tocTxt)) throw new Error('목차 쪽번호 미해석(??) — target-counter 회귀');
+      if (!/\d/.test(tocTxt.replace(/목차/g, ''))) throw new Error('목차에 쪽번호 숫자가 없음');
+      console.log('· 목차 쪽번호 해석 OK (?? 없음)');
+    }
+
     // 안정성 — 조판 완료 후 재조판 루프(깜빡임)가 없어야 한다.
     //   busy 표시("조판 중…")가 3초 동안 다시 켜지지 않는지 샘플링.
     let relayouts = 0;

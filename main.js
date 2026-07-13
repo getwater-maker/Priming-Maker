@@ -2779,7 +2779,13 @@ ipcMain.handle('book-preview', (_e, args = {}) => {
     });
     const dir = path.join(S.outRoot || bookOutRoot(S.scriptPath || 'book.md', S.preset), '_preview');
     fs.mkdirSync(dir, { recursive: true });
-    const htmlPath = path.join(dir, 'book.html');
+    // 조판마다 새 파일명 — URL 쿼리(?t=) 캐시버스터는 vivliostyle target-counter(목차 쪽번호)의
+    //   같은문서 판정을 깨뜨림(로드 URL 은 ?t= 포함, anchor 절대화는 쿼리 없음 → 불일치 → '??').
+    //   파일명 자체를 바꾸면 쿼리 없이도 항상 새 URL = 캐시 무효 + anchor 일치.
+    for (const f of fs.readdirSync(dir)) {
+      if (/^book.*\.html$/.test(f)) { try { fs.unlinkSync(path.join(dir, f)); } catch (_) {} }
+    }
+    const htmlPath = path.join(dir, `book-${Date.now()}.html`);
     fs.writeFileSync(htmlPath, html, 'utf8');
     return { url: 'media://' + encodeURIComponent(htmlPath), htmlPath };
   } catch (e) { log('미리보기 조판 실패: ' + e.message); return null; }

@@ -105,9 +105,10 @@ export default function BookView({ dto, setDto, setStatus, logline }) {
     setPreviewBusy(true); setStatus('조판 중…');
     try {
       const r = await api.bookPreview({ layout });
-      // 캐시 무효화 = 쿼리(?t=) — fragment(#t=)를 쓰면 문서 URL 에 프래그먼트가 남아
-      // 목차 target-counter 의 앵커(#ch-N) 해석이 깨져 쪽번호가 '??' 로 나오던 원인.
-      if (r && r.url) setPreviewUrl(r.url + '?t=' + Date.now());
+      // 캐시 무효화 = main 이 조판마다 새 파일명(book-<ts>.html)을 반환 — URL 에 쿼리(?t=)나
+      // 프래그먼트(#t=)를 붙이면 vivliostyle 의 같은문서 판정이 깨져 목차 target-counter
+      // 쪽번호가 '??' 로 나온다(로드 URL 은 쿼리 포함, anchor 절대화는 쿼리 없음 → 불일치).
+      if (r && r.url) setPreviewUrl(r.url);
       else { setPreviewBusy(false); setStatus('⚠ 미리보기 조판 실패 — 로그를 확인하세요'); } // 실패 시 '조판 중…' 고착 방지
     } catch (e) { logline('미리보기 오류: ' + e.message); setPreviewBusy(false); setStatus('⚠ 미리보기 오류 — 로그 확인'); }
   }, [loaded, layout]);
