@@ -323,11 +323,14 @@ function pageCss(o) {
   //   width:100% 무시하고 가운데 배치 — 실측). 판면 폭을 mm 로 명시해 text-align 이 작동하게 한다.
   const bodyW = o.trimW - m.inner - m.outer; // 판면(글상자) 폭
   const headerBoxes = (kind, align) => {
-    // 밑줄 간격: 글자는 밑줄에 붙고(vertical-align:bottom + padding 2pt), 밑줄과 본문 사이는
-    //   margin-bottom 7pt 로 띄운다(관행 — 이전엔 반대로 글자가 위·밑줄이 본문에 붙어 있었음).
-    const line = o.headerLine ? ' border-bottom: 0.4pt solid #cccccc; padding-bottom: 2pt; margin-bottom: 7pt;' : '';
-    if (kind === 'none' && !o.headerLine) return '';
-    const content = kind === 'none' ? '""' : rhContent(kind);
+    // 밑줄 = 상자 테두리(border-bottom)가 아니라 '글자 밑줄'(text-decoration) — 글자가 있을 때만
+    //   그려지므로 장 시작 페이지(first-except 로 러닝헤드 글자가 빔)엔 밑줄도 자동으로 안 나온다.
+    //   (border-bottom 은 내용이 비어도 빈 상자에 선을 그려 장 시작 페이지에 '떠 있는 줄'이 생겼음.)
+    const line = o.headerLine
+      ? ' text-decoration: underline; text-decoration-color: #cccccc; text-decoration-thickness: 0.4pt; text-underline-offset: 5pt; margin-bottom: 7pt;'
+      : '';
+    if (kind === 'none') return ''; // 러닝헤드 없음 = 상자·밑줄 모두 없음
+    const content = rhContent(kind);
     // 단일 @top-center 박스(판면 폭 명시) + text-align — 모든 정렬 공통.
     //   ⚠ @top-left 와 @top-center 를 함께 쓰면 두 박스가 공간을 나눠 가져 왼쪽 글이
     //   중앙으로 밀리는 충돌(실측) → 박스는 하나만 쓴다.
@@ -362,7 +365,9 @@ function pageCss(o) {
 @page front { @top-left { content: none; } @top-center { content: none; } @top-right { content: none; } @bottom-left { content: none; } @bottom-center { content: none; } @bottom-right { content: none; } }
 /* recto 강제로 생긴 백면 */
 @page :blank { @top-left { content: none; } @top-center { content: none; } @top-right { content: none; } @bottom-left { content: none; } @bottom-center { content: none; } @bottom-right { content: none; } }
-h2.chapter-title { string-set: chapter-title content(); }
+/* 러닝헤드 장제목 = 전체 원제(공백 포함) — h2 는 '제N회'를 .ch-no 로 쪼개 공백이 사라지므로
+   숨김 앵커(.ch-rh)의 원문에서 문자열을 뽑는다(예: "제16회 여포의 신궁, 전위의 최후"). */
+.ch-rh { string-set: chapter-title content(); display: none; }
 section.chapter h3 { string-set: sec-title content(); }
 .book-title-anchor { string-set: book-title content(); display: none; }
 .book-subtitle-anchor { string-set: book-subtitle content(); display: none; }
@@ -516,10 +521,11 @@ ${blocksHtml(s.blocks, book, ctx, srcAttr)}
     for (const c of p.chapters) {
       bodyParts.push(`<section class="chapter" id="ch-${c.num}">
 ${c.title ? (() => {
-        // 최종본 스타일: '제N회'와 제목을 2줄로 분리(중앙 정렬). 헤더 러닝타이틀은 content() 로 전체 텍스트 사용.
+        // 최종본 스타일: '제N회'와 제목을 2줄로 분리(중앙 정렬). 러닝헤드용 전체 원제는 숨김 앵커(.ch-rh)로.
         const mCh = /^(제\s*\d+\s*회)[.,]?\s*(.+)$/.exec(c.title);
         const inner = mCh ? `<span class="ch-no">${esc(mCh[1])}</span>${esc(mCh[2])}` : esc(c.title);
-        return `<h2 class="chapter-title"${o.sourceMap ? ` data-src-line="${c.lineStart}" data-src-end="${c.lineStart}"` : ''}>${inner}</h2>`;
+        return `<span class="ch-rh" aria-hidden="true">${esc(c.title)}</span>`
+          + `<h2 class="chapter-title"${o.sourceMap ? ` data-src-line="${c.lineStart}" data-src-end="${c.lineStart}"` : ''}>${inner}</h2>`;
       })() : ''}
 ${chapterBlocksHtml(c.blocks, book, ctx, srcAttr, o.specialKeywords)}
 </section>`);
