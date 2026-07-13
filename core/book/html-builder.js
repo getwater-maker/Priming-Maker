@@ -127,10 +127,60 @@ const COLOPHON_FIELDS = [
   ['copyright', 'ⓒ 저작권 문구'], ['legal', '무단복제 금지 문구'], ['exchange', '파본 교환 안내'],
 ];
 
+// [판권] 자유문 라벨 → 표(메타) 키 매핑 — 이 라벨로 시작하는 줄은 표에 이미 있으면 '되풀이'로 간주.
+const COLOPHON_LABEL_KEYS = [
+  [/^(원작|지은이|저자|글)\s+\S/, 'author'],
+  [/^(편역|편역자|편역이|옮긴이|역자|엮은이|번역)\s+\S/, 'translator'],
+  [/^(펴낸이|발행인)\s+\S/, 'issuer'],
+  [/^(펴낸곳|발행처|출판사)\s+\S/, 'publisher'],
+  [/^(발행일|초판|발행)\s+.*\d/, 'issueDate'], // \b 는 한글 경계 미인식 → \s+ 사용
+  [/^ISBN\b/i, 'isbn'],
+  [/^(정가|가격)\s+\S/, 'price'],
+  [/^부가기호\s+\S/, 'isbnAddon'],
+  [/^판형\s+\S/, 'trim'],
+  [/^(주소|주 소)\s+\S/, 'address'],
+  [/^(대표전화|전화)\s+\S/, 'phone'],
+  [/^팩스\s+\S/, 'fax'],
+  [/^홈페이지\s+\S/, 'homepage'],
+  [/^(이메일|email)\s+\S/i, 'email'],
+  [/^출판등록\s+\S/, 'regNo'],
+];
+// [판권] 자유문의 한 줄이 '표·제목·ⓒ에 이미 나온 정보를 되풀이한 것'인가?
+//   되풀이면 버리고(표가 대신 보여줌), 표에 없는 고유 정보(고지문 등)는 보존 → 무손실.
+function colophonLineRedundant(line, meta) {
+  const s = String(line || '').trim();
+  if (!s) return false;
+  const title = (meta.title || '').trim();
+  // 제목/부제 재기술 — cp-title 에 이미 있음
+  if (title && (s.replace(/\s/g, '') === title.replace(/\s/g, '')
+    || (s.includes(title) && s.length <= title.length + 30))) return true;
+  // ⓒ/© 저작권 줄 — 하단 cp-legal 이 자동 생성
+  if (/^(ⓒ|©|copyright)/i.test(s) && (meta.author || meta.translator || meta.copyright)) return true;
+  // 라벨+값 — 해당 메타가 표에 이미 있으면 중복(없으면 고유 정보라 보존)
+  for (const [re, key] of COLOPHON_LABEL_KEYS) {
+    if (re.test(s) && meta[key] != null && String(meta[key]).trim() !== '') return true;
+  }
+  return false;
+}
+// [판권] 섹션에서 되풀이 줄을 걸러 고지문만 남긴 사본을 반환(원본 모델 불변).
+function filterColophonSection(section, meta) {
+  if (!section || !Array.isArray(section.blocks)) return section;
+  const blocks = [];
+  for (const b of section.blocks) {
+    if (b && b.type === 'p' && typeof b.text === 'string') {
+      const kept = b.text.split('\n').filter((ln) => !colophonLineRedundant(ln, meta));
+      const txt = kept.join('\n').trim();
+      if (txt) blocks.push({ ...b, text: txt });
+    } else if (b) {
+      blocks.push(b); // 인용·시 등 비문단 블록은 그대로 보존
+    }
+  }
+  return { ...section, blocks };
+}
 // 판권지 — 사용자 확정 레이아웃(구 Book Publishing 앱 실물과 동일):
-//   하단 배치 · 책제목(볼드) · 「라벨 ｜ 값」 행을 3그룹(발행/발행처/ISBN·가격)으로 · 가는 구분선 ·
-//   자유문 고지([판권] 섹션 내용 — AI 활용·편집 저작권 등) · QR(중앙)+라벨 · ⓒ + 재사용 안내.
-//   자유문이 있어도 메타 행과 "병합"해 조판(예전엔 자유문이 전체를 대체 → ISBN 등 법정 항목 누락 위험).
+//   하단 배치 · 책제목(볼드) · 「라벨 ｜ 값」 행(발행/발행처/ISBN·가격) · 가는 구분선 ·
+//   고지문([판권] 자유문 중 표에 없는 줄만 — AI 활용·편집 저작권 등) · QR(중앙)+라벨 · ⓒ + 재사용 안내.
+//   Option 1(2026-07-13): 자유문이 표·제목·ⓒ를 되풀이하면 그 줄만 빼고 고지문만 남김(중복 제거·무손실).
 function colophonHtml(meta, ctx, isFront, section, book, srcAttr, fields) {
   const row = (label, v) => (v ? `<div class="cp-row"><span class="k">${esc(label)}</span><span class="sep">｜</span><span class="v">${esc(v)}</span></div>` : '');
   const g1 = [row('발행일', meta.issueDate), row('지은이', meta.author),
@@ -144,8 +194,9 @@ function colophonHtml(meta, ctx, isFront, section, book, srcAttr, fields) {
     + Object.entries(meta.extra || {}).map(([k, v]) => row(k, v)).join('');
   const groups = [g1, g2, g3].filter(Boolean).join('<div class="cp-gap"></div>');
 
-  const notes = (section && section.blocks && section.blocks.length)
-    ? `<hr class="cp-rule" /><div class="cp-notes">${blocksHtml(section.blocks, book, ctx, srcAttr)}</div>`
+  const fsec = filterColophonSection(section, meta);
+  const notes = (fsec && fsec.blocks && fsec.blocks.length)
+    ? `<hr class="cp-rule" /><div class="cp-notes">${blocksHtml(fsec.blocks, book, ctx, srcAttr)}</div>`
     : '';
 
   const qrIsImg = meta.qr && /\.(png|jpe?g|svg|webp)$/i.test(meta.qr);
