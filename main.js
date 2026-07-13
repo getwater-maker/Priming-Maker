@@ -3024,17 +3024,25 @@ ipcMain.handle('book-set-meta', (_e, args = {}) => {
   const { parseBookText } = require('./core/parsers/book-parser');
   let bodyStart = lines.findIndex((l) => /^#{2,6}\s+/.test(l.trim()) || /^===.*===$/.test(l.trim()));
   if (bodyStart < 0) bodyStart = lines.length;
-  let found = -1, hadArrow = false;
+  // 같은 표준키의 메타 줄을 전부 수집 — 과거 버그(H1 오판)로 중복 삽입된 원고도 자가 정리
+  const foundAll = []; // [{i, arrow}]
   for (let i = 0; i < bodyStart; i++) {
     const m = lines[i].trim().match(/^(>\s*)?([^:：#>\-*\s][^:：]{0,11})\s*[:：]/);
     if (!m) continue;
     const probe = parseBookText(`# t\n> ${m[2].trim()}: probe`, 't');
-    if (probe.meta[key] === 'probe') { found = i; hadArrow = !!m[1]; break; }
+    if (probe.meta[key] === 'probe') foundAll.push({ i, arrow: !!m[1] });
   }
+  // 파서는 '마지막 값 승리'이므로 마지막 줄을 갱신하고 나머지(중복)는 제거
+  const last = foundAll.length ? foundAll[foundAll.length - 1] : null;
+  const found = last ? last.i : -1;
+  const hadArrow = last ? last.arrow : false;
   // 파일의 메타 줄 스타일(평문/>)을 따라 기록 — 필수파일은 평문 유지
   const style = (arrow) => (arrow ? `> ${label}: ${value}` : `${label}: ${value}`);
-  if (value === '' && found >= 0) { lines.splice(found, 1); }
-  else if (found >= 0) { lines[found] = style(hadArrow); }
+  if (value === '' && found >= 0) { for (const f of foundAll.slice().reverse()) lines.splice(f.i, 1); }
+  else if (found >= 0) {
+    lines[found] = style(hadArrow);
+    for (const f of foundAll.slice(0, -1).reverse()) lines.splice(f.i, 1); // 중복 줄 정리
+  }
   else if (value !== '') {
     // 마지막 메타 줄(또는 H1) 다음에 삽입 — 스타일은 기존 메타 줄과 통일
     let at = 0; let anyArrow = !isMultiBook();
