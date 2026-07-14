@@ -862,7 +862,8 @@ async function runFlowImages(project, imagesDir, logger, styleId, onlyNums) {
   const cap = FlowAccounts.load().dailyCap;
   const acctTotal = FlowAccounts.list().accounts.length;
   const tried = new Set(); // 이번 호출에서 이미 시도한 계정 (Flow 계정 순환용)
-  const nextAcc = () => { const info = FlowAccounts.list(); return info.accounts.find((a) => a.available && !tried.has(a.id)) || null; };
+  // 라운드로빈: 마지막 사용 계정의 '다음'부터 — 단건 재생성을 연달아 눌러도 한 계정에 몰리지 않게 분산.
+  const nextAcc = () => FlowAccounts.pickNext(tried);
   let loopGuard = 0;
 
   // ── Flow 계정 내 순환 ── 남은 그룹이 있고 활성 계정이 있는 한, 계정을 바꿔가며 채운다.

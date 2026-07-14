@@ -180,15 +180,18 @@ class AntiDetect {
   }
 
   // run() 진입 시 호출 — 일일 한도 사전 체크
+  //   판정은 '현재 계정(프로필)'의 오늘 카운트 기준 — todayCount 는 모든 계정 합계라
+  //   멀티계정에선 금방 넘어 "계정 안전 주의"가 계정과 무관하게 뜨던 오해의 원인.
   checkDailyLimit() {
     const limit = this.dailyLimit;
-    const reached = limit > 0 && this.state.todayCount >= limit;
+    const mine = this.profileCount();
+    const reached = limit > 0 && mine >= limit;
     return {
       reached,
-      remaining: limit > 0 ? Math.max(0, limit - this.state.todayCount) : Infinity,
+      remaining: limit > 0 ? Math.max(0, limit - mine) : Infinity,
       shouldStop: reached && this.onLimitReached === 'stop',
-      todayCount: this.state.todayCount,
-      profileCount: this.profileCount(),   // 현재 계정의 오늘 횟수
+      todayCount: this.state.todayCount, // 전체 합계(참고 표시용)
+      profileCount: mine,                // 현재 계정의 오늘 횟수(판정 기준)
       limit,
     };
   }
@@ -197,13 +200,13 @@ class AntiDetect {
   // 경고는 인스턴스 라이프사이클 동안 첫 초과 시 한 번만 (이후 침묵)
   beforeNextGeneration() {
     if (!this.enabled || this.dailyLimit <= 0) return { proceed: true };
-    if (this.state.todayCount >= this.dailyLimit) {
+    if (this.profileCount() >= this.dailyLimit) {
       if (this.onLimitReached === 'stop') {
-        return { proceed: false, reason: `일일 한도 ${this.dailyLimit}회 도달 — 자동 중지` };
+        return { proceed: false, reason: `이 계정 일일 한도 ${this.dailyLimit}회 도달 — 자동 중지` };
       }
       if (this._dailyLimitWarned) return { proceed: true };
       this._dailyLimitWarned = true;
-      return { proceed: true, warn: `⚠️ 일일 한도 ${this.dailyLimit}회 초과 (현재 ${this.state.todayCount}회) — 계정 안전 주의` };
+      return { proceed: true, warn: `⚠️ 이 계정 일일 한도 ${this.dailyLimit}회 초과 (이 계정 ${this.profileCount()}회 · 오늘 전체 ${this.state.todayCount}회) — 계정 안전 주의` };
     }
     return { proceed: true };
   }

@@ -87,8 +87,19 @@ function markUsed(id, k = 1) {
   const n = (sameDay ? (e.n || 0) : 0) + (parseInt(k, 10) || 0);
   c.counts = c.counts || {};
   c.counts[id] = { date: _today(), n, ...(sameDay && e.cooldownUntil ? { cooldownUntil: e.cooldownUntil } : {}) };
+  c.lastUsedId = id; // 라운드로빈 포인터 — 다음 선택은 이 계정의 '다음'부터 (한 계정 몰림 방지)
   save(c);
   return n;
+}
+// 라운드로빈 다음 계정 — 마지막 사용 계정의 '다음'부터 순회하며 available 한 첫 계정.
+//   단건 재생성을 연달아 눌러도 계정 1→2→3→4→1… 로 분산. excludeIds = 이번 호출에서 이미 시도한 계정.
+function pickNext(excludeIds) {
+  const c = load();
+  const accs = _accounts(c);
+  const skip = excludeIds instanceof Set ? excludeIds : new Set(excludeIds || []);
+  const idx = accs.findIndex((a) => a.id === c.lastUsedId);
+  const ordered = idx >= 0 ? [...accs.slice(idx + 1), ...accs.slice(0, idx + 1)] : accs;
+  return ordered.find((a) => _available(c, a.id) && !skip.has(a.id)) || null;
 }
 // 오늘 사용 가능한 첫 계정 반환(한도 미도달 + 쿨다운 아님). 전부 불가면 null.
 function pickActive() {
@@ -120,4 +131,4 @@ function resetToday(id) {
   return list();
 }
 
-module.exports = { load, save, list, add, remove, rename, setCap, markUsed, pickActive, cooldown, resetToday, FILE };
+module.exports = { load, save, list, add, remove, rename, setCap, markUsed, pickNext, pickActive, cooldown, resetToday, FILE };

@@ -7,6 +7,17 @@
 **편별 Vrew 4.0.1 .vrew 파일**을 자동 생성하는 Electron 앱. PrimingFlow(D:\PrimingFlow)의 엔진을
 복사·재활용한 독립 클론.
 
+## 🖼 Flow 계정 라운드로빈 + 한도 판정 계정별로 (2026-07-14, v0.2.20)
+> 증상: 그룹 단건 재생성마다 항상 같은(첫 가용) Flow 계정만 사용 → 한 계정에 시도 집중.
+>       "일일 한도 50회 초과 (현재 92회)" 경고는 **모든 계정 합계**(anti-detect todayCount) 기준이라 오해 유발.
+- **라운드로빈**: flow-accounts 에 `lastUsedId` 저장(markUsed 시) + `pickNext(excludeIds)` —
+  마지막 사용 계정의 '다음'부터 available(캡·쿨다운 통과) 계정 선택. runFlowImages nextAcc 가 pickNext 사용.
+  단건 재생성 연타 → 계정 1→2→3→4→1… 분산 (단위검증: 순환·제외·캡소진·쿨다운 4케이스).
+- **한도 판정 계정별**: anti-detect checkDailyLimit/beforeNextGeneration 판정을 todayCount(전역)에서
+  **profileCount(현재 계정 성공 장수)** 기준으로. 메시지 "이 계정 N회 · 오늘 전체 M회" 병기.
+  flow-engine 로그도 동일 표기. stop 모드가 멀쩡한 계정을 차단하던 여지 제거.
+- ⚠ anti-detect profiles 카운트는 '성공 장수'(registerGenerationSuccess) — 시도 카운트 아님(사용자 정책).
+
 ## 🖼 이미지 한도 쿨다운 기억 + 재생성 직렬 큐 (2026-07-14, v0.2.19)
 > 증상 ① 그룹 단건 재생성마다 한도 걸린 Genspark 에 접속→제출→한도 확인→Flow 폴백(시간 낭비)
 >      ② 재생성 진행 중 다른 그룹 생성 클릭 → 같은 브라우저를 잡아 먼저 작업이 죽음("Target page ... closed")

@@ -360,15 +360,15 @@ class FlowAutomator {
     });
     const limitCheck = this.antiDetect.checkDailyLimit();
     if (limitCheck.shouldStop) {
-      this.log(`[!] 일일 한도 ${limitCheck.todayCount}/${limitCheck.limit}회 도달 — 자동 중지 모드로 진행 차단`);
+      this.log(`[!] 이 계정 일일 한도 ${limitCheck.profileCount}/${limitCheck.limit}회 도달 — 자동 중지 모드로 진행 차단`);
       this.send('done', { success: 0, total: paragraphs.length, outputDir, blocked: true });
       return;
     }
     if (limitCheck.reached) {
-      this.log(`⚠️ 일일 한도 ${limitCheck.todayCount}/${limitCheck.limit}회 도달 — 경고만 (계속 진행)`);
+      this.log(`⚠️ 이 계정 일일 한도 ${limitCheck.profileCount}/${limitCheck.limit}회 도달 (오늘 전체 ${limitCheck.todayCount}회) — 경고만 (계속 진행)`);
     } else if (this.antiDetect.enabled) {
       const remain = limitCheck.limit > 0 ? `· 남은 한도 ${limitCheck.remaining}회` : '· 무제한';
-      this.log(`[안티디텍션] 강도 "${this.antiDetect.preset}" · 오늘 ${limitCheck.todayCount}회 ${remain}`);
+      this.log(`[안티디텍션] 강도 "${this.antiDetect.preset}" · 이 계정 오늘 ${limitCheck.profileCount}회 (전체 ${limitCheck.todayCount}회) ${remain}`);
     } else {
       this.log(`[안티디텍션] 비활성화 (기존 동작 유지)`);
     }
