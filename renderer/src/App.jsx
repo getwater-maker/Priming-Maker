@@ -110,6 +110,7 @@ export default function App() {
   const [status, setStatus] = useState('');
   const [autoSavedAt, setAutoSavedAt] = useState(0); // 마지막 자동저장 시각(ms)
   const [appVersion, setAppVersion] = useState(''); // 앱 버전 (타이틀 표시)
+  const [gsCool, setGsCool] = useState(null); // Genspark 한도 쿨다운 {until, label} — 재설정 시각(재시작해도 유지)
   const [logText, setLogText] = useState('');
   const [logCollapsed, setLogCollapsed] = useState(true); // 최소화로 시작 — 로그바 클릭 시 펼침
 
@@ -1118,6 +1119,13 @@ export default function App() {
   }, [preview, playerOpen, promptView, impOpen, scriptEditOpen, grokAccOpen, gsAccOpen, imgRotOpen, flowAccOpen, ollamaOpen, vdOpen, dictOpen, styleEditOpen, chOpen, newChanOpen]);
   // 자막 옵션 변경 시 재생 중이면 즉시 반영
   useEffect(() => { if (playerOpen) applyCaptionStyle(); /* eslint-disable-next-line */ }, [capPos, capFine, capAlign, capSize, capYAlign, playerOpen]);
+  // Genspark 한도 쿨다운(재설정 시각) — 마운트 시 + 60초마다 조회. 저장값(json)을 읽으므로 앱 재시작해도 유지.
+  useEffect(() => {
+    let alive = true;
+    const tick = () => { api.gensparkCooldown().then((r) => { if (alive) setGsCool(r); }).catch(() => {}); };
+    tick(); const iv = setInterval(tick, 60000);
+    return () => { alive = false; clearInterval(iv); };
+  }, []);
   // 헤더 생성설정 변경 → 현재 활성 큐 항목에 저장(디바운스). 대본별 개별 설정 보존.
   useEffect(() => {
     const aid = queue && queue[mode] ? queue[mode].activeId : null;
@@ -1197,6 +1205,12 @@ export default function App() {
             {loaded && (
               <span className="autosave-ind" title="작업은 자동으로 수시 저장됩니다. 같은 대본을 다시 열면 이어서 작업할 수 있어요.">
                 {autoSavedAt ? `✓ 자동저장 ${new Date(autoSavedAt).toLocaleTimeString()}` : '자동저장 켜짐'}
+              </span>
+            )}
+            {gsCool && gsCool.until > 0 && (
+              <span title={`Genspark 이미지가 5시간 한도에 도달했습니다. ${gsCool.label} 이후 자동으로 다시 시도합니다. 그 전까지는 Genspark 에 접속하지 않고 Flow 등 다른 엔진으로 생성합니다. 앱을 껐다 켜도 이 시각은 유지됩니다.`}
+                style={{ marginLeft: 8, padding: '3px 9px', borderRadius: 6, background: '#fde8e8', color: '#a3352b', fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap' }}>
+                ⏸ Genspark 재설정 {gsCool.label}
               </span>
             )}
           </div>

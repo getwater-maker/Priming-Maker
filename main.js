@@ -393,6 +393,18 @@ ipcMain.handle('add-genspark-account', (_e, label) => { require('./core/genspark
 ipcMain.handle('remove-genspark-account', (_e, id) => { require('./core/genspark-accounts').remove(id); return require('./core/genspark-accounts').list(); });
 ipcMain.handle('rename-genspark-account', (_e, args = {}) => { require('./core/genspark-accounts').rename(args.id, args.label); return require('./core/genspark-accounts').list(); });
 ipcMain.handle('set-genspark-cap', (_e, n) => { require('./core/genspark-accounts').setCap(n); return require('./core/genspark-accounts').list(); });
+// Genspark 한도 쿨다운(재설정 시각) 조회 — 한도 감지 시 기억한 재설정 시각을 UI 에 표시.
+//   genspark-accounts.json(cooldowns)에 영속되므로 앱 재시작해도 유지. 여러 계정이면 가장 이른(먼저 풀리는) 시각.
+ipcMain.handle('genspark-cooldown', () => {
+  try {
+    const GsAcc = require('./core/genspark-accounts');
+    const accs = (GsAcc.list().accounts) || [];
+    const times = accs.map((a) => GsAcc.cooldownUntil(a.id)).filter((t) => t > 0);
+    if (!times.length) return { until: 0, label: '' };
+    const until = Math.min(...times);
+    return { until, label: fmtClock(until) };
+  } catch { return { until: 0, label: '' }; }
+});
 ipcMain.handle('genspark-login', async (_e, args = {}) => {
   const accId = (args && args.accId) || 'default';
   log(`🔑 Genspark 로그인 (${accId}) — 열린 크롬에서 직접 로그인하세요 (쿠키 저장됨)`);

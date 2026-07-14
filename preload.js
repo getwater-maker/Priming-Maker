@@ -74,6 +74,7 @@ contextBridge.exposeInMainWorld('api', {
   selectQueueItem: (id) => ipcRenderer.invoke('select-queue-item', { id }),
   removeQueueItem: (id) => ipcRenderer.invoke('remove-queue-item', { id }),
   setQueueSettings: (settings, keepChannel) => ipcRenderer.invoke('set-queue-settings', { settings, keepChannel: !!keepChannel }),
+  gensparkCooldown: () => ipcRenderer.invoke('genspark-cooldown'),
   saveQueue: () => ipcRenderer.invoke('save-queue'),
   loadQueue: () => ipcRenderer.invoke('load-queue'),
   runBatch: (args) => ipcRenderer.invoke('run-batch', args),
