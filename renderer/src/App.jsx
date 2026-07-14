@@ -111,6 +111,7 @@ export default function App() {
   const [autoSavedAt, setAutoSavedAt] = useState(0); // 마지막 자동저장 시각(ms)
   const [appVersion, setAppVersion] = useState(''); // 앱 버전 (타이틀 표시)
   const [gsCool, setGsCool] = useState(null); // Genspark 한도 쿨다운 {until, label} — 재설정 시각(재시작해도 유지)
+  const [gsBatch, setGsBatch] = useState(null); // 나노바나나2 배치 상태 {hasJob, job} — 현재 대본의 미회수 배치
   const [logText, setLogText] = useState('');
   const [logCollapsed, setLogCollapsed] = useState(true); // 최소화로 시작 — 로그바 클릭 시 펼침
 
@@ -1126,6 +1127,27 @@ export default function App() {
     tick(); const iv = setInterval(tick, 60000);
     return () => { alive = false; clearInterval(iv); };
   }, []);
+  // 나노바나나2 배치 — 현재 대본에 미회수 배치가 있는지 조회(엔진=gemini·대본 바뀔 때)
+  const refreshBatch = () => { api.geminiBatchStatus().then(setGsBatch).catch(() => {}); };
+  useEffect(() => { if (imgEngine === 'gemini') refreshBatch(); else setGsBatch(null); /* eslint-disable-next-line */ }, [imgEngine, ftitle]);
+  async function submitBatch() {
+    setStatus('🌙 배치 제출 중…');
+    try {
+      const r = await api.geminiBatchSubmit({ styleId: styleId || null });
+      if (r && r.ok) { setStatus(`🌙 배치 제출 완료 — ${r.count}장 (몇 시간 뒤 📥 회수)`); refreshBatch(); }
+      else setStatus('배치 제출 실패: ' + ((r && r.error) || ''));
+    } catch (e) { logline('배치 제출 오류: ' + e.message); }
+  }
+  async function retrieveBatch() {
+    setStatus('📥 배치 회수 확인 중…');
+    try {
+      const r = await api.geminiBatchRetrieve();
+      if (!r || !r.ok) { setStatus('배치 회수: ' + ((r && r.error) || '실패')); return; }
+      if (!r.done) { setStatus(`⏳ 배치 진행 중 (${r.state}) — 잠시 뒤 다시 회수`); return; }
+      if (r.dto) { setDto(r.dto); setFtitle(r.dto.fileTitle || ''); }
+      setStatus(`📥 배치 회수 완료 — ${r.saved || 0}장 저장`); refreshBatch();
+    } catch (e) { logline('배치 회수 오류: ' + e.message); }
+  }
   // 헤더 생성설정 변경 → 현재 활성 큐 항목에 저장(디바운스). 대본별 개별 설정 보존.
   useEffect(() => {
     const aid = queue && queue[mode] ? queue[mode].activeId : null;
@@ -1240,6 +1262,10 @@ export default function App() {
             </select>
             <button className="ghost" title="이미지 순환 순서·계정 · 나노바나나 키/모델 설정" onClick={openImgRotation}>⚙</button>
             <button disabled={!loaded} title="프롬프트 있는 그룹의 이미지 생성 (이미 있는 그룹은 건너뜀)" onClick={() => runImg(null)}>🖼 이미지</button>
+            {imgEngine === 'gemini' && (<>
+              <button className="ghost" disabled={!loaded} title="나노바나나2 Lite 배치 제출 — 표준가의 50%로 이미지 생성을 예약합니다. 결과는 몇 시간 뒤(최대 24h)에 나오며 「📥 배치회수」로 가져옵니다. 앱을 껐다 켜도 유지됩니다." onClick={submitBatch}>🌙 배치제출</button>
+              <button className="ghost" disabled={!loaded} title="제출한 배치 결과를 회수합니다. 완료됐으면 이미지를 가져와 매핑, 아직이면 진행 상태를 알려줍니다." onClick={retrieveBatch}>📥 배치회수{gsBatch && gsBatch.hasJob ? ' ●' : ''}</button>
+            </>)}
           </span>
           <span className="hgroup">
             <span className="glabel">③ 비디오</span>

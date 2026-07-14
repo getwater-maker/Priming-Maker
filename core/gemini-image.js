@@ -69,4 +69,58 @@ async function generateImageToFile({ prompt, aspect, outPathNoExt, key, model })
 
 function hasKey() { return !!geminiKey(); }
 
-module.exports = { generateImage, generateImageToFile, loadConfig, saveConfig, hasKey, CFG_PATH, DEFAULTS };
+// ── 배치 모드 (Gemini Batch API, 인라인 요청) — 50% 저렴, 최대 24h(보통 2~4h). 제출→회수 분리 ──
+//   requests: [{ key, prompt, aspect }]. 입력(프롬프트)은 작아 인라인으로 충분(<20MB).
+async function submitBatch({ requests, model, key, sendAspect, displayName, timeoutMs = 180000 }) {
+  key = key || geminiKey();
+  if (!key) return { ok: false, error: 'Gemini API 키 없음 (⚙에서 설정)' };
+  if (!requests || !requests.length) return { ok: false, error: '요청이 비어있음' };
+  const cfg = loadConfig();
+  model = model || cfg.model;
+  const useAspect = sendAspect != null ? sendAspect : cfg.sendAspect;
+  const inline = requests.map((r) => {
+    const genCfg = { responseModalities: ['IMAGE'] };
+    if (useAspect && r.aspect) genCfg.imageConfig = { aspectRatio: r.aspect };
+    return { request: { contents: [{ parts: [{ text: String(r.prompt || '') }] }], generationConfig: genCfg }, metadata: { key: String(r.key) } };
+  });
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:batchGenerateContent?key=${encodeURIComponent(key)}`;
+  const body = { batch: { display_name: (displayName || 'priming-batch').slice(0, 120), input_config: { requests: { requests: inline } } } };
+  try {
+    const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(timeoutMs) });
+    const txt = await res.text(); let j = {}; try { j = JSON.parse(txt); } catch {}
+    if (!res.ok) return { ok: false, error: `Gemini batch ${res.status}: ${(j.error && j.error.message) || txt.slice(0, 200)}` };
+    const name = j.name || (j.metadata && j.metadata.name);
+    if (!name) return { ok: false, error: '배치 name 없음: ' + txt.slice(0, 200) };
+    return { ok: true, batchName: name, model, count: inline.length };
+  } catch (e) { return { ok: false, error: String((e && e.message) || e) }; }
+}
+
+// 배치 상태 조회 + (완료 시) 결과 이미지 추출. { ok, state, done, results:[{key, ok, buffer, ext}|{key, ok:false, error}] }
+async function checkBatch({ batchName, key, timeoutMs = 180000 }) {
+  key = key || geminiKey();
+  if (!key) return { ok: false, error: 'Gemini API 키 없음' };
+  const url = `https://generativelanguage.googleapis.com/v1beta/${batchName}?key=${encodeURIComponent(key)}`;
+  try {
+    const res = await fetch(url, { headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(timeoutMs) });
+    const txt = await res.text(); let j = {}; try { j = JSON.parse(txt); } catch {}
+    if (!res.ok) return { ok: false, error: `Gemini batch status ${res.status}: ${(j.error && j.error.message) || txt.slice(0, 200)}` };
+    const state = (j.metadata && j.metadata.state) || j.state || (j.done ? 'JOB_STATE_SUCCEEDED' : 'JOB_STATE_RUNNING');
+    const done = /SUCCEEDED|FAILED|CANCELLED|EXPIRED/i.test(state);
+    const results = [];
+    const inlined = (j.response && (j.response.inlinedResponses || j.response.inlineResponses)) || [];
+    for (let i = 0; i < inlined.length; i++) {
+      const item = inlined[i] || {};
+      const k = (item.metadata && item.metadata.key) || item.key || String(i);
+      if (item.error) { results.push({ key: k, ok: false, error: item.error.message || 'error' }); continue; }
+      const parts = ((((item.response || {}).candidates || [])[0] || {}).content || {}).parts || [];
+      const img = parts.find((p) => p.inlineData && p.inlineData.data);
+      if (!img) { results.push({ key: k, ok: false, error: '이미지 응답 없음' }); continue; }
+      const mime = img.inlineData.mimeType || 'image/png';
+      const ext = /jpe?g/i.test(mime) ? 'jpg' : (/webp/i.test(mime) ? 'webp' : 'png');
+      results.push({ key: k, ok: true, buffer: Buffer.from(img.inlineData.data, 'base64'), ext });
+    }
+    return { ok: true, state, done, results };
+  } catch (e) { return { ok: false, error: String((e && e.message) || e) }; }
+}
+
+module.exports = { generateImage, generateImageToFile, submitBatch, checkBatch, loadConfig, saveConfig, hasKey, CFG_PATH, DEFAULTS };

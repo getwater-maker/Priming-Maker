@@ -360,6 +360,75 @@ ipcMain.handle('set-image-rotation', (_e, patch) => require('./core/image-rotati
 ipcMain.handle('get-gemini-image-config', () => { try { return require('./core/gemini-image').loadConfig(); } catch { return {}; } });
 ipcMain.handle('set-gemini-image-config', (_e, patch) => { try { return require('./core/gemini-image').saveConfig(patch || {}); } catch (e) { return { error: String((e && e.message) || e) }; } });
 
+// ── 나노바나나2 Lite 배치(Batch API) — 제출/회수 분리. 활성 대본 기준. 50% 저렴, 결과는 몇 시간 뒤. ──
+function _aspectFor(pr) { return pr.aspect === '9:16' ? '9:16' : (pr.aspect === '1:1' ? '1:1' : '16:9'); }
+ipcMain.handle('gemini-batch-submit', async (_e, args = {}) => {
+  if (!S.parsed || !S.parsed.projects) return { ok: false, error: '대본을 먼저 여세요.' };
+  const GI = require('./core/gemini-image');
+  if (!GI.hasKey()) return { ok: false, error: 'Gemini API 키 없음 — ⚙ 채널편집에서 Gemini 키를 넣으세요.' };
+  const styleId = args.styleId || null;
+  const stylePrompt = styleId ? (require('./core/style-store').getPrompt(styleId) || '') : '';
+  const requests = []; const items = [];
+  for (const pr of S.parsed.projects) {
+    for (const g of pr.groups) {
+      if (g.imagePrompt && g.imagePrompt.trim() && !hasVisual(g)) {
+        const key = `s${pr.shortsNum}g${g.num}`;
+        requests.push({ key, prompt: (stylePrompt ? stylePrompt + ', ' : '') + g.imagePrompt, aspect: _aspectFor(pr) });
+        items.push({ key, shortsNum: pr.shortsNum, groupNum: g.num });
+      }
+    }
+  }
+  if (!requests.length) return { ok: false, error: '배치로 만들 이미지가 없습니다 (이미 다 있음).' };
+  log(`🌙 배치 제출 중… ${requests.length}장 (나노바나나2 Lite API)`);
+  const r = await GI.submitBatch({ requests, displayName: (S.parsed.fileTitle || 'priming') });
+  if (!r.ok) { log('배치 제출 실패: ' + r.error); return r; }
+  require('./core/gemini-batch-store').add({
+    batchName: r.batchName, model: r.model, scriptPath: S.scriptPath, outRoot: S.outRoot,
+    title: S.parsed.fileTitle || '', items, styleId, count: r.count, state: 'JOB_STATE_PENDING',
+    submittedAt: Date.now(), collected: false,
+  });
+  log(`🌙 배치 제출 완료 — ${r.count}장 (${r.batchName}). 몇 시간 뒤 「📥 배치 회수」로 가져오세요. (앱 껐다 켜도 유지)`);
+  return { ok: true, batchName: r.batchName, count: r.count };
+});
+ipcMain.handle('gemini-batch-status', () => {
+  try {
+    const BS = require('./core/gemini-batch-store');
+    const job = S.scriptPath ? BS.pendingForScript(S.scriptPath) : null;
+    return { hasJob: !!job, job: job ? { count: job.count, state: job.state, submittedAt: job.submittedAt } : null };
+  } catch { return { hasJob: false }; }
+});
+ipcMain.handle('gemini-batch-retrieve', async () => {
+  if (!S.parsed || !S.scriptPath) return { ok: false, error: '대본을 먼저 여세요.' };
+  const BS = require('./core/gemini-batch-store'); const GI = require('./core/gemini-image');
+  const job = BS.pendingForScript(S.scriptPath);
+  if (!job) return { ok: false, error: '이 대본으로 제출한 배치가 없습니다.' };
+  log(`📥 배치 상태 확인… (${job.title || job.batchName})`);
+  const c = await GI.checkBatch({ batchName: job.batchName });
+  if (!c.ok) { log('배치 상태 확인 실패: ' + c.error); return { ok: false, error: c.error }; }
+  BS.update(job.batchName, { state: c.state });
+  if (!c.done) { log(`⏳ 배치 진행 중: ${c.state} — 잠시 뒤 다시 회수해 주세요.`); return { ok: true, done: false, state: c.state }; }
+  if (!/SUCCEEDED/i.test(c.state)) { log(`⚠ 배치 종료 상태: ${c.state} (실패/취소/만료)`); BS.update(job.batchName, { collected: true }); return { ok: true, done: true, state: c.state, saved: 0 }; }
+  const byKey = {}; job.items.forEach((it) => { byKey[it.key] = it; });
+  let saved = 0;
+  for (const r of c.results) {
+    const it = byKey[r.key]; if (!it) continue;
+    if (!r.ok) { log(`  ✗ ${r.key}: ${r.error}`); continue; }
+    try {
+      const dir = shortsDirs(job.outRoot, it.shortsNum).media;
+      fs.mkdirSync(dir, { recursive: true });
+      const out = path.join(dir, `${String(it.groupNum).padStart(2, '0')}.${r.ext}`);
+      fs.writeFileSync(out, r.buffer); saved++;
+      const pr = S.parsed.projects.find((p) => p.shortsNum === it.shortsNum);
+      const g = pr && pr.groups.find((x) => x.num === it.groupNum);
+      if (g) { g.imagePath = out; g.imageStatus = 'done'; }
+    } catch (e) { log(`  저장 실패 ${r.key}: ${e.message}`); }
+  }
+  BS.update(job.batchName, { state: c.state, collected: true, collectedAt: Date.now(), saved });
+  log(`📥 배치 회수 완료 — ${saved}/${job.count}장 저장·매핑`);
+  storeActive(); pushDtoUpdate();
+  return { ok: true, done: true, state: c.state, saved, dto: P.toDTO(S.parsed) };
+});
+
 // LoRA 데이터셋 수집 설정 — Genspark/Flow 이미지를 학습용으로 적립
 ipcMain.handle('get-lora-collect', () => { const L = require('./core/lora-collect'); return { ...L.load(), count: L.count() }; });
 ipcMain.handle('set-lora-collect', (_e, patch) => { const L = require('./core/lora-collect'); const c = L.save(patch || {}); return { ...c, count: L.count() }; });
