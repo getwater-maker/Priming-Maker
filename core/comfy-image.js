@@ -20,8 +20,9 @@ const DEFAULTS = {
   baseUrl: 'http://127.0.0.1:8188',
   cloud: false,
   apiKey: '',
-  workflowPath: '',        // z-image 등 "저장(API 포맷)" JSON 경로 (필수)
-  promptNodeId: '',        // 빈값=CLIPTextEncode(text) 자동탐지
+  workflowPath: '',        // 현재 활성 워크플로 "저장(API 포맷)" JSON 경로 (필수)
+  workflows: [],           // 저장된 워크플로 목록 [{name, path}] — 드롭다운으로 전환(z-image/Krea2 등)
+  promptNodeId: '',        // 빈값=CLIPTextEncode(계열) 또는 text 입력 노드 자동탐지
   widthNodeId: '',         // 빈값=width·height 가진 latent 노드 자동탐지
   heightNodeId: '',
   sendDims: true,          // 프로젝트 비율에 맞춰 해상도 주입(끄면 워크플로 기본 해상도 사용)
@@ -91,7 +92,10 @@ class ComfyImage {
     if (wf.nodes && !wf['1'] && typeof wf.nodes === 'object') throw new Error('UI 포맷 워크플로입니다. ComfyUI 에서 "저장(API 포맷)"으로 저장하세요.');
     const graph = JSON.parse(JSON.stringify(wf));
     if (positive) {
-      const pId = this.promptNodeId || Object.keys(graph).find((id) => graph[id].class_type === 'CLIPTextEncode' && 'text' in (graph[id].inputs || {}));
+      // CLIPTextEncode 계열(FLUX/Krea 포함) 우선 → 없으면 text 문자열 입력 가진 첫 노드(범용 폴백)
+      const pId = this.promptNodeId
+        || Object.keys(graph).find((id) => /CLIPTextEncode/i.test(graph[id].class_type || '') && 'text' in (graph[id].inputs || {}))
+        || Object.keys(graph).find((id) => typeof (graph[id].inputs || {}).text === 'string');
       if (pId && graph[pId] && graph[pId].inputs) graph[pId].inputs.text = String(positive);
     }
     if (this.sendDims) {

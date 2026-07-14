@@ -369,7 +369,7 @@ ipcMain.handle('set-comfy-image-config', (_e, patch) => { try { return require('
 ipcMain.handle('pick-comfy-workflow', async () => {
   const r = await dialog.showOpenDialog(win, { properties: ['openFile'], filters: [{ name: 'ComfyUI API 워크플로', extensions: ['json'] }] });
   if (r.canceled || !r.filePaths[0]) return null;
-  return require('./core/comfy-image').saveConfig({ workflowPath: r.filePaths[0] });
+  return { path: r.filePaths[0] }; // 목록 등록·이름·활성 지정은 렌더러가 setComfyImageConfig 로 처리
 });
 ipcMain.handle('test-comfy-image', async () => {
   try { const CI = require('./core/comfy-image'); const eng = new CI.ComfyImage(CI.loadConfig(), log); const ok = await eng.health(); log(ok ? `✓ ComfyUI 연결 OK (${eng.baseUrl})` : `✗ ComfyUI 연결 실패 (${eng.baseUrl})`); return { ok, baseUrl: eng.baseUrl }; }

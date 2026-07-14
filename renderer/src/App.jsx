@@ -1164,14 +1164,33 @@ export default function App() {
   const refreshBatch = () => { api.geminiBatchStatus().then(setGsBatch).catch(() => {}); };
   useEffect(() => { if (imgEngine === 'gemini') refreshBatch(); else setGsBatch(null); /* eslint-disable-next-line */ }, [imgEngine, ftitle]);
   async function openComfy() {
-    try { const c = await api.getComfyImageConfig(); setComfyCfg(c || {}); setComfyOpen(true); }
-    catch (e) { logline('ComfyUI 설정 읽기 오류: ' + e.message); }
+    try {
+      const c = (await api.getComfyImageConfig()) || {};
+      // 마이그레이션: 목록이 비었는데 기존 단일 workflowPath 가 있으면 목록 첫 항목으로 편입
+      if ((!c.workflows || !c.workflows.length) && c.workflowPath) {
+        c.workflows = [{ name: (c.workflowPath.split(/[\\/]/).pop() || '워크플로').replace(/\.json$/i, ''), path: c.workflowPath }];
+      }
+      setComfyCfg(c); setComfyOpen(true);
+    } catch (e) { logline('ComfyUI 설정 읽기 오류: ' + e.message); }
   }
   async function saveComfyCfg(patch) {
     try { const c = await api.setComfyImageConfig(patch); setComfyCfg(c); } catch (e) { logline('ComfyUI 설정 저장 오류: ' + e.message); }
   }
   async function pickComfyWf() {
-    try { const c = await api.pickComfyWorkflow(); if (c) setComfyCfg(c); } catch (e) { logline('워크플로 선택 오류: ' + e.message); }
+    try {
+      const r = await api.pickComfyWorkflow();
+      if (!r || !r.path) return;
+      const guess = (r.path.split(/[\\/]/).pop() || '워크플로').replace(/\.json$/i, '');
+      const name = (window.prompt('이 워크플로 이름 (예: z-image, Krea2)', guess) || guess).trim();
+      const list = Array.isArray(comfyCfg.workflows) ? comfyCfg.workflows.slice() : [];
+      const i = list.findIndex((w) => w.path === r.path);
+      if (i >= 0) list[i] = { name, path: r.path }; else list.push({ name, path: r.path });
+      await saveComfyCfg({ workflows: list, workflowPath: r.path });
+    } catch (e) { logline('워크플로 추가 오류: ' + e.message); }
+  }
+  async function removeComfyWf() {
+    const list = (comfyCfg.workflows || []).filter((w) => w.path !== comfyCfg.workflowPath);
+    await saveComfyCfg({ workflows: list, workflowPath: list[0] ? list[0].path : '' });
   }
   async function testComfy() {
     setStatus('ComfyUI 연결 확인 중…');
@@ -1675,8 +1694,8 @@ export default function App() {
       {comfyOpen && comfyCfg && (
         <div className="modal-bg show" onClick={(e) => { if (e.target.classList.contains('modal-bg')) setComfyOpen(false); }}>
           <div className="modal-card">
-            <h3>⚙ ComfyUI 이미지 (z-image · 로컬/클라우드)</h3>
-            <div className="meta" style={{ marginBottom: 8 }}>ComfyUI 에서 z-image 워크플로를 <b>「저장(API 포맷)」</b>한 JSON 을 지정하세요. 헤더 이미지 방식을 <b>ComfyUI(z-image)</b>로 고르면 이 설정으로 이미지를 만듭니다.</div>
+            <h3>⚙ ComfyUI 이미지 (z-image · Krea2 등 · 로컬/클라우드)</h3>
+            <div className="meta" style={{ marginBottom: 8 }}>ComfyUI 에서 워크플로를 <b>「저장(API 포맷)」</b>한 JSON 을 <b>＋추가</b>로 여러 개 등록하고, 드롭다운으로 골라 쓰세요(z-image·Krea2 등). 헤더 이미지 방식을 <b>ComfyUI(z-image)</b>로 고르면 선택된 워크플로로 이미지를 만듭니다.</div>
             <div className="frow"><label>주소</label>
               <input style={{ flex: 1 }} value={comfyCfg.baseUrl || ''} placeholder="http://127.0.0.1:8188"
                 onChange={(e) => setComfyCfg({ ...comfyCfg, baseUrl: e.target.value })} onBlur={() => saveComfyCfg({ baseUrl: (comfyCfg.baseUrl || '').trim() })} /></div>
@@ -1688,8 +1707,15 @@ export default function App() {
                 onChange={(e) => setComfyCfg({ ...comfyCfg, apiKey: e.target.value })} onBlur={() => saveComfyCfg({ apiKey: (comfyCfg.apiKey || '').trim() })} />}
             </div>
             <div className="frow"><label>워크플로</label>
-              <input readOnly style={{ flex: 1 }} value={comfyCfg.workflowPath || ''} placeholder="z-image API 포맷 JSON (필수)" title={comfyCfg.workflowPath || ''} />
-              <button className="ghost" onClick={pickComfyWf}>📂 선택</button></div>
+              <select style={{ flex: 1 }} value={comfyCfg.workflowPath || ''} title={comfyCfg.workflowPath || ''} onChange={(e) => saveComfyCfg({ workflowPath: e.target.value })}>
+                {(!comfyCfg.workflows || !comfyCfg.workflows.length) && <option value="">— 없음 (＋추가로 z-image·Krea2 등록) —</option>}
+                {(comfyCfg.workflows || []).map((w) => <option key={w.path} value={w.path}>{w.name}</option>)}
+              </select>
+              <button className="ghost" title="ComfyUI '저장(API 포맷)' JSON 추가 (이름 지정)" onClick={pickComfyWf}>＋ 추가</button>
+              <button className="ghost" title="선택된 워크플로를 목록에서 제거" disabled={!comfyCfg.workflowPath} onClick={removeComfyWf}>🗑</button></div>
+            <div className="frow"><label>프롬프트 노드</label>
+              <input style={{ flex: 1 }} value={comfyCfg.promptNodeId || ''} placeholder="빈값=자동(CLIPTextEncode). 프롬프트가 안 들어가면 노드ID 지정"
+                onChange={(e) => setComfyCfg({ ...comfyCfg, promptNodeId: e.target.value })} onBlur={() => saveComfyCfg({ promptNodeId: (comfyCfg.promptNodeId || '').trim() })} /></div>
             <div className="frow"><label>타임아웃(초)</label>
               <input type="number" style={{ width: 90 }} value={comfyCfg.timeoutSec || 300}
                 onChange={(e) => setComfyCfg({ ...comfyCfg, timeoutSec: e.target.value })} onBlur={() => saveComfyCfg({ timeoutSec: parseInt(comfyCfg.timeoutSec, 10) || 300 })} />
