@@ -115,6 +115,8 @@ export default function App() {
   const [gsBatch, setGsBatch] = useState(null); // 나노바나나2 배치 상태 {hasJob, job} — 현재 대본의 미회수 배치
   const [comfyOpen, setComfyOpen] = useState(false);
   const [comfyCfg, setComfyCfg] = useState(null); // ComfyUI(z-image) 설정
+  const [cvidOpen, setCvidOpen] = useState(false);
+  const [cvidCfg, setCvidCfg] = useState(null); // ComfyUI 비디오(i2v Wan/LTX) 설정
   const [findOpen, setFindOpen] = useState(false);       // 화면 내 검색 바(Ctrl+F)
   const [findText, setFindText] = useState('');
   const [findRes, setFindRes] = useState({ active: 0, total: 0 });
@@ -335,7 +337,7 @@ export default function App() {
     // 제거된 엔진(comfy 이미지) → 순환으로 마이그레이션.
     if (s.imgEngine != null) setImgEngine(s.imgEngine === 'comfy' ? 'rotate' : s.imgEngine);
     // 제거된 영상 엔진(flow/comfy/wan)·레거시(grok10) → grok 으로 마이그레이션.
-    if (s.videoEngine != null) setVideoEngine(['flow', 'comfy', 'wan', 'grok10'].includes(s.videoEngine) ? 'grok' : s.videoEngine);
+    if (s.videoEngine != null) setVideoEngine(['flow', 'wan', 'grok10'].includes(s.videoEngine) ? 'grok' : s.videoEngine);
     if (s.vidFrom != null) setVidFrom(s.vidFrom);
     if (s.vidTo != null) setVidTo(s.vidTo);
     if (s.flowVideoModel != null) setFlowVideoModel(s.flowVideoModel);
@@ -1172,6 +1174,11 @@ export default function App() {
       if ((!c.workflows || !c.workflows.length) && c.workflowPath) c.workflows = [{ name: (c.workflowPath.split(/[\\/]/).pop() || '워크플로').replace(/\.json$/i, ''), path: c.workflowPath }];
       setComfyCfg(c);
     }).catch(() => {});
+    api.getComfyVideoConfig().then((c) => {
+      if (!c) return;
+      if ((!c.workflows || !c.workflows.length) && c.workflowPath) c.workflows = [{ name: (c.workflowPath.split(/[\\/]/).pop() || '워크플로').replace(/\.json$/i, ''), path: c.workflowPath }];
+      setCvidCfg(c);
+    }).catch(() => {});
   }, []);
   // 나노바나나2 배치 — 현재 대본에 미회수 배치가 있는지 조회(엔진=gemini·대본 바뀔 때)
   const refreshBatch = () => { api.geminiBatchStatus().then(setGsBatch).catch(() => {}); };
@@ -1217,6 +1224,41 @@ export default function App() {
     setStatus('ComfyUI 연결 확인 중…');
     try { const r = await api.testComfyImage(); setStatus(r && r.ok ? `✓ ComfyUI 연결 OK (${r.baseUrl})` : `✗ ComfyUI 연결 실패${r && r.error ? ': ' + r.error : ''}`); }
     catch (e) { logline('연결 테스트 오류: ' + e.message); }
+  }
+  // ── ComfyUI 비디오(i2v Wan/LTX) ──
+  async function openCvid() {
+    try {
+      const c = (await api.getComfyVideoConfig()) || {};
+      if ((!c.workflows || !c.workflows.length) && c.workflowPath) c.workflows = [{ name: (c.workflowPath.split(/[\\/]/).pop() || '워크플로').replace(/\.json$/i, ''), path: c.workflowPath }];
+      setCvidCfg(c); setCvidOpen(true);
+    } catch (e) { logline('ComfyUI 비디오 설정 읽기 오류: ' + e.message); }
+  }
+  async function saveCvidCfg(patch) {
+    try { const c = await api.setComfyVideoConfig(patch); setCvidCfg(c); } catch (e) { logline('ComfyUI 비디오 설정 저장 오류: ' + e.message); }
+  }
+  async function pickCvidWf() {
+    try {
+      const r = await api.pickComfyVideoWorkflow();
+      if (!r || !r.path) return;
+      const guess = (r.path.split(/[\\/]/).pop() || '워크플로').replace(/\.json$/i, '');
+      const name = (window.prompt('이 i2v 워크플로 이름 (예: Wan2.2 5B, LTX)', guess) || guess).trim();
+      const list = Array.isArray(cvidCfg.workflows) ? cvidCfg.workflows.slice() : [];
+      const i = list.findIndex((w) => w.path === r.path);
+      if (i >= 0) list[i] = { name, path: r.path }; else list.push({ name, path: r.path });
+      await saveCvidCfg({ workflows: list, workflowPath: r.path });
+    } catch (e) { logline('i2v 워크플로 추가 오류: ' + e.message); }
+  }
+  async function removeCvidWf() {
+    const list = (cvidCfg.workflows || []).filter((w) => w.path !== cvidCfg.workflowPath);
+    await saveCvidCfg({ workflows: list, workflowPath: list[0] ? list[0].path : '' });
+  }
+  // 비디오 드롭다운에서 ComfyUI i2v 워크플로별 항목(comfy::<path>) 선택 → 엔진=comfy::path
+  function onPickVideoEngine(val) {
+    if (val && val.indexOf('comfy::') === 0) {
+      const p = val.slice(7);
+      setVideoEngine(p ? `comfy::${p}` : 'comfy');
+      if (p) saveCvidCfg({ workflowPath: p }); else openCvid();
+    } else setVideoEngine(val);
   }
   async function submitBatch() {
     setStatus('🌙 배치 제출 중…');
@@ -1379,11 +1421,17 @@ export default function App() {
           </span>
           <span className="hgroup">
             <span className="glabel">③ 비디오</span>
-            <select title="i2v 비디오 엔진" value={videoEngine} onChange={(e) => setVideoEngine(e.target.value)}>
-              <option value="grok">Grok (브라우저)</option><option value="grok-api">Grok API (유료)</option><option value="none">없음 (이미지만)</option>
+            <select title="i2v 비디오 엔진" value={videoEngine === 'comfy' ? `comfy::${(cvidCfg && cvidCfg.workflowPath) || ''}` : videoEngine} onChange={(e) => onPickVideoEngine(e.target.value)}>
+              <option value="grok">Grok (브라우저)</option>
+              <option value="grok-api">Grok API (유료)</option>
+              {(cvidCfg && cvidCfg.workflows && cvidCfg.workflows.length)
+                ? cvidCfg.workflows.map((w) => <option key={w.path} value={`comfy::${w.path}`}>ComfyUI: {w.name}</option>)
+                : <option value="comfy::">ComfyUI i2v (워크플로 추가)</option>}
+              <option value="none">없음 (이미지만)</option>
             </select>
             {videoEngine === 'grok' && <button className="ghost" title="Grok(X) 멀티계정 등록·로그인·한도" onClick={openGrokAcc}>⚙ 계정</button>}
             {videoEngine === 'grok-api' && <button className="ghost" title="xAI API 키 입력 (console.x.ai) — 사용량 과금" onClick={setXaiKey}>⚙ 키</button>}
+            {(videoEngine === 'comfy' || (typeof videoEngine === 'string' && videoEngine.indexOf('comfy::') === 0)) && <button className="ghost" title="ComfyUI i2v 설정 — 로컬/클라우드·API키·워크플로(Wan/LTX)" onClick={openCvid}>⚙ ComfyUI</button>}
             {videoEngine === 'none'
               ? <span className="meta" title="비디오 없이 이미지만으로 .vrew 생성 (켄번스)">이미지만(켄번스)</span>
               : (<>
@@ -1771,6 +1819,51 @@ export default function App() {
               <button onClick={testComfy}>🔌 연결 테스트</button>
               <span style={{ flex: 1 }} />
               <button className="ghost" onClick={() => setComfyOpen(false)}>닫기</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {cvidOpen && cvidCfg && (
+        <div className="modal-bg show">
+          <div className="modal-card wide">
+            <h3>⚙ ComfyUI 비디오 i2v (Wan 2.2 · LTX 등 · 로컬/클라우드)</h3>
+            <div className="meta" style={{ marginBottom: 8 }}>그룹 이미지를 업로드해 <b>이미지→비디오</b>로 만듭니다. ComfyUI 에서 i2v 워크플로를 <b>「저장(API 포맷)」</b>한 JSON 을 <b>＋추가</b>로 등록하세요. (Wan 2.2는 <b>Load Image → start_image</b> 연결이 있어야 하며, 없으면 앱이 자동 주입을 시도합니다.)</div>
+            <div className="frow"><label>주소</label>
+              <input style={{ flex: 1 }} value={cvidCfg.baseUrl || ''} placeholder="http://127.0.0.1:8188"
+                onChange={(e) => setCvidCfg({ ...cvidCfg, baseUrl: e.target.value })} onBlur={() => saveCvidCfg({ baseUrl: (cvidCfg.baseUrl || '').trim() })} /></div>
+            <div className="frow">
+              <label className="chk" style={{ display: 'flex', gap: 4, alignItems: 'center', width: 'auto' }}>
+                <input type="checkbox" style={{ width: 'auto' }} checked={!!cvidCfg.cloud} onChange={(e) => { const v = e.target.checked; setCvidCfg({ ...cvidCfg, cloud: v }); saveCvidCfg({ cloud: v }); }} /> 클라우드(comfy.org)
+              </label>
+              {cvidCfg.cloud && <input type="password" style={{ flex: 1 }} placeholder="🔑 X-API-Key (Standard+ 구독)" value={cvidCfg.apiKey || ''}
+                onChange={(e) => setCvidCfg({ ...cvidCfg, apiKey: e.target.value })} onBlur={() => saveCvidCfg({ apiKey: (cvidCfg.apiKey || '').trim() })} />}</div>
+            <div className="frow"><label>워크플로</label>
+              <select style={{ flex: 1 }} value={cvidCfg.workflowPath || ''} title={cvidCfg.workflowPath || ''} onChange={(e) => saveCvidCfg({ workflowPath: e.target.value })}>
+                {(!cvidCfg.workflows || !cvidCfg.workflows.length) && <option value="">— 없음 (＋추가로 Wan/LTX 등록) —</option>}
+                {(cvidCfg.workflows || []).map((w) => <option key={w.path} value={w.path}>{w.name}</option>)}
+              </select>
+              <button className="ghost" title="ComfyUI '저장(API 포맷)' i2v JSON 추가 (이름 지정)" onClick={pickCvidWf}>＋ 추가</button>
+              <button className="ghost" title="선택된 워크플로를 목록에서 제거" disabled={!cvidCfg.workflowPath} onClick={removeCvidWf}>🗑</button></div>
+            <div className="frow"><label>최대 길이(초)</label>
+              <input type="number" style={{ width: 70 }} value={cvidCfg.videoMaxSec != null ? cvidCfg.videoMaxSec : 8} title="0=제한없음(TTS 길이 그대로). 클라우드 GPU 시간/비용 상한"
+                onChange={(e) => setCvidCfg({ ...cvidCfg, videoMaxSec: e.target.value })} onBlur={() => saveCvidCfg({ videoMaxSec: Math.max(0, parseInt(cvidCfg.videoMaxSec, 10) || 0) })} />
+              <label style={{ width: 'auto' }}>fps</label>
+              <input type="number" style={{ width: 60 }} value={cvidCfg.fps || 24} title="워크플로 CreateVideo fps 와 맞추기 (초→프레임 변환)"
+                onChange={(e) => setCvidCfg({ ...cvidCfg, fps: e.target.value })} onBlur={() => saveCvidCfg({ fps: parseInt(cvidCfg.fps, 10) || 24 })} />
+              <label style={{ width: 'auto' }}>타임아웃(초)</label>
+              <input type="number" style={{ width: 80 }} value={cvidCfg.timeoutSec || 600}
+                onChange={(e) => setCvidCfg({ ...cvidCfg, timeoutSec: e.target.value })} onBlur={() => saveCvidCfg({ timeoutSec: parseInt(cvidCfg.timeoutSec, 10) || 600 })} /></div>
+            <div className="frow"><label>프롬프트 노드</label>
+              <input style={{ flex: 1 }} value={cvidCfg.promptNodeId || ''} placeholder="빈값=자동(Positive CLIPTextEncode)"
+                onChange={(e) => setCvidCfg({ ...cvidCfg, promptNodeId: e.target.value })} onBlur={() => saveCvidCfg({ promptNodeId: (cvidCfg.promptNodeId || '').trim() })} />
+              <label className="chk" style={{ display: 'flex', gap: 4, alignItems: 'center', width: 'auto' }}>
+                <input type="checkbox" style={{ width: 'auto' }} checked={cvidCfg.sendDims !== false} onChange={(e) => { const v = e.target.checked; setCvidCfg({ ...cvidCfg, sendDims: v }); saveCvidCfg({ sendDims: v }); }} /> 비율에 맞춰 해상도
+              </label></div>
+            <div className="meta" style={{ marginTop: 4 }}>클라우드 = <b>구독 GPU 시간(정액)</b>으로 실행 — 영상당 추가 과금 없음. 로컬 RTX 3060은 Wan 2.2 <b>5B</b> 권장(12GB). i2v는 그룹 이미지가 있어야 동작합니다.</div>
+            <div className="mbtns" style={{ marginTop: 10 }}>
+              <button onClick={async () => { setStatus('ComfyUI 비디오 연결 확인 중…'); try { const r = await api.testComfyVideo(); setStatus(r && r.ok ? `✓ 연결 OK (${r.baseUrl})` : `✗ 연결 실패${r && r.error ? ': ' + r.error : ''}`); } catch (e) { logline(e.message); } }}>🔌 연결 테스트</button>
+              <span style={{ flex: 1 }} />
+              <button className="ghost" onClick={() => setCvidOpen(false)}>닫기</button>
             </div>
           </div>
         </div>

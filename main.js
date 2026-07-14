@@ -375,6 +375,18 @@ ipcMain.handle('test-comfy-image', async () => {
   try { const CI = require('./core/comfy-image'); const eng = new CI.ComfyImage(CI.loadConfig(), log); const ok = await eng.health(); log(ok ? `✓ ComfyUI 연결 OK (${eng.baseUrl})` : `✗ ComfyUI 연결 실패 (${eng.baseUrl})`); return { ok, baseUrl: eng.baseUrl }; }
   catch (e) { return { ok: false, error: String((e && e.message) || e) }; }
 });
+// ComfyUI 비디오(i2v) 설정 — Wan 2.2 / LTX 등 워크플로 (이미지 comfy 와 별개 config)
+ipcMain.handle('get-comfy-video-config', () => { try { return require('./core/comfy-video').loadConfig(); } catch { return {}; } });
+ipcMain.handle('set-comfy-video-config', (_e, patch) => { try { return require('./core/comfy-video').saveConfig(patch || {}); } catch (e) { return { error: String((e && e.message) || e) }; } });
+ipcMain.handle('pick-comfy-video-workflow', async () => {
+  const r = await dialog.showOpenDialog(win, { properties: ['openFile'], filters: [{ name: 'ComfyUI API 워크플로', extensions: ['json'] }] });
+  if (r.canceled || !r.filePaths[0]) return null;
+  return { path: r.filePaths[0] };
+});
+ipcMain.handle('test-comfy-video', async () => {
+  try { const CV = require('./core/comfy-video'); const eng = new CV.ComfyVideo(CV.loadConfig(), log); const ok = await eng.health(); log(ok ? `✓ ComfyUI 비디오 연결 OK (${eng.baseUrl})` : `✗ ComfyUI 비디오 연결 실패 (${eng.baseUrl})`); return { ok, baseUrl: eng.baseUrl }; }
+  catch (e) { return { ok: false, error: String((e && e.message) || e) }; }
+});
 
 // ── 나노바나나2 Lite 배치(Batch API) — 제출/회수 분리. 활성 대본 기준. 50% 저렴, 결과는 몇 시간 뒤. ──
 function _aspectFor(pr) { return pr.aspect === '9:16' ? '9:16' : (pr.aspect === '1:1' ? '1:1' : '16:9'); }
@@ -1154,9 +1166,41 @@ async function runGrokApiVideos(pr, mediaDir, onlyNums) {
   }
 }
 
-// 비디오 생성 디스패치 — 'grok-api'=REST API, 그 외('grok'/'grok10')=브라우저 Grok.
+// ComfyUI i2v (Wan 2.2 5B / LTX 등) — 이미지 있는 그룹만. workflowPath 지정 시 그 워크플로 사용.
+async function runComfyVideos(pr, mediaDir, onlyNums, workflowPath) {
+  const CV = require('./core/comfy-video');
+  const cfg = CV.loadConfig();
+  if (workflowPath) cfg.workflowPath = workflowPath;
+  if (!cfg.workflowPath || !fs.existsSync(cfg.workflowPath)) { log('⚠ ComfyUI 비디오 워크플로가 없습니다 — ⚙ ComfyUI 비디오에서 등록하세요.'); return; }
+  const targets = pr.groups.filter((g) => (g.imagePath && fs.existsSync(g.imagePath)) && (!onlyNums || onlyNums.includes(g.num)) && !(g.videoPath && fs.existsSync(g.videoPath)));
+  if (!targets.length) { log('🎬 ComfyUI i2v — 영상화할(이미지 있는) 그룹이 없습니다'); return; }
+  const eng = new CV.ComfyVideo(cfg, log);
+  const wfName = (cfg.workflows.find((w) => w.path === cfg.workflowPath) || {}).name || path.basename(cfg.workflowPath);
+  log(`🎬 ${prLabel(pr)} 비디오 생성 (ComfyUI ${cfg.cloud ? '클라우드' : '로컬'}·${wfName} · ${targets.length}개 그룹)…`);
+  for (const g of targets) {
+    if (S.abort) { log('⏹ 중단됨'); break; }
+    const sents = pr.getSentencesOfGroup(g);
+    const totalSec = sents.reduce((a, s) => a + (s.ttsDurationSec || 0), 0);
+    const durationSec = totalSec > 0 ? Math.ceil(totalSec) : 5;
+    const prompt = (g.videoPrompt && g.videoPrompt.trim()) || (g.motionNote && g.motionNote.trim()) || 'natural slow motion, subtle camera movement, cinematic';
+    const out = path.join(mediaDir, `${String(g.num).padStart(2, '0')}.mp4`);
+    g.videoStatus = 'generating'; pushDtoUpdate();
+    log(`  · G${g.num} → ComfyUI i2v (${Math.min(durationSec, cfg.videoMaxSec > 0 ? cfg.videoMaxSec : durationSec)}초, ${pr.aspect})…`);
+    const r = await eng.imageToVideo({ imagePath: g.imagePath, prompt, aspect: pr.aspect, durationSec, outputPath: out, abortSignal: () => S.abort });
+    if (r.success) { g.videoPath = r.videoPath; g.videoStatus = 'done'; log(`  ✓ G${g.num} 완료`); }
+    else { g.videoStatus = 'fail'; log(`  ✗ G${g.num} 실패: ${r.error}`); if (/중단/.test(r.error || '')) break; }
+    pushDtoUpdate();
+  }
+}
+
+// 비디오 생성 디스패치 — 'grok-api'=REST API, 'comfy[::path]'=ComfyUI i2v, 그 외('grok'/'grok10')=브라우저 Grok.
 async function genGroupVideos(pr, mediaDir, onlyNums, videoEngine) {
   if (videoEngine === 'grok-api') { await runGrokApiVideos(pr, mediaDir, onlyNums); return {}; }
+  if (videoEngine === 'comfy' || (typeof videoEngine === 'string' && videoEngine.indexOf('comfy::') === 0)) {
+    const wf = videoEngine.indexOf('comfy::') === 0 ? videoEngine.slice(7) : '';
+    await runComfyVideos(pr, mediaDir, onlyNums, wf);
+    return {};
+  }
   return P.generateHookVideosGrok(pr, mediaDir, log, () => S.abort, 0, pushDtoUpdate, onlyNums, grokDurOf(videoEngine));
 }
 
@@ -1558,7 +1602,7 @@ ipcMain.handle('video-build', async (_e, args = {}) => {
     }
     try {
       {
-        if (engine !== 'grok-api') log(`🎬 ${prLabel(pr)} 비디오 생성 (Grok ${grokDurOf(engine) === 'auto' ? '자동 6/10초' : grokDurOf(engine)}${rangeLbl})…`);
+        if (engine === 'grok' || engine === 'grok10') log(`🎬 ${prLabel(pr)} 비디오 생성 (Grok ${grokDurOf(engine) === 'auto' ? '자동 6/10초' : grokDurOf(engine)}${rangeLbl})…`);
         const vr = await genGroupVideos(pr, videoDir, onlyNums, engine);
         if (vr && vr.limitReached) { S.grokLimit = { reset: (vr && vr.reset) || '' }; recordGrokCooldown(vr); S.abort = true; log('⛔ Grok 요청 한도 도달 — 작업을 멈춥니다'); }
       }

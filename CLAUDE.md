@@ -7,6 +7,24 @@
 **편별 Vrew 4.0.1 .vrew 파일**을 자동 생성하는 Electron 앱. PrimingFlow(D:\PrimingFlow)의 엔진을
 복사·재활용한 독립 클론.
 
+## 🎬 ComfyUI i2v 비디오 엔진 (Wan 2.2 5B / LTX · 로컬·클라우드) 추가 (2026-07-15, v0.2.38)
+> 요청: Grok API 무료크레딧 불가+건당 과금 → ComfyUI i2v 로 전환. 사용자가 `D:\Priming-Maker\comfy\video_wan2_2_5B_ti2v.json`
+> 다운(일단 comfy 클라우드). 이미지 comfy 경로(comfy-image.js)를 비디오용으로 확장.
+- **엔진** `core/comfy-video.js`(구 comfy-engine.js i2v 로직 이식): `/upload/image` 로 그룹 이미지 업로드 →
+  워크플로 LoadImage.image=업로드명. **LoadImage 없으면 자동 주입** → i2v latent 노드(class_type ~/ImageToVideo/)의
+  `start_image` 에 연결(이 Wan JSON 은 LoadImage 미포함이라 필수). 프롬프트(Positive CLIPTextEncode, Negative 회피)·
+  길이(초→`length`=4n+1 프레임, fps·videoMaxSec 반영)·해상도(비율)·seed 주입 → /prompt → 폴링 → /view 다운로드(webm→mp4 ffmpeg).
+  로컬(/history)·클라우드(cloud.comfy.org /api + X-API-Key + extra_data.api_key_comfy_org, /job/{id}/status→/jobs/{id}) 양쪽.
+- **설정** `~/.priming-maker/comfy-video-config.json`(이미지 comfy 와 별개): baseUrl·cloud·apiKey·workflows[]·workflowPath·
+  fps(24)·videoMaxSec(8, 0=제한없음)·sendDims·timeoutSec. IPC get/set-comfy-video-config·pick-comfy-video-workflow·test-comfy-video.
+  초기값 직접 기록(cloud=true, 이미지 config 의 apiKey 복사, Wan2.2 5B 등록).
+- **비디오 드롭다운**: Grok(브라우저)/Grok API(유료)/**ComfyUI: <워크플로>**(value `comfy::<path>`)/없음. comfy 선택 시 「⚙ ComfyUI」 →
+  설정 모달(로컬·클라우드/키/워크플로 추가·전환/최대길이·fps/타임아웃). main `runComfyVideos`(이미지 있는 그룹만 i2v,
+  duration=그룹 TTS초, 출력 media-N/NN.mp4) + `genGroupVideos` 디스패치(grok-api / comfy[::path] / 브라우저 Grok).
+- comfy 는 브라우저 아님 → grokVideoPipeline=false → make-all 순차 3단계 실행. 저장된 videoEngine 정규화에서 'comfy' 제외 유지.
+- ⚠ **실측 필요**: ① comfy.org 클라우드가 `/api/upload/image`(i2v 소스 업로드)를 받는지 ② Wan22ImageToVideoLatent 에
+  start_image 자동주입이 실제로 먹는지(안 되면 ComfyUI 에서 Load Image→start_image 연결 후 API 포맷 재저장) ③ 클라우드 length·해상도 한계.
+
 ## 🎬 Grok Imagine 비디오 API (image→video, 브라우저 없이) 추가 (2026-07-15, v0.2.36)
 > 요청: "비디오에서 Grok api를 이용할수 있도록 해줘". 브라우저 Grok(SuperGrok 구독, 주간한도)과 별개의 **유료 사용량 과금** API.
 - **엔진** `core/grok-api.js`: xAI 공식 REST. 제출 `POST https://api.x.ai/v1/videos/generations`
