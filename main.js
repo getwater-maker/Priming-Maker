@@ -359,6 +359,18 @@ ipcMain.handle('set-image-rotation', (_e, patch) => require('./core/image-rotati
 // Nano Banana 2 Lite (Gemini 이미지 API) 설정 — 모델명·비율전송
 ipcMain.handle('get-gemini-image-config', () => { try { return require('./core/gemini-image').loadConfig(); } catch { return {}; } });
 ipcMain.handle('set-gemini-image-config', (_e, patch) => { try { return require('./core/gemini-image').saveConfig(patch || {}); } catch (e) { return { error: String((e && e.message) || e) }; } });
+// ── ComfyUI(z-image) 이미지 설정 — 로컬/클라우드 공용. 워크플로 JSON(API 포맷) 지정. ──
+ipcMain.handle('get-comfy-image-config', () => { try { return require('./core/comfy-image').loadConfig(); } catch { return {}; } });
+ipcMain.handle('set-comfy-image-config', (_e, patch) => { try { return require('./core/comfy-image').saveConfig(patch || {}); } catch (e) { return { error: String((e && e.message) || e) }; } });
+ipcMain.handle('pick-comfy-workflow', async () => {
+  const r = await dialog.showOpenDialog(win, { properties: ['openFile'], filters: [{ name: 'ComfyUI API 워크플로', extensions: ['json'] }] });
+  if (r.canceled || !r.filePaths[0]) return null;
+  return require('./core/comfy-image').saveConfig({ workflowPath: r.filePaths[0] });
+});
+ipcMain.handle('test-comfy-image', async () => {
+  try { const CI = require('./core/comfy-image'); const eng = new CI.ComfyImage(CI.loadConfig(), log); const ok = await eng.health(); log(ok ? `✓ ComfyUI 연결 OK (${eng.baseUrl})` : `✗ ComfyUI 연결 실패 (${eng.baseUrl})`); return { ok, baseUrl: eng.baseUrl }; }
+  catch (e) { return { ok: false, error: String((e && e.message) || e) }; }
+});
 
 // ── 나노바나나2 Lite 배치(Batch API) — 제출/회수 분리. 활성 대본 기준. 50% 저렴, 결과는 몇 시간 뒤. ──
 function _aspectFor(pr) { return pr.aspect === '9:16' ? '9:16' : (pr.aspect === '1:1' ? '1:1' : '16:9'); }
@@ -1035,6 +1047,27 @@ async function runGeminiImages(project, imagesDir, logger, styleId, onlyNums) {
   }
 }
 
+// ComfyUI(z-image 등) — 로컬 또는 comfy.org 클라우드. imgEngine==='comfy' 일 때. 워크플로 JSON(API 포맷) 필요.
+async function runComfyImages(project, imagesDir, logger, styleId, onlyNums) {
+  const CI = require('./core/comfy-image');
+  const cfg = CI.loadConfig();
+  if (!cfg.workflowPath) { logger('⚠ ComfyUI 워크플로 미지정 — ⚙ ComfyUI 에서 z-image "저장(API 포맷)" JSON 을 지정하세요.'); return; }
+  const eng = new CI.ComfyImage(cfg, logger);
+  const stylePrompt = styleId ? (require('./core/style-store').getPrompt(styleId) || '') : '';
+  const targets = project.groups.filter((g) => g.imagePrompt && g.imagePrompt.trim() && !hasVisual(g) && (!onlyNums || onlyNums.includes(g.num)));
+  if (!targets.length) return;
+  try { fs.mkdirSync(imagesDir, { recursive: true }); } catch {}
+  logger(`🧩 ComfyUI ${cfg.cloud ? '클라우드' : '로컬'}(z-image) — ${targets.length}장 생성 (${eng.baseUrl})`);
+  for (const g of targets) {
+    if (S.abort) { logger('⏹ 중단됨'); break; }
+    const prompt = P.buildImagePrompt(stylePrompt, g.imagePrompt);
+    const base = path.join(imagesDir, String(g.num).padStart(2, '0') + '.png');
+    const r = await eng.textToImage({ prompt, aspect: project.aspect || '9:16', outputPath: base, abortSignal: () => S.abort });
+    if (r.success) { g.imagePath = r.imagePath; g.imageStatus = 'done'; logger(`  ✓ G${g.num} → ${path.basename(r.imagePath)}`); pushDtoUpdate(); }
+    else { logger(`  ✗ G${g.num} 실패: ${r.error}`); }
+  }
+}
+
 // Genspark 한도 메시지의 재설정 시각 파싱 — "AI Image 5시간 제한에 도달했습니다. 7월 14일 오후 3:39에 재설정됩니다"
 //   파싱 성공 → 그 시각(ms). 실패 → 지금+60분(보수적 기본). 24시간 초과로 파싱되면 오파싱으로 보고 기본값.
 function parseLimitResetTime(msg) {
@@ -1055,6 +1088,7 @@ const fmtClock = (ts) => { const d = new Date(ts); return `${d.getMonth() + 1}/$
 async function runRotatingImages(project, imagesDir, logger, styleId, startEngine, onlyNums) {
   // 유료(나노바나나 API) 선택 시 순환을 건너뛰고 Gemini API 로 직접 생성.
   if (startEngine === 'gemini') return runGeminiImages(project, imagesDir, logger, styleId, onlyNums);
+  if (startEngine === 'comfy') return runComfyImages(project, imagesDir, logger, styleId, onlyNums);
   const Rot = require('./core/image-rotation');
   const order = Rot.activeOrder(startEngine);
   if (!order.length) { logger('⚠ 순환 엔진이 비어있음 — ⚙ 순환 설정 확인'); return; }

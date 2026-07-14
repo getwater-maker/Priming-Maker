@@ -112,6 +112,8 @@ export default function App() {
   const [appVersion, setAppVersion] = useState(''); // 앱 버전 (타이틀 표시)
   const [gsCool, setGsCool] = useState(null); // Genspark 한도 쿨다운 {until, label} — 재설정 시각(재시작해도 유지)
   const [gsBatch, setGsBatch] = useState(null); // 나노바나나2 배치 상태 {hasJob, job} — 현재 대본의 미회수 배치
+  const [comfyOpen, setComfyOpen] = useState(false);
+  const [comfyCfg, setComfyCfg] = useState(null); // ComfyUI(z-image) 설정
   const [logText, setLogText] = useState('');
   const [logCollapsed, setLogCollapsed] = useState(true); // 최소화로 시작 — 로그바 클릭 시 펼침
 
@@ -1130,6 +1132,21 @@ export default function App() {
   // 나노바나나2 배치 — 현재 대본에 미회수 배치가 있는지 조회(엔진=gemini·대본 바뀔 때)
   const refreshBatch = () => { api.geminiBatchStatus().then(setGsBatch).catch(() => {}); };
   useEffect(() => { if (imgEngine === 'gemini') refreshBatch(); else setGsBatch(null); /* eslint-disable-next-line */ }, [imgEngine, ftitle]);
+  async function openComfy() {
+    try { const c = await api.getComfyImageConfig(); setComfyCfg(c || {}); setComfyOpen(true); }
+    catch (e) { logline('ComfyUI 설정 읽기 오류: ' + e.message); }
+  }
+  async function saveComfyCfg(patch) {
+    try { const c = await api.setComfyImageConfig(patch); setComfyCfg(c); } catch (e) { logline('ComfyUI 설정 저장 오류: ' + e.message); }
+  }
+  async function pickComfyWf() {
+    try { const c = await api.pickComfyWorkflow(); if (c) setComfyCfg(c); } catch (e) { logline('워크플로 선택 오류: ' + e.message); }
+  }
+  async function testComfy() {
+    setStatus('ComfyUI 연결 확인 중…');
+    try { const r = await api.testComfyImage(); setStatus(r && r.ok ? `✓ ComfyUI 연결 OK (${r.baseUrl})` : `✗ ComfyUI 연결 실패${r && r.error ? ': ' + r.error : ''}`); }
+    catch (e) { logline('연결 테스트 오류: ' + e.message); }
+  }
   async function submitBatch() {
     setStatus('🌙 배치 제출 중…');
     try {
@@ -1256,11 +1273,13 @@ export default function App() {
               {styles.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
             <button className="ghost" title="이미지 스타일 편집(추가·수정·삭제·프롬프트 복사)" onClick={() => setStyleEditOpen(true)}>✎</button>
-            <select title="이미지 생성 방식 — 순환(무료 브라우저) 또는 유료(나노바나나2 Lite API)" value={imgEngine} onChange={(e) => setImgEngine(e.target.value)}>
+            <select title="이미지 생성 방식 — 순환(무료 브라우저) / 유료(나노바나나2 API) / ComfyUI(z-image 로컬·클라우드)" value={imgEngine} onChange={(e) => setImgEngine(e.target.value)}>
               <option value="rotate">순환(무료)</option>
               <option value="gemini">유료(나노바나나2)</option>
+              <option value="comfy">ComfyUI(z-image)</option>
             </select>
             <button className="ghost" title="이미지 순환 순서·계정 · 나노바나나 키/모델 설정" onClick={openImgRotation}>⚙</button>
+            {imgEngine === 'comfy' && <button className="ghost" title="ComfyUI 설정 — 로컬/클라우드 주소·API키·z-image 워크플로" onClick={openComfy}>⚙ ComfyUI</button>}
             <button disabled={!loaded} title="프롬프트 있는 그룹의 이미지 생성 (이미 있는 그룹은 건너뜀)" onClick={() => runImg(null)}>🖼 이미지</button>
             {imgEngine === 'gemini' && (<>
               <button className="ghost" disabled={!loaded} title="나노바나나2 Lite 배치 제출 — 표준가의 50%로 이미지 생성을 예약합니다. 결과는 몇 시간 뒤(최대 24h)에 나오며 「📥 배치회수」로 가져옵니다. 앱을 껐다 켜도 유지됩니다." onClick={submitBatch}>🌙 배치제출</button>
@@ -1302,6 +1321,7 @@ export default function App() {
               <select title="배경 이미지 생성 방식" value={imgEngine} onChange={(e) => setImgEngine(e.target.value)}>
                 <option value="rotate">이미지: 순환(무료)</option>
                 <option value="gemini">이미지: 유료(나노바나나2)</option>
+                <option value="comfy">이미지: ComfyUI(z-image)</option>
               </select>
               <select title="배경 영상 — Grok 심리스 반복 영상 또는 이미지 고정" value={videoEngine} onChange={(e) => setVideoEngine(e.target.value)}>
                 <option value="grok">영상: Grok(심리스)</option>
@@ -1605,6 +1625,39 @@ export default function App() {
         </div>
       )}
 
+      {comfyOpen && comfyCfg && (
+        <div className="modal-bg show" onClick={(e) => { if (e.target.classList.contains('modal-bg')) setComfyOpen(false); }}>
+          <div className="modal-card">
+            <h3>⚙ ComfyUI 이미지 (z-image · 로컬/클라우드)</h3>
+            <div className="meta" style={{ marginBottom: 8 }}>ComfyUI 에서 z-image 워크플로를 <b>「저장(API 포맷)」</b>한 JSON 을 지정하세요. 헤더 이미지 방식을 <b>ComfyUI(z-image)</b>로 고르면 이 설정으로 이미지를 만듭니다.</div>
+            <div className="frow"><label>주소</label>
+              <input style={{ flex: 1 }} value={comfyCfg.baseUrl || ''} placeholder="http://127.0.0.1:8188"
+                onChange={(e) => setComfyCfg({ ...comfyCfg, baseUrl: e.target.value })} onBlur={() => saveComfyCfg({ baseUrl: (comfyCfg.baseUrl || '').trim() })} /></div>
+            <div className="frow">
+              <label className="chk" style={{ display: 'flex', gap: 4, alignItems: 'center', width: 'auto' }}>
+                <input type="checkbox" style={{ width: 'auto' }} checked={!!comfyCfg.cloud} onChange={(e) => { const v = e.target.checked; setComfyCfg({ ...comfyCfg, cloud: v }); saveComfyCfg({ cloud: v }); }} /> 클라우드(comfy.org)
+              </label>
+              {comfyCfg.cloud && <input type="password" style={{ flex: 1 }} placeholder="🔑 X-API-Key (Standard+ 구독)" value={comfyCfg.apiKey || ''}
+                onChange={(e) => setComfyCfg({ ...comfyCfg, apiKey: e.target.value })} onBlur={() => saveComfyCfg({ apiKey: (comfyCfg.apiKey || '').trim() })} />}
+            </div>
+            <div className="frow"><label>워크플로</label>
+              <input readOnly style={{ flex: 1 }} value={comfyCfg.workflowPath || ''} placeholder="z-image API 포맷 JSON (필수)" title={comfyCfg.workflowPath || ''} />
+              <button className="ghost" onClick={pickComfyWf}>📂 선택</button></div>
+            <div className="frow"><label>타임아웃(초)</label>
+              <input type="number" style={{ width: 90 }} value={comfyCfg.timeoutSec || 300}
+                onChange={(e) => setComfyCfg({ ...comfyCfg, timeoutSec: e.target.value })} onBlur={() => saveComfyCfg({ timeoutSec: parseInt(comfyCfg.timeoutSec, 10) || 300 })} />
+              <label className="chk" style={{ display: 'flex', gap: 4, alignItems: 'center', width: 'auto' }}>
+                <input type="checkbox" style={{ width: 'auto' }} checked={comfyCfg.sendDims !== false} onChange={(e) => { const v = e.target.checked; setComfyCfg({ ...comfyCfg, sendDims: v }); saveComfyCfg({ sendDims: v }); }} /> 비율에 맞춰 해상도 주입
+              </label></div>
+            <div className="meta" style={{ marginTop: 4 }}>클라우드는 <b>주소 cloud.comfy.org + API키 + 유료구독(Standard+)</b>이 필요합니다. 로컬은 내 PC ComfyUI에 z-image 모델(z_image·qwen_3_4b·ae)이 설치돼 있어야 합니다.</div>
+            <div className="mbtns" style={{ marginTop: 10 }}>
+              <button onClick={testComfy}>🔌 연결 테스트</button>
+              <span style={{ flex: 1 }} />
+              <button className="ghost" onClick={() => setComfyOpen(false)}>닫기</button>
+            </div>
+          </div>
+        </div>
+      )}
       {imgRotOpen && imgRot && (
         <div className="modal-bg show">
           <div className="modal-card">
