@@ -486,6 +486,8 @@ ipcMain.handle('genspark-cooldown', () => {
     return { until, label: fmtClock(until) };
   } catch { return { until: 0, label: '' }; }
 });
+// Grok 한도 쿨다운 조회 — 영상 재설정 시각(재시작해도 유지). 헤더 뱃지 표시용.
+ipcMain.handle('grok-cooldown', () => { try { return require('./core/grok-cooldown').get(); } catch { return { until: 0, label: '' }; } });
 ipcMain.handle('genspark-login', async (_e, args = {}) => {
   const accId = (args && args.accId) || 'default';
   log(`🔑 Genspark 로그인 (${accId}) — 열린 크롬에서 직접 로그인하세요 (쿠키 저장됨)`);
@@ -1084,6 +1086,31 @@ function parseLimitResetTime(msg) {
   return ts;
 }
 const fmtClock = (ts) => { const d = new Date(ts); return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
+// Grok 한도 재설정 시각 파싱 — "20일 (월) 오후 3:23에 재설정"(요일·월 생략 가능) · "7월 14일 오후 6:01에 다시 사용" · "오후 6:01".
+//   월+일 있으면 그날, 일만 있으면 이번달(지났으면 다음달) 그 날짜, 시각만 있으면 오늘(지났으면 내일). 8일 넘게 나오면 오파싱=0.
+function parseGrokReset(msg) {
+  const s = String(msg || ''); const now = new Date();
+  const t = s.match(/(오전|오후)\s*(\d{1,2}):(\d{2})/); if (!t) return 0;
+  let h = parseInt(t[2], 10) % 12; if (t[1] === '오후') h += 12; const mm = parseInt(t[3], 10);
+  const md = s.match(/(\d{1,2})월\s*(\d{1,2})일/); const dOnly = s.match(/(\d{1,2})일/);
+  let d;
+  if (md) { d = new Date(now.getFullYear(), +md[1] - 1, +md[2], h, mm); if (d.getTime() <= Date.now()) d = new Date(now.getFullYear() + 1, +md[1] - 1, +md[2], h, mm); }
+  else if (dOnly) { const day = +dOnly[1]; d = new Date(now.getFullYear(), now.getMonth(), day, h, mm); if (d.getTime() <= Date.now()) d = new Date(now.getFullYear(), now.getMonth() + 1, day, h, mm); }
+  else { d = new Date(now.getFullYear(), now.getMonth(), now.getDate(), h, mm); if (d.getTime() <= Date.now()) d = new Date(d.getTime() + 86400000); }
+  const ts = d.getTime();
+  if (ts - Date.now() > 8 * 24 * 3600 * 1000) return 0;
+  return ts;
+}
+function grokCoolUntil() { try { return require('./core/grok-cooldown').get().until || 0; } catch { return 0; } }
+function recordGrokCooldown(vr) {
+  try {
+    const reset = (vr && typeof vr === 'object') ? (vr.reset || '') : '';
+    const until = parseGrokReset(reset);
+    if (until) { require('./core/grok-cooldown').set(until, fmtClock(until)); log(`⏸ Grok 한도 — ${fmtClock(until)}까지 영상 생성 건너뜀(재설정 시각 기억, 앱 재시작해도 유지)`); }
+    else if (reset) log(`⏸ Grok 한도 — 재설정 텍스트 "${reset}" 시각 파싱 실패 (로그의 [DUMP 한도영역] 공유 시 고정)`);
+    else log('⏸ Grok 한도 — 재설정 시각 미확인 (빨간 시계 팝업 못 읽음 — 로그의 [DUMP 한도영역] 공유 요망)');
+  } catch {}
+}
 
 async function runRotatingImages(project, imagesDir, logger, styleId, startEngine, onlyNums) {
   // 유료(나노바나나 API) 선택 시 순환을 건너뛰고 Gemini API 로 직접 생성.
@@ -1485,7 +1512,7 @@ ipcMain.handle('video-build', async (_e, args = {}) => {
       {
         log(`🎬 ${prLabel(pr)} 비디오 생성 (Grok ${grokDurOf(engine) === 'auto' ? '자동 6/10초' : grokDurOf(engine)}${rangeLbl})…`);
         const vr = await P.generateHookVideosGrok(pr, videoDir, log, () => S.abort, 0, pushDtoUpdate, onlyNums, grokDurOf(engine));
-        if (vr && vr.limitReached) { S.grokLimit = vr.limitReached; S.abort = true; log('⛔ Grok 요청 한도 도달 — 작업을 멈춥니다'); }
+        if (vr && vr.limitReached) { S.grokLimit = { reset: (vr && vr.reset) || '' }; recordGrokCooldown(vr); S.abort = true; log('⛔ Grok 요청 한도 도달 — 작업을 멈춥니다'); }
       }
       if (!S.abort) await maybeUpscale(pr, log, true); // 모든 영상 1080p 업스케일 (중단 시 생략)
       log(`✓ ${prLabel(pr)} 영상 완료`);
@@ -1964,6 +1991,9 @@ async function runMakeAllCore(opts = {}) {
   //   Grok 비디오는 별도 크롬 프로필이라 이미지 브라우저(Genspark/Flow)와 충돌하지 않음 → 그룹 이미지(+그룹 TTS)가
   //   준비되는 즉시 그 그룹 영상을 시작(TTS∥이미지∥비디오 겹침). ('없음'은 파이프라인 대상 아님)
   const grokVideoPipeline = videoEngine === 'grok' || videoEngine === 'grok10';
+  // Grok 한도 쿨다운 중이면 이번 실행에선 영상 생략(이미지만) — 헛되이 브라우저 띄우지 않음. 한도 풀린 뒤 영상만 이어서.
+  const _grokCool = grokVideoPipeline ? grokCoolUntil() : 0;
+  if (_grokCool) log(`⏭ Grok 한도 — ${fmtClock(_grokCool)}까지 영상 생략(이미지만 생성). 한도 풀린 뒤 '만들기'를 다시 누르면 빠진 영상만 이어서 만듭니다.`);
   const videoPipeline = canParallel && grokVideoPipeline;
   const needTtsForVideo = true; // 그룹 TTS 길이로 영상 길이를 정함
   let ttsStageDone = false, imageStageDone = false;
@@ -2012,6 +2042,7 @@ async function runMakeAllCore(opts = {}) {
   // 그룹별 비디오 파이프라인 — 이미지(+필요 시 그 그룹 TTS)가 준비된 그룹부터 즉시 영상 생성.
   //   Comfy 클라우드 = 그룹 단건씩 / Grok = 준비된 그룹을 모아 배치(브라우저 기동 오버헤드 절약).
   const videoStage = async () => {
+    if (_grokCool) return; // Grok 쿨다운 — 영상 단계 건너뜀
     const done = new Set();
     const vmap = new Map();
     for (const pr of projects) vmap.set(pr, rangeNums(pr, fromNum, toNum)); // I2V 범위(미지정=전체)
@@ -2052,7 +2083,7 @@ async function runMakeAllCore(opts = {}) {
         try {
           log(`🎬 G${nums.join(',G')} (${prLabel(pr)}) 이미지 준비 — 즉시 비디오 생성(파이프라인·Grok)…`);
           const vr = await P.generateHookVideosGrok(pr, dirs.media, log, () => S.abort, 0, pushDtoUpdate, nums, grokDurOf(videoEngine));
-          if (vr && vr.limitReached) { S.grokLimit = vr.limitReached; S.abort = true; log('⛔ Grok 요청 한도 도달 — 작업을 멈춥니다 (한도 풀린 뒤 다시 만들기)'); }
+          if (vr && vr.limitReached) { S.grokLimit = { reset: (vr && vr.reset) || '' }; recordGrokCooldown(vr); S.abort = true; log('⛔ Grok 요청 한도 도달 — 작업을 멈춥니다 (한도 풀린 뒤 다시 만들기)'); }
           if (!S.abort) await maybeUpscale(pr, log, true);
         } catch (e) { log(`G${nums.join(',G')} 영상 실패: ${e.message}`); }
         S.timings.video += (Date.now() - t0) / 1000;
@@ -2075,6 +2106,8 @@ async function runMakeAllCore(opts = {}) {
   // ── 3단계: 비디오 — 전 쇼츠 (videoEngine='none'이면 비디오 없이 이미지만 사용) ──
   if (videoEngine === 'none') {
     log('🎬 3단계 — 비디오 없음(이미지만) — 건너뜀');
+  } else if (_grokCool) {
+    log(`🎬 3단계 — Grok 한도(${fmtClock(_grokCool)} 재설정)로 영상 생략 — 이미지만 사용`);
   } else if (videoPipeline) {
     log('🎬 3단계 — 파이프라인에서 그룹별로 이미 생성 완료');
   } else if (!dry && !S.abort) {
@@ -2086,7 +2119,7 @@ async function runMakeAllCore(opts = {}) {
       const t0 = Date.now();
       try {
         const vr = await P.generateHookVideosGrok(pr, dirs.media, log, () => S.abort, 0, pushDtoUpdate, vOnly, grokDurOf(videoEngine));
-        if (vr && vr.limitReached) { S.grokLimit = vr.limitReached; S.abort = true; log('⛔ Grok 요청 한도 도달 — 작업을 멈춥니다 (한도 풀린 뒤 다시 만들기)'); }
+        if (vr && vr.limitReached) { S.grokLimit = { reset: (vr && vr.reset) || '' }; recordGrokCooldown(vr); S.abort = true; log('⛔ Grok 요청 한도 도달 — 작업을 멈춥니다 (한도 풀린 뒤 다시 만들기)'); }
         if (!S.abort) await maybeUpscale(pr, log, true); // 모든 영상 1080p 업스케일 (중단 시 생략)
       } catch (e) { log(`${prLabel(pr)} 영상 실패: ${e.message}`); }
       S.timings.video += (Date.now() - t0) / 1000;

@@ -111,6 +111,7 @@ export default function App() {
   const [autoSavedAt, setAutoSavedAt] = useState(0); // 마지막 자동저장 시각(ms)
   const [appVersion, setAppVersion] = useState(''); // 앱 버전 (타이틀 표시)
   const [gsCool, setGsCool] = useState(null); // Genspark 한도 쿨다운 {until, label} — 재설정 시각(재시작해도 유지)
+  const [grokCool, setGrokCool] = useState(null); // Grok(영상) 한도 쿨다운 {until, label}
   const [gsBatch, setGsBatch] = useState(null); // 나노바나나2 배치 상태 {hasJob, job} — 현재 대본의 미회수 배치
   const [comfyOpen, setComfyOpen] = useState(false);
   const [comfyCfg, setComfyCfg] = useState(null); // ComfyUI(z-image) 설정
@@ -1131,7 +1132,10 @@ export default function App() {
   // Genspark 한도 쿨다운(재설정 시각) — 마운트 시 + 60초마다 조회. 저장값(json)을 읽으므로 앱 재시작해도 유지.
   useEffect(() => {
     let alive = true;
-    const tick = () => { api.gensparkCooldown().then((r) => { if (alive) setGsCool(r); }).catch(() => {}); };
+    const tick = () => {
+      api.gensparkCooldown().then((r) => { if (alive) setGsCool(r); }).catch(() => {});
+      api.grokCooldown().then((r) => { if (alive) setGrokCool(r); }).catch(() => {});
+    };
     tick(); const iv = setInterval(tick, 60000);
     return () => { alive = false; clearInterval(iv); };
   }, []);
@@ -1254,6 +1258,12 @@ export default function App() {
               <span title={`Genspark 이미지가 5시간 한도에 도달했습니다. ${gsCool.label} 이후 자동으로 다시 시도합니다. 그 전까지는 Genspark 에 접속하지 않고 Flow 등 다른 엔진으로 생성합니다. 앱을 껐다 켜도 이 시각은 유지됩니다.`}
                 style={{ marginLeft: 8, padding: '3px 9px', borderRadius: 6, background: '#fde8e8', color: '#a3352b', fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap' }}>
                 ⏸ Genspark 재설정 {gsCool.label}
+              </span>
+            )}
+            {grokCool && grokCool.until > 0 && (
+              <span title={`Grok 영상이 한도에 도달했습니다. ${grokCool.label} 이후 재설정됩니다. 그 전까지는 영상 생성을 건너뛰고 이미지만 만듭니다(헛되이 브라우저를 띄우지 않음). 앱을 껐다 켜도 이 시각은 유지됩니다.`}
+                style={{ marginLeft: 8, padding: '3px 9px', borderRadius: 6, background: '#e8eefd', color: '#2b45a3', fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap' }}>
+                ⏸ Grok 재설정 {grokCool.label}
               </span>
             )}
           </div>

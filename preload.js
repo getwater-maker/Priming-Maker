@@ -75,6 +75,7 @@ contextBridge.exposeInMainWorld('api', {
   removeQueueItem: (id) => ipcRenderer.invoke('remove-queue-item', { id }),
   setQueueSettings: (settings, keepChannel) => ipcRenderer.invoke('set-queue-settings', { settings, keepChannel: !!keepChannel }),
   gensparkCooldown: () => ipcRenderer.invoke('genspark-cooldown'),
+  grokCooldown: () => ipcRenderer.invoke('grok-cooldown'),
   getComfyImageConfig: () => ipcRenderer.invoke('get-comfy-image-config'),
   setComfyImageConfig: (patch) => ipcRenderer.invoke('set-comfy-image-config', patch),
   pickComfyWorkflow: () => ipcRenderer.invoke('pick-comfy-workflow'),

@@ -244,15 +244,45 @@ class GrokEngine {
   // 요청(전체) 한도 팝업 감지 — "요청 한도에 도달했습니다 / Upgrade to SuperGrok".
   //   720p 한도(_check720pLimit, 자동 480p 전환)와는 다른, 계정 전체 요청 한도.
   //   이게 뜨면 재시도해도 소용없으므로 작업을 멈춰야 한다. 반환: { limited, reset }(reset=재사용 시각 텍스트).
+  // 재설정/재사용 시각 텍스트 추출 — "20일 (월) 오후 3:23에 재설정" · "7월 14일 오후 6:01에 다시 사용" · "오후 6:01에 다시 사용"
+  _extractReset(txt) {
+    txt = String(txt || '');
+    let m = txt.match(/(\d{1,2}월\s*)?\d{1,2}일[^\n]{0,14}?(오전|오후)\s*\d{1,2}:\d{2}[^\n]{0,10}?(재설정|다시\s*사용|available)/);
+    if (m) return m[0].replace(/\s+/g, ' ').trim();
+    m = txt.match(/(오전|오후)\s*\d{1,2}:\d{2}[^\n]{0,10}?(재설정|다시\s*사용|available)/);
+    if (m) return m[0].replace(/\s+/g, ' ').trim();
+    return '';
+  }
   async _checkRequestLimit() {
     try {
-      const txt = await this.page.evaluate(() => (document.body ? document.body.innerText : '') || '');
-      // 중단 신호: 요청(전체) 한도 · 480p 생성 한도 · SuperGrok 업그레이드 권유 · request limit.
+      let txt = await this.page.evaluate(() => (document.body ? document.body.innerText : '') || '');
+      // 중단 신호: 요청(전체) 한도 · 주간 한도(100%) · 480p 생성 한도 · SuperGrok 업그레이드 권유 · request limit.
       //   ※ 720p 한도는 _check720pLimit 가 480p 전환으로 처리하므로 여기서 제외(잘못 멈춤 방지).
-      if (/요청\s*한도에?\s*도달|Upgrade to SuperGrok|request\s*limit\s*reached|480p.{0,12}한도/i.test(txt)) {
-        const m = txt.match(/(오전|오후)\s*\d{1,2}:\d{2}[^\n]*?(다시 사용|available)/);
-        return { limited: true, reset: m ? m[0].trim() : '' };
+      if (!/요청\s*한도에?\s*도달|주간\s*한도|한도의?\s*100\s*%|Upgrade to SuperGrok|request\s*limit\s*reached|weekly\s*limit|480p.{0,12}한도/i.test(txt)) {
+        return { limited: false, reset: '' };
       }
+      let reset = this._extractReset(txt);
+      // 주간 한도는 '빨간 시계' 아이콘을 눌러야 재설정 날짜가 팝업에 뜬다 → 후보 버튼 클릭 시도(best-effort).
+      if (!reset) {
+        try {
+          const clicked = await this.page.evaluate(() => {
+            const cands = Array.from(document.querySelectorAll('button,[role="button"],[aria-label]'));
+            const el = cands.find((e) => {
+              const cls = (e.className && e.className.baseVal != null) ? e.className.baseVal : (e.className || '');
+              const al = (e.getAttribute && e.getAttribute('aria-label')) || '';
+              return /text-fg-danger|text-red|clock|시계/i.test(String(cls)) || /한도|재설정|시계|clock|limit/i.test(al);
+            });
+            if (el) { (el.closest('button') || el).click(); return true; }
+            return false;
+          });
+          if (clicked) { await this.page.waitForTimeout(700); txt = await this.page.evaluate(() => (document.body ? document.body.innerText : '') || ''); reset = this._extractReset(txt); }
+        } catch (_) {}
+      }
+      if (!reset) {
+        // 재설정 날짜를 못 읽음 → 하단/팝업 텍스트 덤프(셀렉터 정밀화용, 사용자가 로그 공유하면 고정)
+        try { this.log('[Grok] [DUMP 한도영역] ' + String(txt).replace(/\s+/g, ' ').slice(-400)); } catch {}
+      }
+      return { limited: true, reset: reset || '' };
     } catch (_) {}
     return { limited: false, reset: '' };
   }
