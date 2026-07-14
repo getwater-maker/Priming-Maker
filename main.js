@@ -2192,7 +2192,15 @@ ipcMain.handle('remove-queue-item', (_e, args = {}) => {
 // 활성 항목의 생성 설정 저장(대본별 개별). 렌더러 헤더 변경 시 디바운스로 전송.
 ipcMain.handle('set-queue-settings', (_e, args = {}) => {
   const it = activeItem();
-  if (it) { it.settings = (args && args.settings) || null; scheduleAutoSave(); writeWorkspace(); }
+  if (it) {
+    let ns = (args && args.settings) || null;
+    // keepChannel: 채널(presetName)은 '대본 열 때' 확정된 값 유지 — 디바운스 자동저장이 헤더의
+    //   (다음 대본용으로 바뀐) 채널을 이 항목에 덮어써서 목소리가 뒤섞이던 버그 방지. 배속·스타일 등만 갱신.
+    if (args && args.keepChannel && ns && it.settings && it.settings.presetName) {
+      ns = { ...ns, presetName: it.settings.presetName };
+    }
+    it.settings = ns; scheduleAutoSave(); writeWorkspace();
+  }
   return true;
 });
 

@@ -438,7 +438,7 @@ export default function App() {
   }
   // ⚡ 만들기(통합) — 큐 대본이 1개면 그것만(.vrew 자동열기 등 기존 동작), 여러 개면 큐 전체 순차 제작.
   async function runMakeOrBatch() {
-    try { await api.setQueueSettings(currentSettings()); } catch (_) {} // 현재 헤더값을 활성 항목에 반영
+    try { await api.setQueueSettings(currentSettings(), true); } catch (_) {} // 현재 헤더값을 활성 항목에 반영(채널은 열 때 값 유지)
     const L = (queue && queue.longform && queue.longform.items) || [];
     const Sh = (queue && queue.shorts && queue.shorts.items) || [];
     const total = L.length + Sh.length;
@@ -1121,7 +1121,7 @@ export default function App() {
   useEffect(() => {
     const aid = queue && queue[mode] ? queue[mode].activeId : null;
     if (!aid) return;
-    const t = setTimeout(() => { api.setQueueSettings(currentSettings()).catch(() => {}); }, 300);
+    const t = setTimeout(() => { api.setQueueSettings(currentSettings(), true).catch(() => {}); }, 300); // keepChannel: 채널은 열 때 값 유지(다음 대본용 채널 선택이 이 항목을 오염시키지 않게)
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [presetName, styleId, ttsSpeed, imgEngine, videoEngine, vidFrom, vidTo, flowVideoModel, flowCount, aiNotice, bgmOn, bgmMood]);
