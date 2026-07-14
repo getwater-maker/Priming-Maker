@@ -1160,6 +1160,14 @@ export default function App() {
     api.findInPage({ text, findNext: !!findNext, forward: forward !== false });
   }
   function closeFind() { api.findStop(); setFindOpen(false); setFindRes({ active: 0, total: 0 }); }
+  // ComfyUI 설정을 마운트 시 로드 — 헤더 드롭다운이 등록된 워크플로(z-image·Krea2 등) 목록을 알도록.
+  useEffect(() => {
+    api.getComfyImageConfig().then((c) => {
+      if (!c) return;
+      if ((!c.workflows || !c.workflows.length) && c.workflowPath) c.workflows = [{ name: (c.workflowPath.split(/[\\/]/).pop() || '워크플로').replace(/\.json$/i, ''), path: c.workflowPath }];
+      setComfyCfg(c);
+    }).catch(() => {});
+  }, []);
   // 나노바나나2 배치 — 현재 대본에 미회수 배치가 있는지 조회(엔진=gemini·대본 바뀔 때)
   const refreshBatch = () => { api.geminiBatchStatus().then(setGsBatch).catch(() => {}); };
   useEffect(() => { if (imgEngine === 'gemini') refreshBatch(); else setGsBatch(null); /* eslint-disable-next-line */ }, [imgEngine, ftitle]);
@@ -1191,6 +1199,14 @@ export default function App() {
   async function removeComfyWf() {
     const list = (comfyCfg.workflows || []).filter((w) => w.path !== comfyCfg.workflowPath);
     await saveComfyCfg({ workflows: list, workflowPath: list[0] ? list[0].path : '' });
+  }
+  // 헤더 이미지 드롭다운에서 ComfyUI 워크플로별 항목(comfy::<path>) 선택 → 엔진=comfy + 활성 워크플로 지정
+  function onPickImgEngine(val) {
+    if (val && val.indexOf('comfy::') === 0) {
+      setImgEngine('comfy');
+      const p = val.slice(7);
+      if (p) saveComfyCfg({ workflowPath: p }); else openComfy();
+    } else setImgEngine(val);
   }
   async function testComfy() {
     setStatus('ComfyUI 연결 확인 중…');
@@ -1339,13 +1355,17 @@ export default function App() {
               {styles.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
             <button className="ghost" title="이미지 스타일 편집(추가·수정·삭제·프롬프트 복사)" onClick={() => setStyleEditOpen(true)}>✎</button>
-            <select title="이미지 생성 방식 — 순환(무료 브라우저) / 유료(나노바나나2 API) / ComfyUI(z-image 로컬·클라우드)" value={imgEngine} onChange={(e) => setImgEngine(e.target.value)}>
+            <select title="이미지 생성 방식 — 순환(무료) / 유료(나노바나나2) / ComfyUI 워크플로별(z-image·Krea2 등)"
+              value={imgEngine === 'comfy' ? `comfy::${(comfyCfg && comfyCfg.workflowPath) || ''}` : imgEngine}
+              onChange={(e) => onPickImgEngine(e.target.value)}>
               <option value="rotate">순환(무료)</option>
               <option value="gemini">유료(나노바나나2)</option>
-              <option value="comfy">ComfyUI(z-image)</option>
+              {(comfyCfg && comfyCfg.workflows && comfyCfg.workflows.length)
+                ? comfyCfg.workflows.map((w) => <option key={w.path} value={`comfy::${w.path}`}>ComfyUI: {w.name}</option>)
+                : <option value="comfy::">ComfyUI (워크플로 추가)</option>}
             </select>
             <button className="ghost" title="이미지 순환 순서·계정 · 나노바나나 키/모델 설정" onClick={openImgRotation}>⚙</button>
-            {imgEngine === 'comfy' && <button className="ghost" title="ComfyUI 설정 — 로컬/클라우드 주소·API키·z-image 워크플로" onClick={openComfy}>⚙ ComfyUI</button>}
+            {imgEngine === 'comfy' && <button className="ghost" title="ComfyUI 설정 — 로컬/클라우드 주소·API키·워크플로(z-image·Krea2) 추가/전환" onClick={openComfy}>⚙ ComfyUI</button>}
             <button disabled={!loaded} title="프롬프트 있는 그룹의 이미지 생성 (이미 있는 그룹은 건너뜀)" onClick={() => runImg(null)}>🖼 이미지</button>
             {imgEngine === 'gemini' && (<>
               <button className="ghost" disabled={!loaded} title="나노바나나2 Lite 배치 제출 — 표준가의 50%로 이미지 생성을 예약합니다. 결과는 몇 시간 뒤(최대 24h)에 나오며 「📥 배치회수」로 가져옵니다. 앱을 껐다 켜도 유지됩니다." onClick={submitBatch}>🌙 배치제출</button>
@@ -1384,10 +1404,12 @@ export default function App() {
             <span className="meta" style={{ marginRight: 'auto' }}>{dto && dto.kind === 'playlist' ? `${dto.tracks.length}곡` : '플리 스펙(.md)을 여세요 — 클로드가 채팅에서 만들어 줍니다'}</span>
             <span className="hgroup">
               <span className="glabel">배경</span>
-              <select title="배경 이미지 생성 방식" value={imgEngine} onChange={(e) => setImgEngine(e.target.value)}>
+              <select title="배경 이미지 생성 방식" value={imgEngine === 'comfy' ? `comfy::${(comfyCfg && comfyCfg.workflowPath) || ''}` : imgEngine} onChange={(e) => onPickImgEngine(e.target.value)}>
                 <option value="rotate">이미지: 순환(무료)</option>
                 <option value="gemini">이미지: 유료(나노바나나2)</option>
-                <option value="comfy">이미지: ComfyUI(z-image)</option>
+                {(comfyCfg && comfyCfg.workflows && comfyCfg.workflows.length)
+                  ? comfyCfg.workflows.map((w) => <option key={w.path} value={`comfy::${w.path}`}>이미지: ComfyUI {w.name}</option>)
+                  : <option value="comfy::">이미지: ComfyUI (워크플로 추가)</option>}
               </select>
               <select title="배경 영상 — Grok 심리스 반복 영상 또는 이미지 고정" value={videoEngine} onChange={(e) => setVideoEngine(e.target.value)}>
                 <option value="grok">영상: Grok(심리스)</option>
