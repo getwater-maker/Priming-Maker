@@ -1087,6 +1087,7 @@ async function runComfyImages(project, imagesDir, logger, styleId, onlyNums) {
   const _wf = (cfg.workflows || []).find((w) => w.path === cfg.workflowPath);
   const _wfName = _wf ? _wf.name : path.basename(cfg.workflowPath).replace(/\.json$/i, '');
   logger(`🧩 ComfyUI ${cfg.cloud ? '클라우드' : '로컬'}(${_wfName}) — ${targets.length}장 생성 (${eng.baseUrl})`);
+  if (!cfg.cloud) { logger('  🧹 로컬 VRAM 정리(이전 모델 언로드) — OOM 방지'); await eng.freeMemory(); } // 12GB: 비디오 Wan 등 비우고 이미지 모델 로드
   for (const g of targets) {
     if (S.abort) { logger('⏹ 중단됨'); break; }
     const prompt = P.buildImagePrompt(stylePrompt, g.imagePrompt);
@@ -1177,6 +1178,7 @@ async function runComfyVideos(pr, mediaDir, onlyNums, workflowPath) {
   const eng = new CV.ComfyVideo(cfg, log);
   const wfName = (cfg.workflows.find((w) => w.path === cfg.workflowPath) || {}).name || path.basename(cfg.workflowPath);
   log(`🎬 ${prLabel(pr)} 비디오 생성 (ComfyUI ${cfg.cloud ? '클라우드' : '로컬'}·${wfName} · ${targets.length}개 그룹)…`);
+  if (!cfg.cloud) { log('  🧹 로컬 VRAM 정리(이전 모델 언로드) — OOM 방지'); await eng.freeMemory(); } // 12GB: 이미지 모델 비우고 Wan 로드
   for (const g of targets) {
     if (S.abort) { log('⏹ 중단됨'); break; }
     const sents = pr.getSentencesOfGroup(g);

@@ -63,6 +63,11 @@ class ComfyImage {
     if (this.cloud) { if (!this.apiKey) { this.log('[Comfy] ⚠ 클라우드 모드인데 API 키가 비었습니다.'); return false; } return true; }
     try { const r = await fetch(this._url('/system_stats'), { method: 'GET' }); return r.ok; } catch { return false; }
   }
+  // 로컬 ComfyUI 상주 모델 언로드 + VRAM 해제(12GB OOM 방지 — 예: 비디오 Wan→이미지 전환). 클라우드는 불필요.
+  async freeMemory() {
+    if (this.cloud) return;
+    try { await fetch(this._url('/free'), { method: 'POST', headers: this._headers({ 'Content-Type': 'application/json' }), body: JSON.stringify({ unload_models: true, free_memory: true }) }); } catch {}
+  }
   _scanImage(outputs) {
     outputs = outputs || {};
     for (const nodeId of Object.keys(outputs)) {

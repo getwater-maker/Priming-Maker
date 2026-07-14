@@ -65,6 +65,12 @@ class ComfyVideo {
     if (this.cloud) { if (!this.apiKey) { this.log('[ComfyVid] ⚠ 클라우드 모드인데 API 키가 비었습니다.'); return false; } return true; }
     try { const r = await fetch(this._url('/system_stats'), { method: 'GET' }); return r.ok; } catch { return false; }
   }
+  // 로컬 ComfyUI 의 상주 모델을 언로드하고 VRAM 을 비운다(12GB OOM 방지 — 예: 이미지 Krea2(FLUX)→비디오 Wan 전환).
+  //   클라우드는 인스턴스가 분리돼 불필요. 실패해도 무시(구버전 ComfyUI 는 /free 없음).
+  async freeMemory() {
+    if (this.cloud) return;
+    try { await fetch(this._url('/free'), { method: 'POST', headers: this._headers({ 'Content-Type': 'application/json' }), body: JSON.stringify({ unload_models: true, free_memory: true }) }); } catch {}
+  }
   async _uploadImage(imagePath) {
     const data = fs.readFileSync(imagePath);
     const fd = new FormData();
