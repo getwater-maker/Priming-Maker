@@ -115,6 +115,9 @@ export default function App() {
   const [gsBatch, setGsBatch] = useState(null); // 나노바나나2 배치 상태 {hasJob, job} — 현재 대본의 미회수 배치
   const [comfyOpen, setComfyOpen] = useState(false);
   const [comfyCfg, setComfyCfg] = useState(null); // ComfyUI(z-image) 설정
+  const [findOpen, setFindOpen] = useState(false);       // 화면 내 검색 바(Ctrl+F)
+  const [findText, setFindText] = useState('');
+  const [findRes, setFindRes] = useState({ active: 0, total: 0 });
   const [logText, setLogText] = useState('');
   const [logCollapsed, setLogCollapsed] = useState(true); // 최소화로 시작 — 로그바 클릭 시 펼침
 
@@ -1139,6 +1142,24 @@ export default function App() {
     tick(); const iv = setInterval(tick, 60000);
     return () => { alive = false; clearInterval(iv); };
   }, []);
+  // 화면 내 검색(Ctrl+F) — 모든 모드 공통. Electron find-in-page 로 렌더 텍스트 찾기·이동.
+  useEffect(() => {
+    api.onFindResult((r) => setFindRes(r || { active: 0, total: 0 }));
+    const onKey = (e) => {
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'f' || e.key === 'F')) {
+        e.preventDefault(); setFindOpen(true);
+        setTimeout(() => { const el = document.getElementById('find-input'); if (el) { el.focus(); el.select(); } }, 30);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+  function runFind(text, findNext, forward) {
+    setFindText(text);
+    if (!text) { api.findStop(); setFindRes({ active: 0, total: 0 }); return; }
+    api.findInPage({ text, findNext: !!findNext, forward: forward !== false });
+  }
+  function closeFind() { api.findStop(); setFindOpen(false); setFindRes({ active: 0, total: 0 }); }
   // 나노바나나2 배치 — 현재 대본에 미회수 배치가 있는지 조회(엔진=gemini·대본 바뀔 때)
   const refreshBatch = () => { api.geminiBatchStatus().then(setGsBatch).catch(() => {}); };
   useEffect(() => { if (imgEngine === 'gemini') refreshBatch(); else setGsBatch(null); /* eslint-disable-next-line */ }, [imgEngine, ftitle]);
@@ -1207,12 +1228,24 @@ export default function App() {
   // ── 렌더 ─────────────────────────────────────────────────
   return (
     <>
+      {findOpen && (
+        <div style={{ position: 'fixed', top: 8, right: 16, zIndex: 9999, display: 'flex', gap: 6, alignItems: 'center', background: 'var(--card, #fff)', border: '1px solid var(--line)', borderRadius: 8, padding: '6px 8px', boxShadow: '0 3px 12px rgba(0,0,0,.18)' }}>
+          <input id="find-input" value={findText} placeholder="화면에서 검색… (Enter 다음 / Shift+Enter 이전)" style={{ width: 240 }}
+            onChange={(e) => runFind(e.target.value, false)}
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); runFind(findText, true, !e.shiftKey); } else if (e.key === 'Escape') { e.preventDefault(); closeFind(); } }} />
+          <span style={{ fontSize: 12, color: 'var(--muted)', minWidth: 44, textAlign: 'center' }}>{findText ? `${findRes.total ? findRes.active : 0}/${findRes.total}` : ''}</span>
+          <button className="ghost" title="이전 (Shift+Enter)" style={{ padding: '2px 8px' }} onClick={() => runFind(findText, true, false)}>▲</button>
+          <button className="ghost" title="다음 (Enter)" style={{ padding: '2px 8px' }} onClick={() => runFind(findText, true, true)}>▼</button>
+          <button className="ghost" title="닫기 (Esc)" style={{ padding: '2px 8px' }} onClick={closeFind}>✕</button>
+        </div>
+      )}
       <div className="topsticky">
       <header>
         {/* 상단 행 — 대본·프로젝트 관리 (열기·수정·저장·불러오기·초기화 한 줄로) */}
         <div className="hrow">
           <div className="hleft">
             <h1>🎬 Priming{appVersion ? <span className="ver">v{appVersion}</span> : null}</h1>
+            <button className="ghost" title="화면에서 검색 (Ctrl+F) — 대본·문장·곡·원고 등 현재 화면의 글자를 찾아 이동" style={{ padding: '4px 8px' }} onClick={() => { setFindOpen(true); setTimeout(() => { const el = document.getElementById('find-input'); if (el) { el.focus(); el.select(); } }, 30); }}>🔍</button>
             <span className="modetoggle">
               <button className={mode === 'longform' ? 'active' : ''} onClick={() => switchMode('longform')}>롱폼</button>
               <button className={mode === 'shorts' ? 'active' : ''} onClick={() => switchMode('shorts')}>쇼츠</button>

@@ -202,6 +202,10 @@ function createWindow() {
     },
   });
   win.setMenuBarVisibility(false);
+  // 화면 내 검색(Ctrl+F) — Electron 내장 find-in-page. 렌더된 텍스트를 찾아 강조·이동. 모든 모드 공통.
+  win.webContents.on('found-in-page', (_e, r) => {
+    try { win.webContents.send('find-result', { active: r.activeMatchOrdinal || 0, total: r.matches || 0 }); } catch {}
+  });
   // 렌더러(React/Vite): dev 는 PM_DEV_URL(HMR 서버), prod 는 빌드된 정적 파일.
   const devUrl = process.env.PM_DEV_URL;
   if (devUrl) { win.loadURL(devUrl); win.webContents.openDevTools({ mode: 'detach' }); }
@@ -488,6 +492,14 @@ ipcMain.handle('genspark-cooldown', () => {
 });
 // Grok 한도 쿨다운 조회 — 영상 재설정 시각(재시작해도 유지). 헤더 뱃지 표시용.
 ipcMain.handle('grok-cooldown', () => { try { return require('./core/grok-cooldown').get(); } catch { return { until: 0, label: '' }; } });
+// 화면 내 검색(Ctrl+F) — 렌더된 텍스트 찾기/이동. text 빈값=검색 종료.
+ipcMain.handle('find-in-page', (_e, args = {}) => {
+  if (!win) return;
+  const text = String(args.text || '');
+  if (!text) { try { win.webContents.stopFindInPage('clearSelection'); } catch {} return; }
+  try { win.webContents.findInPage(text, { forward: args.forward !== false, findNext: !!args.findNext, matchCase: false }); } catch {}
+});
+ipcMain.handle('find-stop', () => { try { if (win) win.webContents.stopFindInPage('clearSelection'); } catch {} });
 ipcMain.handle('genspark-login', async (_e, args = {}) => {
   const accId = (args && args.accId) || 'default';
   log(`🔑 Genspark 로그인 (${accId}) — 열린 크롬에서 직접 로그인하세요 (쿠키 저장됨)`);
