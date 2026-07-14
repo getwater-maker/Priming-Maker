@@ -101,6 +101,7 @@ export default function App() {
   const [aiNotice, setAiNotice] = useState(false); // 쇼츠 AI 고지: 기본 OFF (롱폼은 항상 표시·필수)
   const [bgmOn, setBgmOn] = useState(true);        // 배경음(BGM, ACE-Step) 삽입 — 기본 ON
   const [bgmMood, setBgmMood] = useState('');      // BGM 무드 태그(빈값=대본 자동분석)
+  const [openEachVrew, setOpenEachVrew] = useState(true); // 큐 순차제작: 대본 완료 때마다 그 .vrew 자동 열기(ON) / 끝에 폴더만 1번(OFF). 기본 ON
   const [modeProfiles, setModeProfiles] = useState(null); // mode-profiles.js (음성배속 등 모드 기본값 출처)
   // 롱폼 분할옵션(도입부/본론/짧은/긴) — 프리셋에서 초기화, capbar 패널에서 조절 시 재분할.
   const [splitOpts, setSplitOpts] = useState({ intro: 3, main: 10, short: 10, long: 20, mode: 'h3' });
@@ -437,7 +438,7 @@ export default function App() {
     if (!ensurePromptsFilled(null, { image: 'all', video: videoEngine === 'none' ? 'none' : 'range' })) return; // 현재 표시 대본 기준 빈 프롬프트 검사 ('없음'은 i2v 불요)
     setStatus(`⚡⚡ 큐 순차 제작중… (${plan.length}개)`);
     try {
-      const r = await api.runBatch({ plan, common: { captionStyle: capOverride(), captionMaxChars: effCap } });
+      const r = await api.runBatch({ plan, common: { captionStyle: capOverride(), captionMaxChars: effCap }, openEach: openEachVrew });
       if (r && r.queue) setQueue(r.queue);
       if (r && r.dto) { setDto(r.dto); setFtitle(r.dto.fileTitle || ''); }
       setStatus('⚡⚡ 큐 제작 완료');
@@ -1214,9 +1215,10 @@ export default function App() {
           <span className="hgroup" style={{ marginLeft: 'auto' }}>
             <span className="glabel">④ 완성</span>
             <button className="ghost" disabled={!loaded} title="모든 편을 이어서 미리보기 재생" onClick={() => playShorts(null)}>▶ 미리보기</button>
-            {(() => { const qc = (queue && queue.longform ? queue.longform.items.length : 0) + (queue && queue.shorts ? queue.shorts.items.length : 0); return (
+            {(() => { const qc = (queue && queue.longform ? queue.longform.items.length : 0) + (queue && queue.shorts ? queue.shorts.items.length : 0); return (<>
               <button className="cta" disabled={qc < 1} title={qc > 1 ? `큐 ${qc}개 대본을 교차 순서(롱1→쇼1→롱2→쇼2…)로 순차 제작` : '현재 대본 TTS+이미지 → 영상 → .vrew → 폴더열기'} onClick={runMakeOrBatch}>⚡ 만들기{qc > 1 ? ` (${qc})` : ''}</button>
-            ); })()}
+              {qc > 1 && <label className="chk" title="체크: 대본이 완료될 때마다 그 .vrew 를 순차적으로 자동 열기(단건과 동일). 해제: 창 폭주 방지를 위해 열지 않고 큐가 끝나면 출력폴더만 1번 열기" style={{ display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" style={{ width: 'auto' }} checked={openEachVrew} onChange={(e) => setOpenEachVrew(e.target.checked)} />순차 열기</label>}
+            </>); })()}
             <button className="ghost stop" title="진행 중인 작업 중단" onClick={abort}>■ 중단</button>
             <button disabled={!loaded} title=".vrew 만 다시 내보내기 (이미 만든 음성·이미지 사용)" onClick={() => runVrew(null)}>💾 .vrew</button>
             <button className="ghost" disabled={!loaded} onClick={() => api.openFolder()}>📁 출력폴더</button>

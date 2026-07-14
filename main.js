@@ -1798,6 +1798,7 @@ ipcMain.handle('load-project', async () => {
 async function runMakeAllCore(opts = {}) {
   { const _b = gpuBusyReason(); if (_b) { log(`⚠ ${_b} 중에는 제작을 할 수 없습니다. 끝난 뒤 다시 시도하세요.`); return; } }
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
+  const outRoot = S.outRoot; const parsed = S.parsed; // 실행 시작 시점 고정 — 진행 중 다른 큐를 선택해 S.outRoot/S.parsed 가 바뀌어도 이 작업은 제 대본·폴더로 저장(오염 방지)
   const { shortsNum = null, engine = 'genspark', presetName = null, speed = null, captionStyle = null, captionMaxChars = 7, styleId = null, fromNum = null, toNum = null, dry = false, videoEngine = 'grok', flowVideoModel = 'Veo 3.1 - Lite', flowCount = 'x1', clipMaxSec = null, aiNotice = false, bgm = null, openVrew = true, openFolder = true } = opts;
   const stylePrompt = styleId ? (require('./core/style-store').getPrompt(styleId) || '') : '';
   let preset = P.getPreset(presetName);
@@ -1811,9 +1812,9 @@ async function runMakeAllCore(opts = {}) {
   }
   S.abort = false;
   S.grokLimit = null; // 이번 실행 중 Grok 요청 한도 감지 여부(감지 시 작업 중단 + 팝업)
-  try { fs.mkdirSync(S.outRoot, { recursive: true }); } catch {}
+  try { fs.mkdirSync(outRoot, { recursive: true }); } catch {}
   // 프롬프트 없는 그룹(prose 대본) → 이미지 전에 API로 자동 생성 (내용 맞는 이미지)
-  if (!dry) { await autoFillPrompts(S.parsed.projects.filter((p) => !shortsNum || p.shortsNum === shortsNum), log); }
+  if (!dry) { await autoFillPrompts(parsed.projects.filter((p) => !shortsNum || p.shortsNum === shortsNum), log); }
   const _makeT0 = Date.now();
   S.timings = { tts: 0, image: 0, video: 0, make: 0 }; // 이번 작업 단계별 시간 (누적)
   pushDtoUpdate();
@@ -1824,7 +1825,7 @@ async function runMakeAllCore(opts = {}) {
   //         그다음 전 쇼츠 영상, 마지막에 전 쇼츠 .vrew. (사용자 요청)
   //   부수효과: 단계가 완전 순차라 ComfyUI(로컬 GPU) 이미지와 OmniVoice TTS 가 겹치지 않음 → VRAM 충돌 자동 해소.
   //   (트레이드오프: 예전 Genspark/Flow 의 'TTS∥이미지' 동시 실행은 사라짐 — 의도된 변경.)
-  const projects = S.parsed.projects.filter((pr) => !shortsNum || pr.shortsNum === shortsNum);
+  const projects = parsed.projects.filter((pr) => !shortsNum || pr.shortsNum === shortsNum);
 
   // ── 1·2단계: 음성(TTS) + 이미지 ──
   //   이미지가 로컬 GPU 를 안 쓰므로(Genspark/Flow 브라우저, 나노바나나 API) TTS(로컬 GPU)와 '병렬' → 더 빠름.
@@ -1846,7 +1847,7 @@ async function runMakeAllCore(opts = {}) {
     log('🎙 1단계 — 음성(TTS) 일괄 변환…');
     for (const pr of projects) {
       if (S.abort) { log('⏹ 중단됨'); break; }
-      const dirs = shortsDirs(S.outRoot, pr.shortsNum);
+      const dirs = shortsDirs(outRoot, pr.shortsNum);
       const t0 = Date.now();
       try {
         if (dry) P.fillSilent(pr, dirs.tts);
@@ -1868,7 +1869,7 @@ async function runMakeAllCore(opts = {}) {
     log('🖼 2단계 — 이미지 일괄 생성…');
     for (const pr of projects) {
       if (S.abort) { log('⏹ 중단됨'); break; }
-      const dirs = shortsDirs(S.outRoot, pr.shortsNum);
+      const dirs = shortsDirs(outRoot, pr.shortsNum);
       prefillImageCache(pr, dirs.media, styleId, engine); // ♻ 캐시 재활용 먼저
       const t0 = Date.now();
       try {
@@ -1921,7 +1922,7 @@ async function runMakeAllCore(opts = {}) {
         if (S.abort) break;
         gs.forEach((g) => done.add(g));
         const nums = gs.map((g) => g.num);
-        const dirs = shortsDirs(S.outRoot, pr.shortsNum);
+        const dirs = shortsDirs(outRoot, pr.shortsNum);
         const t0 = Date.now();
         try {
           log(`🎬 G${nums.join(',G')} (${prLabel(pr)}) 이미지 준비 — 즉시 비디오 생성(파이프라인·Grok)…`);
@@ -1955,7 +1956,7 @@ async function runMakeAllCore(opts = {}) {
     log('🎬 3단계 — 비디오 일괄 생성…');
     for (const pr of projects) {
       if (S.abort) { log('⏹ 중단됨'); break; }
-      const dirs = shortsDirs(S.outRoot, pr.shortsNum);
+      const dirs = shortsDirs(outRoot, pr.shortsNum);
       const vOnly = rangeNums(pr, fromNum, toNum); // I2V 범위(미지정=전체)
       const t0 = Date.now();
       try {
@@ -1989,7 +1990,7 @@ async function runMakeAllCore(opts = {}) {
             if (!totalSec) continue;
             const tags = await deriveBgmMood(pr, bgm.moodOverride, log);
             pr._bgmUsedMood = tags; // UI 표시용 — 실제 사용된 BGM 무드
-            const dirs = shortsDirs(S.outRoot, pr.shortsNum);
+            const dirs = shortsDirs(outRoot, pr.shortsNum);
             const raw = path.join(dirs.media, `bgm_${vrewBaseName(pr)}.wav`);
             log(`  ▶ ${prLabel(pr)} BGM (${Math.round(totalSec)}초 분량, 무드: ${tags.slice(0, 50)})`);
             const r = await AS.generate({ tags, lyrics: '', durationSec: Math.min(Math.ceil(totalSec), 180) }, log);
@@ -2022,9 +2023,9 @@ async function runMakeAllCore(opts = {}) {
       ep = resolveAiNotice(ep, aiNotice); // 롱폼=항상 / 쇼츠=사용자 선택
       const _bgmPath4 = bgmOn ? resolveBgmPath(pr) : null; // 메모리 없으면 media 폴더 bgm mp3 재사용
       if (_bgmPath4) { ep = { ...ep, bgm: { enabled: true, audioPath: _bgmPath4, volume: (bgm.volume != null ? bgm.volume : 0.15), loop: true } }; log(`🎵 ${prLabel(pr)} .vrew 에 BGM 포함: ${path.basename(_bgmPath4)}`); }
-      const dirs = shortsDirs(S.outRoot, pr.shortsNum);
+      const dirs = shortsDirs(outRoot, pr.shortsNum);
       const baseName = vrewBaseName(pr);
-      const vrewPath = path.join(S.outRoot, `${baseName}.vrew`);
+      const vrewPath = path.join(outRoot, `${baseName}.vrew`);
       try {
         const res = await P.buildProjectVrew(pr, vrewPath, ep, log, captionMaxChars); // 배속은 음성에 이미 반영
         P.writeSrt(pr, path.join(dirs.subtitles, `${baseName}.srt`), captionMaxChars);
@@ -2041,8 +2042,8 @@ async function runMakeAllCore(opts = {}) {
   try { await closeFlowEng(); } catch {} // Flow 이미지/영상 창 닫고 마무리
   S.timings.make = (Date.now() - _makeT0) / 1000;
   pushDtoUpdate();
-  try { fs.mkdirSync(S.outRoot, { recursive: true }); } catch {}
-  if (openFolder && !S.abort) shell.openPath(S.outRoot); // 중단 시 탐색기 자동 열기 생략
+  try { fs.mkdirSync(outRoot, { recursive: true }); } catch {}
+  if (openFolder && !S.abort) shell.openPath(outRoot); // 중단 시 탐색기 자동 열기 생략
   log(S.abort
     ? `⏹ 중단됨 — 완료된 자산만 보존 (TTS ${S.timings.tts.toFixed(1)}s · 이미지 ${S.timings.image.toFixed(1)}s · 비디오 ${S.timings.video.toFixed(1)}s)`
     : `⚡ 전체 제작 완료 (TTS ${S.timings.tts.toFixed(1)}s · 이미지 ${S.timings.image.toFixed(1)}s · 비디오 ${S.timings.video.toFixed(1)}s · 전체 ${S.timings.make.toFixed(1)}s)`);
@@ -2054,10 +2055,13 @@ ipcMain.handle('make-all', async (_e, args = {}) => {
 });
 
 // ── 큐 순차 제작 ── 교차 순서(L1→S1→L2→S2…)는 렌더러가 plan 으로 전달. 한 항목씩 runMakeAllCore.
-//   실패해도 해당 항목만 '실패' 표시 후 다음 진행. 자동열기는 끔(.vrew·폴더 폭주 방지).
+//   실패해도 해당 항목만 '실패' 표시 후 다음 진행.
+//   openEach(기본 true): 대본 완료 때마다 그 .vrew 를 순차적으로 자동 열기(단건과 동일). false 면 열지 않고
+//   큐가 끝난 뒤 출력폴더만 1번 열기(창 폭주 방지). 폴더 열기(openFolder)는 항목마다는 끔 — 끝에 1번만.
 ipcMain.handle('run-batch', async (_e, args = {}) => {
   const plan = Array.isArray(args.plan) ? args.plan : [];
   const common = args.common || {};
+  const openEach = args.openEach !== false; // 기본값 = 순차 열기
   if (!plan.length) throw new Error('실행할 대본이 큐에 없습니다.');
   S.abort = false;
   log(`⚡⚡ 큐 순차 제작 시작 — 총 ${plan.length}개`);
@@ -2085,7 +2089,7 @@ ipcMain.handle('run-batch', async (_e, args = {}) => {
         videoEngine: s.videoEngine || 'grok', flowVideoModel: s.flowVideoModel || 'Veo 3.1 - Lite', flowCount: s.flowCount || 'x1',
         captionStyle: common.captionStyle || null, captionMaxChars: common.captionMaxChars || 7,
         clipMaxSec: clipMaxOf(s.videoEngine || 'grok'), aiNotice: !!s.aiNotice, // 쇼츠 그룹 재구성 캡 + AI 고지(사용자 선택)
-        dry: false, openVrew: false, openFolder: false,
+        dry: false, openVrew: openEach, openFolder: false, // openEach=순차 .vrew 열기(단건과 동일). 폴더는 끝에 1번만
       });
       it.status = 'done'; okN++;
     } catch (e) {
