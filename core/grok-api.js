@@ -1,11 +1,11 @@
 'use strict';
 // core/grok-api.js — xAI Grok Imagine 비디오 API (image-to-video). 브라우저 없이 REST.
 //   제출: POST https://api.x.ai/v1/videos/generations
-//     body { model:'grok-imagine-video', prompt, image(base64 data URI), duration(1~15), aspect_ratio, resolution }
+//     body { model:'grok-imagine-video', prompt, image:{ url }, duration(1~15), aspect_ratio, resolution }
+//        image.url = 공개 URL 또는 base64 data URL(JPEG/PNG/WebP). image 는 객체여야 함(문자열이면 422).
 //     → { request_id }
 //   폴링: GET https://api.x.ai/v1/videos/{request_id} → { status: done|pending|failed|expired, video:{ url } }
 //   인증: Authorization: Bearer <xAI 키>  (secret-store 'xai'). 사용량 과금 — 브라우저 Grok(SuperGrok) 구독과 별개.
-//   ⚠ image 필드 형식(base64 vs URL)이 공식 문서에 명시가 약해 base64 data URI 로 보냄 — 실측 후 조정 가능.
 const fs = require('fs');
 const path = require('path');
 
@@ -20,7 +20,8 @@ async function generateVideo({ imagePath, prompt, aspect, durationSec, key, logg
   let image;
   try { const buf = fs.readFileSync(imagePath); image = `data:${_mime(imagePath)};base64,${buf.toString('base64')}`; }
   catch (e) { return { success: false, error: '이미지 읽기 실패: ' + e.message }; }
-  const body = { model: 'grok-imagine-video', prompt: String(prompt || 'natural slow motion, cinematic feel'), image, aspect_ratio: _aspect(aspect), resolution: '720p' };
+  // image 는 객체 {url} 이어야 함(문자열 X). url = 공개 URL 또는 base64 data URL. (xAI 스키마 실측 2026-07-15)
+  const body = { model: 'grok-imagine-video', prompt: String(prompt || 'natural slow motion, cinematic feel'), image: { url: image }, aspect_ratio: _aspect(aspect), resolution: '720p' };
   if (durationSec) body.duration = Math.max(1, Math.min(15, Math.round(durationSec)));
   let reqId;
   try {

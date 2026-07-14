@@ -1,5 +1,5 @@
 {
-  "version": "0.2.36",
+  "version": "0.2.37",
   "deps": "0a1409dd7b6c37e6b850a8223ac05d93b0380d94",
   "files": {
     "AGENTS.md": "1a0fd73c104ff40f5cce110a3ffac07a7aa77205",
@@ -29,7 +29,7 @@
     "core/gemini-image.js": "865d7c0e602d8a698a16c1d09c7cbf0c14a5eec9",
     "core/genspark-accounts.js": "3e523c32e118a152aa5249477097d4cfe095a6df",
     "core/grok-accounts.js": "b83a68d14765d3261d8332e73fdd20cd536cd7a2",
-    "core/grok-api.js": "56d148e9035f82ce2a0a496efe097b300a1e6391",
+    "core/grok-api.js": "6602eeb4170c301a273292b0cec1b82d660d863d",
     "core/grok-cooldown.js": "659a01ebb4ce27632524ded40818905d2e10e104",
     "core/group-builder.js": "7df66478740c157066af8ed1fc6b40be405f821b",
     "core/image-rotation.js": "9fdb43b7775a5f8f9c4ab04e56039980d4e9602a",
@@ -67,7 +67,7 @@
     "light-updater.js": "c9be26807112942a9cf4a88dfcd14a1004634762",
     "main.js": "9490c4634c1626e428cb9ce924f056d4ce34518c",
     "package-lock.json": "c6fea8decaa5e80e4aa524b7d5cfcbafa63f810f",
-    "package.json": "2b4cb34bb1f6d85da78bf471c2f2bd4fcf931027",
+    "package.json": "19c437e618c9f24e2bc77749d7acdadab1b6038d",
     "preload.js": "dd1b42e4c91b00783cc3aed0eb9583eb53880c4a",
     "renderer/dist/assets/index-CyleVltf.css": "3dd5ab7c23151ec908795fba6ac504e394fa281e",
     "renderer/dist/assets/index-OxmDqsG5.js": "ed67039de85d898645b523e68a4e3ff6709dbd9c",
