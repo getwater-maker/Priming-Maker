@@ -2449,8 +2449,9 @@ ipcMain.handle('video-group', async (_e, args = {}) => {
   try {
     await P.generateHookVideosGrok(pr, videoDir, log, () => S.abort, 0, pushDtoUpdate, [groupNum], grokDurOf(engine));
     await maybeUpscale(pr, log, true);
-    log(`✓ G${groupNum} 영상 완료`);
-  } catch (e) { log(`✗ G${groupNum} 영상 실패: ${e.message}`); }
+    if (g.videoPath) log(`✓ G${groupNum} 영상 완료`);
+    else { g.videoStatus = 'fail'; log(`✗ G${groupNum} 영상 실패 — 생성되지 않았습니다 (Grok 한도·오류 확인)`); } // 실패 시 'generating' 고착 방지
+  } catch (e) { g.videoStatus = 'fail'; log(`✗ G${groupNum} 영상 실패: ${e.message}`); }
   pushDtoUpdate();
   return P.toDTO(S.parsed);
 });
@@ -2484,8 +2485,10 @@ ipcMain.handle('regen-group', (_e, args = {}) => {
       g.imagePath = null; g.imageStatus = 'generating'; g.imageEngine = null; pushDtoUpdate(); // 강제 재생성(기존/캐시 우회)
       await runRotatingImages(pr, mediaDir, log, styleId, engine, [groupNum]); // Flow+Genspark 순환, 이 그룹만
       cacheGeneratedImages(pr, styleId, engine); // 새 결과 캐시 갱신(엔진 태그 맞춤)
-      log(`✓ G${groupNum} 재생성 완료`);
-    } catch (e) { log(`✗ G${groupNum} 재생성 실패: ${e.message}`); }
+      if (g.imagePath && g.imageStatus === 'done') log(`✓ G${groupNum} 재생성 완료`);
+      else { g.imageStatus = 'fail'; log(`✗ G${groupNum} 재생성 실패 — 이미지가 생성되지 않았습니다 (엔진 한도·오류·결제 확인)`); } // 실패 시 'generating' 고착 방지
+    } catch (e) { g.imageStatus = 'fail'; log(`✗ G${groupNum} 재생성 실패: ${e.message}`); }
+    pushDtoUpdate(); // 성공/실패 최종 상태를 UI 에 반영(스피너 해제)
     return P.toDTO(S.parsed);
   });
 });
