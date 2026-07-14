@@ -7,6 +7,22 @@
 **편별 Vrew 4.0.1 .vrew 파일**을 자동 생성하는 Electron 앱. PrimingFlow(D:\PrimingFlow)의 엔진을
 복사·재활용한 독립 클론.
 
+## 🎬 Grok Imagine 비디오 API (image→video, 브라우저 없이) 추가 (2026-07-15, v0.2.36)
+> 요청: "비디오에서 Grok api를 이용할수 있도록 해줘". 브라우저 Grok(SuperGrok 구독, 주간한도)과 별개의 **유료 사용량 과금** API.
+- **엔진** `core/grok-api.js`: xAI 공식 REST. 제출 `POST https://api.x.ai/v1/videos/generations`
+  (`Authorization: Bearer <키>`, body `{model:'grok-imagine-video', prompt, image(base64 data URI), duration(1~15), aspect_ratio, resolution:'720p'}`)
+  → `{request_id}` → 폴링 `GET /v1/videos/{id}` (3초 간격, ≤7분) → `{status: done|pending|failed|expired, video:{url}}` →
+  `video.url` 다운로드. `generateVideo`(url) / `generateVideoToFile`(mp4). 키=secret-store `'xai'`.
+- **비디오 엔진 드롭다운**: `Grok (브라우저)` / **`Grok API (유료)`**(value `grok-api`) / `없음`. grok-api 선택 시 「⚙ 키」 버튼 →
+  xAI 키 입력 모달(console.x.ai 발급 안내). IPC `get-xai-key`/`set-xai-key`.
+- **디스패치**: main.js `genGroupVideos(pr, mediaDir, onlyNums, videoEngine)` — `grok-api`면 `runGrokApiVideos`(이미지 있는 그룹만
+  i2v, prompt=videoPrompt‖motionNote‖기본, duration=그룹 TTS초 clamp1~15‖6, 출력 media-N/NN.mp4, 성공 g.videoPath·실패 g.videoStatus='fail'),
+  그 외는 기존 `P.generateHookVideosGrok`(브라우저). video-build·make-all 3단계·video-group 3곳이 이 래퍼 사용.
+- grok-api 는 브라우저가 아니라 **파이프라인/쿨다운 제외**(grokVideoPipeline=false → _grokCool=0, videoPipeline=false) →
+  make-all 에서 순차 3단계로 실행. 429는 사용량/결제 한도로 중단(브라우저 주간한도 쿨다운과 무관).
+- ⏳ **실측 필요**: ① `image` 필드 형식(base64 data URI 로 보냄 — 공식 문서 명시 약함, 실패 시 로그의 `xAI 4xx:` 응답 보고
+  URL 방식/필드명 조정) ② 폴링 응답 실제 shape(status/video.url) 확인. xAI 키+결제 설정 후 영상 1개로 검증.
+
 ## 🖼 Flow 계정 라운드로빈 + 한도 판정 계정별로 (2026-07-14, v0.2.20)
 > 증상: 그룹 단건 재생성마다 항상 같은(첫 가용) Flow 계정만 사용 → 한 계정에 시도 집중.
 >       "일일 한도 50회 초과 (현재 92회)" 경고는 **모든 계정 합계**(anti-detect todayCount) 기준이라 오해 유발.

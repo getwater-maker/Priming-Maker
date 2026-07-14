@@ -66,6 +66,8 @@ contextBridge.exposeInMainWorld('api', {
   removePreset: (args) => ipcRenderer.invoke('remove-preset', args),
   getGeminiKey: () => ipcRenderer.invoke('get-gemini-key'),
   setGeminiKey: (key) => ipcRenderer.invoke('set-gemini-key', key),
+  getXaiKey: () => ipcRenderer.invoke('get-xai-key'),
+  setXaiKey: (key) => ipcRenderer.invoke('set-xai-key', key),
   pickFile: (args) => ipcRenderer.invoke('pick-file', args),
   pickDir: () => ipcRenderer.invoke('pick-dir'),
   saveProject: () => ipcRenderer.invoke('save-project'),

@@ -159,6 +159,8 @@ export default function App() {
   const [imgRot, setImgRot] = useState(null);            // { order:[], enabled:{} } 이미지 순환 설정
   const [giCfg, setGiCfg] = useState(null);              // Nano Banana 2 Lite (Gemini 이미지 API) 설정
   const [giKey, setGiKey] = useState('');                // Gemini API 키(이미지 설정 팝업에서 입력) — secret-store 공용
+  const [xaiOpen, setXaiOpen] = useState(false);         // Grok API(비디오) xAI 키 입력 모달
+  const [xaiVal, setXaiVal] = useState('');
   const [lora, setLora] = useState(null);                // LoRA 수집 설정 { enabled, dir, trigger, count }
   const [gsAccOpen, setGsAccOpen] = useState(false);
   const [gsAcc, setGsAcc] = useState(null);              // Genspark 멀티계정
@@ -723,6 +725,9 @@ export default function App() {
   async function renameGsAcc(id, label) { try { setGsAcc(await api.renameGensparkAccount(id, label)); } catch (e) { logline(e.message); } }
   async function changeGsCap(n) { try { setGsAcc(await api.setGensparkCap(n)); } catch (e) { logline(e.message); } }
   async function gsLogin(id) { setStatus('Genspark 로그인 창 여는 중…'); try { const r = await api.gensparkLogin(id); setStatus(r.ok ? '✓ Genspark 로그인 완료' : 'Genspark 로그인 실패: ' + (r.error || '')); } catch (e) { setStatus('Genspark 로그인 오류'); } }
+  // Grok API(비디오) xAI 키
+  async function setXaiKey() { try { setXaiVal(await api.getXaiKey() || ''); } catch (_) { setXaiVal(''); } setXaiOpen(true); }
+  async function saveXaiKey() { try { await api.setXaiKey((xaiVal || '').trim()); setXaiOpen(false); setStatus('xAI API 키 저장됨'); } catch (e) { logline('xAI 키 저장 오류: ' + e.message); } }
   // Grok 멀티계정
   async function openGrokAcc() { try { setGrokAcc(await api.getGrokAccounts()); setGrokAccOpen(true); } catch (e) { logline('Grok 계정 오류: ' + e.message); } }
   async function addGrokAcc() { try { setGrokAcc(await api.addGrokAccount('')); } catch (e) { logline(e.message); } }
@@ -1375,9 +1380,10 @@ export default function App() {
           <span className="hgroup">
             <span className="glabel">③ 비디오</span>
             <select title="i2v 비디오 엔진" value={videoEngine} onChange={(e) => setVideoEngine(e.target.value)}>
-              <option value="grok">Grok</option><option value="none">없음 (이미지만)</option>
+              <option value="grok">Grok (브라우저)</option><option value="grok-api">Grok API (유료)</option><option value="none">없음 (이미지만)</option>
             </select>
             {videoEngine === 'grok' && <button className="ghost" title="Grok(X) 멀티계정 등록·로그인·한도" onClick={openGrokAcc}>⚙ 계정</button>}
+            {videoEngine === 'grok-api' && <button className="ghost" title="xAI API 키 입력 (console.x.ai) — 사용량 과금" onClick={setXaiKey}>⚙ 키</button>}
             {videoEngine === 'none'
               ? <span className="meta" title="비디오 없이 이미지만으로 .vrew 생성 (켄번스)">이미지만(켄번스)</span>
               : (<>
@@ -1518,6 +1524,22 @@ export default function App() {
               value={newChanName} onChange={(e) => setNewChanName(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') createChannel(); }} />
             <div className="mbtns"><button onClick={createChannel}>만들기</button><button className="ghost" onClick={() => setNewChanOpen(false)}>취소</button></div>
+          </div>
+        </div>
+      )}
+
+      {xaiOpen && (
+        <div className="modal-bg show">
+          <div className="modal-card" style={{ maxWidth: 460 }}>
+            <h3>⚙ Grok API 키 (비디오)</h3>
+            <div className="meta" style={{ marginBottom: 8, lineHeight: 1.5 }}>
+              xAI <b>Grok Imagine</b> 비디오 API 키입니다. <b>console.x.ai</b> → API Keys 에서 발급.<br />
+              <b>사용량 과금</b>(영상 1개당 비용) — 브라우저 Grok(SuperGrok/X 구독)과 별개입니다. 이미지→비디오(i2v)로 동작하므로 그룹 이미지가 있어야 합니다.
+            </div>
+            <input autoFocus type="password" placeholder="🔑 xAI API 키 (xai-...)" style={{ width: '100%', boxSizing: 'border-box', padding: '7px 9px' }}
+              value={xaiVal} onChange={(e) => setXaiVal(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') saveXaiKey(); }} />
+            <div className="mbtns"><button onClick={saveXaiKey}>저장</button><button className="ghost" onClick={() => setXaiOpen(false)}>취소</button></div>
           </div>
         </div>
       )}

@@ -1127,6 +1127,39 @@ function recordGrokCooldown(vr) {
   } catch {}
 }
 
+// Grok Imagine 비디오 API (image→video, 브라우저 없이 REST). 이미지 있는 그룹만 i2v.
+//   videoEngine='grok-api' 경로. 사용량 과금(SuperGrok 구독과 별개) — xAI 키(secret-store 'xai') 필요.
+async function runGrokApiVideos(pr, mediaDir, onlyNums) {
+  const GA = require('./core/grok-api');
+  if (!GA.hasKey()) { log('⚠ xAI API 키가 없습니다 — 헤더 ⚙(Grok API)에서 키를 입력하세요.'); return; }
+  const targets = pr.groups.filter((g) => (g.imagePath && fs.existsSync(g.imagePath)) && (!onlyNums || onlyNums.includes(g.num)) && !(g.videoPath && fs.existsSync(g.videoPath)));
+  if (!targets.length) { log('🎬 Grok API — 영상화할(이미지 있는) 그룹이 없습니다'); return; }
+  fs.mkdirSync(mediaDir, { recursive: true });
+  log(`🎬 ${prLabel(pr)} 비디오 생성 (Grok API · ${targets.length}개 그룹)…`);
+  for (const g of targets) {
+    if (S.abort) { log('⏹ 중단됨'); break; }
+    const sents = pr.getSentencesOfGroup(g);
+    const totalSec = sents.reduce((a, s) => a + (s.ttsDurationSec || 0), 0);
+    const durationSec = totalSec > 0 ? Math.max(1, Math.min(15, Math.ceil(totalSec))) : 6;
+    const prompt = (g.videoPrompt && g.videoPrompt.trim()) || (g.motionNote && g.motionNote.trim()) || 'natural slow motion, subtle camera movement, cinematic';
+    const out = path.join(mediaDir, `${String(g.num).padStart(2, '0')}.mp4`);
+    g.videoStatus = 'generating'; pushDtoUpdate();
+    log(`  · G${g.num} → Grok API (${durationSec}초, ${pr.aspect})…`);
+    try {
+      const r = await GA.generateVideoToFile({ imagePath: g.imagePath, prompt, aspect: pr.aspect, durationSec, outputPath: out, abortSignal: () => S.abort, logger: log });
+      if (r.success) { g.videoPath = r.videoPath; g.videoStatus = 'done'; log(`  ✓ G${g.num} 완료`); }
+      else { g.videoStatus = 'fail'; log(`  ✗ G${g.num} 실패: ${r.error}`); if (r.limitReached) { log('⛔ xAI 429 — 사용량/결제 한도. 작업을 멈춥니다'); S.abort = true; } }
+    } catch (e) { g.videoStatus = 'fail'; log(`  ✗ G${g.num} 오류: ${e.message}`); }
+    pushDtoUpdate();
+  }
+}
+
+// 비디오 생성 디스패치 — 'grok-api'=REST API, 그 외('grok'/'grok10')=브라우저 Grok.
+async function genGroupVideos(pr, mediaDir, onlyNums, videoEngine) {
+  if (videoEngine === 'grok-api') { await runGrokApiVideos(pr, mediaDir, onlyNums); return {}; }
+  return P.generateHookVideosGrok(pr, mediaDir, log, () => S.abort, 0, pushDtoUpdate, onlyNums, grokDurOf(videoEngine));
+}
+
 async function runRotatingImages(project, imagesDir, logger, styleId, startEngine, onlyNums) {
   // 유료(나노바나나 API) 선택 시 순환을 건너뛰고 Gemini API 로 직접 생성.
   if (startEngine === 'gemini') return runGeminiImages(project, imagesDir, logger, styleId, onlyNums);
@@ -1525,8 +1558,8 @@ ipcMain.handle('video-build', async (_e, args = {}) => {
     }
     try {
       {
-        log(`🎬 ${prLabel(pr)} 비디오 생성 (Grok ${grokDurOf(engine) === 'auto' ? '자동 6/10초' : grokDurOf(engine)}${rangeLbl})…`);
-        const vr = await P.generateHookVideosGrok(pr, videoDir, log, () => S.abort, 0, pushDtoUpdate, onlyNums, grokDurOf(engine));
+        if (engine !== 'grok-api') log(`🎬 ${prLabel(pr)} 비디오 생성 (Grok ${grokDurOf(engine) === 'auto' ? '자동 6/10초' : grokDurOf(engine)}${rangeLbl})…`);
+        const vr = await genGroupVideos(pr, videoDir, onlyNums, engine);
         if (vr && vr.limitReached) { S.grokLimit = { reset: (vr && vr.reset) || '' }; recordGrokCooldown(vr); S.abort = true; log('⛔ Grok 요청 한도 도달 — 작업을 멈춥니다'); }
       }
       if (!S.abort) await maybeUpscale(pr, log, true); // 모든 영상 1080p 업스케일 (중단 시 생략)
@@ -1636,6 +1669,14 @@ ipcMain.handle('get-gemini-key', () => {
 ipcMain.handle('set-gemini-key', (_e, key) => {
   try { require('./tts/secret-store').set('gemini', { key: String(key || '').trim() }); log('Gemini API 키 저장됨'); return true; }
   catch (e) { log('Gemini 키 저장 실패: ' + e.message); return false; }
+});
+// xAI API 키 (secret-store 'xai') — Grok Imagine 비디오 API(grok-api 엔진)용. console.x.ai 에서 발급.
+ipcMain.handle('get-xai-key', () => {
+  try { const s = require('./tts/secret-store').get('xai'); return (s && s.key) || ''; } catch { return ''; }
+});
+ipcMain.handle('set-xai-key', (_e, key) => {
+  try { require('./tts/secret-store').set('xai', { key: String(key || '').trim() }); log('xAI API 키 저장됨'); return true; }
+  catch (e) { log('xAI 키 저장 실패: ' + e.message); return false; }
 });
 
 ipcMain.handle('pick-file', async (_e, args = {}) => {
@@ -2133,7 +2174,7 @@ async function runMakeAllCore(opts = {}) {
       const vOnly = rangeNums(pr, fromNum, toNum); // I2V 범위(미지정=전체)
       const t0 = Date.now();
       try {
-        const vr = await P.generateHookVideosGrok(pr, dirs.media, log, () => S.abort, 0, pushDtoUpdate, vOnly, grokDurOf(videoEngine));
+        const vr = await genGroupVideos(pr, dirs.media, vOnly, videoEngine);
         if (vr && vr.limitReached) { S.grokLimit = { reset: (vr && vr.reset) || '' }; recordGrokCooldown(vr); S.abort = true; log('⛔ Grok 요청 한도 도달 — 작업을 멈춥니다 (한도 풀린 뒤 다시 만들기)'); }
         if (!S.abort) await maybeUpscale(pr, log, true); // 모든 영상 1080p 업스케일 (중단 시 생략)
       } catch (e) { log(`${prLabel(pr)} 영상 실패: ${e.message}`); }
@@ -2447,7 +2488,7 @@ ipcMain.handle('video-group', async (_e, args = {}) => {
     g.videoPath = null; g.videoStatus = 'generating'; pushDtoUpdate();
   } catch {}
   try {
-    await P.generateHookVideosGrok(pr, videoDir, log, () => S.abort, 0, pushDtoUpdate, [groupNum], grokDurOf(engine));
+    await genGroupVideos(pr, videoDir, [groupNum], engine);
     await maybeUpscale(pr, log, true);
     if (g.videoPath) log(`✓ G${groupNum} 영상 완료`);
     else { g.videoStatus = 'fail'; log(`✗ G${groupNum} 영상 실패 — 생성되지 않았습니다 (Grok 한도·오류 확인)`); } // 실패 시 'generating' 고착 방지
