@@ -84,6 +84,7 @@ contextBridge.exposeInMainWorld('api', {
   geminiBatchRetrieve: () => ipcRenderer.invoke('gemini-batch-retrieve'),
   saveQueue: () => ipcRenderer.invoke('save-queue'),
   loadQueue: () => ipcRenderer.invoke('load-queue'),
+  clearSaves: () => ipcRenderer.invoke('clear-saves'),
   runBatch: (args) => ipcRenderer.invoke('run-batch', args),
   setTitle: (args) => ipcRenderer.invoke('set-title', args),
   readAudio: (p) => ipcRenderer.invoke('read-audio', p),

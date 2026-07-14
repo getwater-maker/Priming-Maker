@@ -1888,17 +1888,22 @@ function overlaySnapshot(parsed, snap) {
 }
 
 // 프로젝트 저장/불러오기 (대본 1개 기준 스냅샷)
+// 저장 전용 폴더 — 작업(.smproj.json)·큐(.pmqueue.json) 파일만 모임. 전체삭제 대상. (자동이어받기 projects/ 와 분리)
+function savesDir() { const d = path.join(os.homedir(), '.priming-maker', 'saves'); try { fs.mkdirSync(d, { recursive: true }); } catch {} return d; }
+function _saveStamp() { const d = new Date(); const p = (n) => String(n).padStart(2, '0'); return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}`; }
 ipcMain.handle('save-project', async () => {
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
-  const file = writeSnapshotSync();
-  if (!file) throw new Error('저장 실패 — 로그를 확인하세요.');
-  log(`💾 프로젝트 저장: ${file}`);
+  writeSnapshotSync(); // 자동이어받기(projects/) 최신화는 유지
+  const snap = buildSnapshot();
+  if (!snap) throw new Error('저장 실패 — 로그를 확인하세요.');
+  const base = (_safeFolder(S.parsed.fileTitle || 'project') || 'project').slice(0, 50);
+  const file = path.join(savesDir(), `작업_${base}_${_saveStamp()}.smproj.json`);
+  try { fs.writeFileSync(file, JSON.stringify(snap, null, 2), 'utf8'); } catch (e) { throw new Error('저장 실패: ' + e.message); }
+  log(`💾 작업 저장: ${path.basename(file)}`);
   return { file };
 });
 ipcMain.handle('load-project', async () => {
-  const projDir = path.join(os.homedir(), '.priming-maker', 'projects');
-  fs.mkdirSync(projDir, { recursive: true });
-  const r = await dialog.showOpenDialog(win, { properties: ['openFile'], defaultPath: projDir, filters: [{ name: 'Shots 프로젝트', extensions: ['json'] }] });
+  const r = await dialog.showOpenDialog(win, { properties: ['openFile'], defaultPath: savesDir(), filters: [{ name: 'Priming 작업', extensions: ['smproj.json', 'json'] }] });
   if (r.canceled || !r.filePaths[0]) return null;
   const snap = JSON.parse(fs.readFileSync(r.filePaths[0], 'utf8'));
   const projects = projectsFromSnapshot(snap);
@@ -2265,22 +2270,22 @@ ipcMain.handle('list-queue', () => ({ queue: queueDTO(), dto: S.parsed ? P.toDTO
 ipcMain.handle('save-queue', async () => {
   const total = ['longform', 'shorts', 'playlist', 'book'].reduce((n, m) => n + ((S.modes[m] && S.modes[m].items.length) || 0), 0);
   if (!total) { log('저장할 큐가 비어있습니다.'); return { ok: false, reason: 'empty' }; }
-  const dir = path.join(os.homedir(), '.priming-maker', 'queues');
-  try { fs.mkdirSync(dir, { recursive: true }); } catch {}
-  const d = new Date();
-  const stamp = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}_${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}`;
-  const r = await dialog.showSaveDialog(win, { defaultPath: path.join(dir, `큐_${stamp}.pmqueue.json`), filters: [{ name: 'Priming 큐', extensions: ['pmqueue.json', 'json'] }] });
-  if (r.canceled || !r.filePath) return { ok: false, reason: 'cancel' };
+  const file = path.join(savesDir(), `큐_${_saveStamp()}.pmqueue.json`);
   try {
-    fs.writeFileSync(r.filePath, JSON.stringify(serializeQueue(), null, 2), 'utf8');
-    log(`💾 큐 저장: ${path.basename(r.filePath)} (${total}개 대본)`);
-    return { ok: true, path: r.filePath, count: total };
+    fs.writeFileSync(file, JSON.stringify(serializeQueue(), null, 2), 'utf8');
+    log(`💾 큐 저장: ${path.basename(file)} (${total}개 대본)`);
+    return { ok: true, path: file, count: total };
   } catch (e) { log('큐 저장 실패: ' + e.message); return { ok: false, reason: 'write', error: e.message }; }
 });
+// 저장 폴더(saves) 전체삭제 — 작업·큐 파일만. 자동이어받기(projects/)·워크스페이스는 건드리지 않음.
+ipcMain.handle('clear-saves', () => {
+  const dir = savesDir(); let n = 0;
+  try { for (const f of fs.readdirSync(dir)) { if (/\.(smproj|pmqueue)\.json$/i.test(f) || /\.json$/i.test(f)) { try { fs.unlinkSync(path.join(dir, f)); n++; } catch {} } } } catch {}
+  log(`🗑 저장 폴더 비움 — ${n}개 파일 삭제 (${dir})`);
+  return { ok: true, count: n, dir };
+});
 ipcMain.handle('load-queue', async () => {
-  const dir = path.join(os.homedir(), '.priming-maker', 'queues');
-  const opt = { properties: ['openFile'], filters: [{ name: 'Priming 큐', extensions: ['pmqueue.json', 'json'] }] };
-  if (fs.existsSync(dir)) opt.defaultPath = dir;
+  const opt = { properties: ['openFile'], defaultPath: savesDir(), filters: [{ name: 'Priming 큐', extensions: ['pmqueue.json', 'json'] }] };
   const r = await dialog.showOpenDialog(win, opt);
   if (r.canceled || !r.filePaths[0]) return { ok: false, reason: 'cancel', queue: queueDTO(), dto: S.parsed ? P.toDTO(S.parsed) : null, mode: S.mode };
   let ws;

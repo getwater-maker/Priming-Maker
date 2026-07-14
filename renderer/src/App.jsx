@@ -380,6 +380,12 @@ export default function App() {
       setStatus(`📂 큐 불러오기 — ${r.count}개 대본 복구`);
     } catch (e) { logline('큐 불러오기 오류: ' + e.message); }
   }
+  // 저장 폴더(saves) 전체삭제 — 확인 팝업 필수
+  async function deleteSaves() {
+    if (!window.confirm('저장 폴더(saves)의 「작업·큐 저장 파일」을 모두 삭제합니다.\n\n⚠ 되돌릴 수 없습니다.\n(진행 중 대본의 자동 이어받기 데이터는 삭제되지 않습니다.)\n\n정말 모두 삭제할까요?')) return;
+    try { const r = await api.clearSaves(); setStatus(`🗑 저장 파일 ${(r && r.count) || 0}개 삭제됨`); }
+    catch (e) { logline('전체삭제 오류: ' + e.message); }
+  }
   // 큐에서 대본 제거
   async function removeQueueItem(id) {
     try { const r = await api.removeQueueItem(id); if (r.queue) setQueue(r.queue); setDto(r.dto || null); setFtitle(r.dto ? (r.dto.fileTitle || '') : ''); setStatus('대본 제거됨'); }
@@ -1222,15 +1228,13 @@ export default function App() {
                 <button className="ghost" title="음성·영상 파일을 텍스트로 변환(STT) → 원본과 같은 폴더에 같은 이름 .txt 생성 (OmniVoice Whisper)" onClick={runStt}>🎧 STT</button>
               </span>
               <span className="hgroup">
-                <span className="glabel">작업</span>
-                <button className="ghost" disabled={!loaded} title="수동 저장(자동저장도 항상 켜져 있음)" onClick={saveProject}>💾 저장</button>
-                <button className="ghost" title="저장한 프로젝트 불러오기" onClick={loadProject}>📂 불러오기</button>
+                <span className="glabel">저장·불러오기</span>
+                <button className="ghost" disabled={!loaded} title="현재 대본 작업을 파일로 저장 (saves 폴더에 '작업_제목_날짜.smproj.json'). 자동저장도 항상 켜져 있음" onClick={saveProject}>💾 작업저장</button>
+                <button className="ghost" title="저장한 작업 파일 불러오기 (saves 폴더)" onClick={loadProject}>📂 작업열기</button>
+                <button className="ghost" title="현재 작업 큐 전체(대본 목록·채널·설정)를 파일로 저장 (saves 폴더에 '큐_날짜.pmqueue.json')" onClick={saveQueueFile}>💾 큐저장</button>
+                <button className="ghost" title="저장한 큐를 통째로 불러오기 — 대본 목록 복구 + 각 대본 작업물 이어짐 (saves 폴더)" onClick={loadQueueFile}>📂 큐열기</button>
+                <button className="ghost" style={{ color: '#c0392b' }} title="저장 폴더(saves)의 작업·큐 파일을 모두 삭제 (확인 팝업 있음). 진행 중 대본의 자동 이어받기 데이터는 삭제되지 않습니다." onClick={deleteSaves}>🗑 전체삭제</button>
                 <button className="ghost" title="새 작업 — 현재 화면 비우기" onClick={resetProject}>🆕 초기화</button>
-              </span>
-              <span className="hgroup">
-                <span className="glabel">큐</span>
-                <button className="ghost" title="현재 작업 큐 전체(대본 목록·채널·설정·상태)를 파일로 저장 — 나중에 통째로 불러오기" onClick={saveQueueFile}>💾 큐저장</button>
-                <button className="ghost" title="저장한 큐를 통째로 불러오기 — 대본 목록이 복구되고 각 대본의 작업물(첨부 이미지·TTS)도 이어짐" onClick={loadQueueFile}>📂 큐불러오기</button>
               </span>
             </>)}
             {isPl && <button onClick={openPlaylist}>🎵 플리 스펙 열기</button>}
