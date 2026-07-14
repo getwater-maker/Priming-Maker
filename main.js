@@ -2086,14 +2086,19 @@ ipcMain.handle('run-batch', async (_e, args = {}) => {
     log(`▶ [${i + 1}/${plan.length}] ${S.mode === 'longform' ? '롱폼' : '쇼츠'} · ${label}`);
     const s = entry.settings || {};
     try {
+      // 비디오·이미지 엔진은 '이번 만들기 전체' 공통값(헤더)을 우선 사용 — 큐에 굳어 있던 항목별 stale
+      //   값(예: 헤더는 '없음(이미지만)'인데 항목은 'grok')이 무시돼 원치 않는 영상이 만들어지던 문제 방지.
+      //   common 에 없으면(구버전 렌더러 등) 항목값으로 폴백. 채널·배속·스타일은 여전히 항목별.
+      const ve = (common.videoEngine != null) ? common.videoEngine : (s.videoEngine || 'grok');
+      const ie = common.imgEngine || s.imgEngine || 'genspark';
       await runMakeAllCore({
-        engine: s.imgEngine || 'genspark', presetName: s.presetName || null, speed: s.ttsSpeed || null,
+        engine: ie, presetName: s.presetName || null, speed: s.ttsSpeed || null,
         styleId: s.styleId || null,
         fromNum: (s.vidFrom != null && s.vidFrom !== '') ? parseInt(s.vidFrom, 10) : null,
         toNum: (s.vidTo != null && s.vidTo !== '') ? parseInt(s.vidTo, 10) : null,
-        videoEngine: s.videoEngine || 'grok', flowVideoModel: s.flowVideoModel || 'Veo 3.1 - Lite', flowCount: s.flowCount || 'x1',
+        videoEngine: ve, flowVideoModel: common.flowVideoModel || s.flowVideoModel || 'Veo 3.1 - Lite', flowCount: common.flowCount || s.flowCount || 'x1',
         captionStyle: common.captionStyle || null, captionMaxChars: common.captionMaxChars || 7,
-        clipMaxSec: clipMaxOf(s.videoEngine || 'grok'), aiNotice: !!s.aiNotice, // 쇼츠 그룹 재구성 캡 + AI 고지(사용자 선택)
+        clipMaxSec: clipMaxOf(ve), aiNotice: !!s.aiNotice, // 쇼츠 그룹 재구성 캡 + AI 고지(사용자 선택)
         dry: false, openVrew: openEach, openFolder: false, // openEach=순차 .vrew 열기(단건과 동일). 폴더는 끝에 1번만
       });
       it.status = 'done'; okN++;
