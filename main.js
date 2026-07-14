@@ -1065,13 +1065,16 @@ async function runGeminiImages(project, imagesDir, logger, styleId, onlyNums) {
 async function runComfyImages(project, imagesDir, logger, styleId, onlyNums) {
   const CI = require('./core/comfy-image');
   const cfg = CI.loadConfig();
-  if (!cfg.workflowPath) { logger('⚠ ComfyUI 워크플로 미지정 — ⚙ ComfyUI 에서 z-image "저장(API 포맷)" JSON 을 지정하세요.'); return; }
+  if (!cfg.workflowPath) { logger('⚠ ComfyUI 워크플로 미지정 — ⚙ ComfyUI 에서 워크플로(API 포맷 JSON)를 지정하세요.'); return; }
   const eng = new CI.ComfyImage(cfg, logger);
   const stylePrompt = styleId ? (require('./core/style-store').getPrompt(styleId) || '') : '';
   const targets = project.groups.filter((g) => g.imagePrompt && g.imagePrompt.trim() && !hasVisual(g) && (!onlyNums || onlyNums.includes(g.num)));
   if (!targets.length) return;
   try { fs.mkdirSync(imagesDir, { recursive: true }); } catch {}
-  logger(`🧩 ComfyUI ${cfg.cloud ? '클라우드' : '로컬'}(z-image) — ${targets.length}장 생성 (${eng.baseUrl})`);
+  // 활성 워크플로 이름(하드코딩 'z-image' 아님) — 실제 선택된 모델(Z-image/Krea2 등)을 로그에 표기.
+  const _wf = (cfg.workflows || []).find((w) => w.path === cfg.workflowPath);
+  const _wfName = _wf ? _wf.name : path.basename(cfg.workflowPath).replace(/\.json$/i, '');
+  logger(`🧩 ComfyUI ${cfg.cloud ? '클라우드' : '로컬'}(${_wfName}) — ${targets.length}장 생성 (${eng.baseUrl})`);
   for (const g of targets) {
     if (S.abort) { logger('⏹ 중단됨'); break; }
     const prompt = P.buildImagePrompt(stylePrompt, g.imagePrompt);

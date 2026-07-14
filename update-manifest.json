@@ -1,5 +1,5 @@
 {
-  "version": "0.2.33",
+  "version": "0.2.34",
   "deps": "0a1409dd7b6c37e6b850a8223ac05d93b0380d94",
   "files": {
     "AGENTS.md": "1a0fd73c104ff40f5cce110a3ffac07a7aa77205",
@@ -64,9 +64,9 @@
     "image/image-manager.js": "d0813dac4ce63498592b8037d5ccd81f3e59ea81",
     "image/providers/gemini-image-provider.js": "cf341221315558eeb1676b4279270976684389d2",
     "light-updater.js": "c9be26807112942a9cf4a88dfcd14a1004634762",
-    "main.js": "a9b474c02f16fe52d0de64fa4a9e4189bd3662c7",
+    "main.js": "e1c3dfbc56bb2186d880d629a2be92f8708aa931",
     "package-lock.json": "c6fea8decaa5e80e4aa524b7d5cfcbafa63f810f",
-    "package.json": "27078f5594c913770c0fecb9a42bd9602ff19474",
+    "package.json": "b490a4ba239efc05b15b783a29589b594217b7d7",
     "preload.js": "5a8475806d95417541aecf42ff18450e855c357c",
     "renderer/dist/assets/index-CVajGj_3.js": "5da96db7e51ebca009312046a6a1f9ee6d48705f",
     "renderer/dist/assets/index-CyleVltf.css": "3dd5ab7c23151ec908795fba6ac504e394fa281e",
