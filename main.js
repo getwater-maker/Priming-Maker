@@ -1632,23 +1632,27 @@ function flushAutoSave() {
 // ── 작업 큐(워크스페이스) 영속 ── 어떤 대본들이 적재됐는지(목록/설정/상태/활성)를 저장.
 //   대본 작업 내용 자체는 각 .smproj.json 에 있고, 여기엔 scriptPath·settings·status 만 기록.
 function workspaceFile() { return path.join(os.homedir(), '.priming-maker', 'workspace.json'); }
+// 큐 전체 직렬화 (workspace 자동저장 + '큐 저장' 공용). 대본경로·설정·상태만 저장(작업물은 .smproj).
+function serializeQueue() {
+  const ser = (mode) => {
+    const q = S.modes[mode];
+    return { activeId: q.activeId, items: q.items.map((it) => ({ id: it.id, scriptPath: it.scriptPath, settings: it.settings || null, status: it.status || 'idle' })) };
+  };
+  return { version: 1, mode: S.mode, longform: ser('longform'), shorts: ser('shorts'), playlist: ser('playlist'), book: ser('book') };
+}
 function writeWorkspace() {
   try {
-    const ser = (mode) => {
-      const q = S.modes[mode];
-      return { activeId: q.activeId, items: q.items.map((it) => ({ id: it.id, scriptPath: it.scriptPath, settings: it.settings || null, status: it.status || 'idle' })) };
-    };
-    const ws = { version: 1, mode: S.mode, longform: ser('longform'), shorts: ser('shorts'), playlist: ser('playlist'), book: ser('book') };
+    const ws = serializeQueue();
     const f = workspaceFile(); const tmp = f + '.tmp';
     fs.mkdirSync(path.dirname(f), { recursive: true });
     fs.writeFileSync(tmp, JSON.stringify(ws, null, 2), 'utf8'); fs.renameSync(tmp, f);
   } catch { /* ignore */ }
 }
 // 앱 시작 시 큐 복원 — 저장된 대본들을 다시 파싱(+작업본 복원)해 큐 재구성.
-function restoreWorkspace() {
+function applyWorkspace(ws, opts = {}) {
   try {
-    const f = workspaceFile(); if (!fs.existsSync(f)) return;
-    const ws = JSON.parse(fs.readFileSync(f, 'utf8')); if (!ws) return;
+    if (!ws) return 0;
+    if (opts.clear) { for (const m of ['longform', 'shorts', 'playlist', 'book']) { const q = S.modes[m]; if (q) { q.items = []; q.activeId = null; } } }
     let restored = 0;
     for (const mode of ['longform', 'shorts']) {
       const wq = ws[mode]; if (!wq || !Array.isArray(wq.items)) continue;
@@ -1707,7 +1711,8 @@ function restoreWorkspace() {
     S.mode = normMode(ws.mode);
     syncActiveToS();
     if (restored) log(`♻ 작업 큐 복원: ${restored}개 대본 (${S.mode})`);
-  } catch (e) { log('큐 복원 실패: ' + (e && e.message)); }
+    return restored;
+  } catch (e) { log('큐 복원 실패: ' + (e && e.message)); return 0; }
 }
 // 스냅샷 JSON → Project[] 복원 (load-project / open-script 자동복원 공용)
 function projectsFromSnapshot(snap) {
@@ -2134,6 +2139,38 @@ ipcMain.handle('reset-project', () => {
 
 // ── 작업 큐 ── 현재 모드의 적재 대본 목록 조회/선택/제거. (mount 복원용 dto/mode 포함)
 ipcMain.handle('list-queue', () => ({ queue: queueDTO(), dto: S.parsed ? P.toDTO(S.parsed) : null, mode: S.mode }));
+
+// ── 큐 전체 저장/불러오기 ── 다중 작업 세트를 파일(.pmqueue.json)로 저장 후 통째로 복구.
+//   저장 = 대본목록·채널·설정·상태. 불러오기 = 그 목록을 다시 파싱(+.smproj 작업물 이어받기)해 큐 재구성.
+ipcMain.handle('save-queue', async () => {
+  const total = ['longform', 'shorts', 'playlist', 'book'].reduce((n, m) => n + ((S.modes[m] && S.modes[m].items.length) || 0), 0);
+  if (!total) { log('저장할 큐가 비어있습니다.'); return { ok: false, reason: 'empty' }; }
+  const dir = path.join(os.homedir(), '.priming-maker', 'queues');
+  try { fs.mkdirSync(dir, { recursive: true }); } catch {}
+  const d = new Date();
+  const stamp = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}_${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}`;
+  const r = await dialog.showSaveDialog(win, { defaultPath: path.join(dir, `큐_${stamp}.pmqueue.json`), filters: [{ name: 'Priming 큐', extensions: ['pmqueue.json', 'json'] }] });
+  if (r.canceled || !r.filePath) return { ok: false, reason: 'cancel' };
+  try {
+    fs.writeFileSync(r.filePath, JSON.stringify(serializeQueue(), null, 2), 'utf8');
+    log(`💾 큐 저장: ${path.basename(r.filePath)} (${total}개 대본)`);
+    return { ok: true, path: r.filePath, count: total };
+  } catch (e) { log('큐 저장 실패: ' + e.message); return { ok: false, reason: 'write', error: e.message }; }
+});
+ipcMain.handle('load-queue', async () => {
+  const dir = path.join(os.homedir(), '.priming-maker', 'queues');
+  const opt = { properties: ['openFile'], filters: [{ name: 'Priming 큐', extensions: ['pmqueue.json', 'json'] }] };
+  if (fs.existsSync(dir)) opt.defaultPath = dir;
+  const r = await dialog.showOpenDialog(win, opt);
+  if (r.canceled || !r.filePaths[0]) return { ok: false, reason: 'cancel', queue: queueDTO(), dto: S.parsed ? P.toDTO(S.parsed) : null, mode: S.mode };
+  let ws;
+  try { ws = JSON.parse(fs.readFileSync(r.filePaths[0], 'utf8')); }
+  catch (e) { log('큐 파일 읽기 실패: ' + e.message); return { ok: false, reason: 'parse', queue: queueDTO() }; }
+  const n = applyWorkspace(ws, { clear: true }); // 현재 큐 비우고 파일 내용으로 교체
+  writeWorkspace();
+  log(`📂 큐 불러오기: ${path.basename(r.filePaths[0])} — ${n}개 대본 복구`);
+  return { ok: true, count: n, dto: S.parsed ? P.toDTO(S.parsed) : null, queue: queueDTO(), mode: S.mode };
+});
 ipcMain.handle('select-queue-item', (_e, args = {}) => {
   const id = args && args.id;
   const q = S.modes[S.mode];

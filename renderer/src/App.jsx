@@ -354,6 +354,28 @@ export default function App() {
       if (it && it.settings) applySettings(it.settings);
     } catch (e) { logline('대본 선택 오류: ' + e.message); }
   }
+  // 큐 전체를 파일로 저장 (다중 작업 세트)
+  async function saveQueueFile() {
+    try {
+      const r = await api.saveQueue();
+      if (r && r.ok) setStatus(`💾 큐 저장 완료 — ${r.count}개 대본`);
+      else if (r && r.reason === 'empty') setStatus('저장할 큐가 없습니다');
+    } catch (e) { logline('큐 저장 오류: ' + e.message); }
+  }
+  // 저장한 큐를 통째로 불러오기 (현재 큐 교체)
+  async function loadQueueFile() {
+    try {
+      const r = await api.loadQueue();
+      if (!r || !r.ok) { if (r && r.reason !== 'cancel') logline('큐 불러오기 실패'); return; }
+      if (r.queue) setQueue(r.queue);
+      if (r.mode) { setMode(r.mode); setAspect(r.mode === 'longform' ? '16:9' : '9:16'); }
+      if (r.dto) { setDto(r.dto); setFtitle(r.dto.fileTitle || ''); }
+      const m = r.mode || 'longform';
+      const it = r.queue && r.queue[m] && r.queue[m].items.find((x) => x.active);
+      if (it && it.settings) applySettings(it.settings);
+      setStatus(`📂 큐 불러오기 — ${r.count}개 대본 복구`);
+    } catch (e) { logline('큐 불러오기 오류: ' + e.message); }
+  }
   // 큐에서 대본 제거
   async function removeQueueItem(id) {
     try { const r = await api.removeQueueItem(id); if (r.queue) setQueue(r.queue); setDto(r.dto || null); setFtitle(r.dto ? (r.dto.fileTitle || '') : ''); setStatus('대본 제거됨'); }
@@ -1156,6 +1178,11 @@ export default function App() {
                 <button className="ghost" disabled={!loaded} title="수동 저장(자동저장도 항상 켜져 있음)" onClick={saveProject}>💾 저장</button>
                 <button className="ghost" title="저장한 프로젝트 불러오기" onClick={loadProject}>📂 불러오기</button>
                 <button className="ghost" title="새 작업 — 현재 화면 비우기" onClick={resetProject}>🆕 초기화</button>
+              </span>
+              <span className="hgroup">
+                <span className="glabel">큐</span>
+                <button className="ghost" title="현재 작업 큐 전체(대본 목록·채널·설정·상태)를 파일로 저장 — 나중에 통째로 불러오기" onClick={saveQueueFile}>💾 큐저장</button>
+                <button className="ghost" title="저장한 큐를 통째로 불러오기 — 대본 목록이 복구되고 각 대본의 작업물(첨부 이미지·TTS)도 이어짐" onClick={loadQueueFile}>📂 큐불러오기</button>
               </span>
             </>)}
             {isPl && <button onClick={openPlaylist}>🎵 플리 스펙 열기</button>}
