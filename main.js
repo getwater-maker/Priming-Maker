@@ -953,6 +953,23 @@ async function runGeminiImages(project, imagesDir, logger, styleId, onlyNums) {
   }
 }
 
+// Genspark 한도 메시지의 재설정 시각 파싱 — "AI Image 5시간 제한에 도달했습니다. 7월 14일 오후 3:39에 재설정됩니다"
+//   파싱 성공 → 그 시각(ms). 실패 → 지금+60분(보수적 기본). 24시간 초과로 파싱되면 오파싱으로 보고 기본값.
+function parseLimitResetTime(msg) {
+  const FALLBACK = Date.now() + 60 * 60 * 1000;
+  const m = String(msg || '').match(/(\d{1,2})월\s*(\d{1,2})일\s*(오전|오후)\s*(\d{1,2}):(\d{2})/);
+  if (!m) return FALLBACK;
+  let h = parseInt(m[4], 10) % 12;
+  if (m[3] === '오후') h += 12;
+  const now = new Date();
+  let d = new Date(now.getFullYear(), parseInt(m[1], 10) - 1, parseInt(m[2], 10), h, parseInt(m[5], 10));
+  if (d.getTime() <= Date.now()) d = new Date(d.getFullYear() + 1, d.getMonth(), d.getDate(), h, parseInt(m[5], 10)); // 연말 경계
+  const ts = d.getTime();
+  if (ts - Date.now() > 24 * 60 * 60 * 1000) return FALLBACK; // 5시간 제한인데 하루 넘게 나오면 오파싱
+  return ts;
+}
+const fmtClock = (ts) => { const d = new Date(ts); return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
+
 async function runRotatingImages(project, imagesDir, logger, styleId, startEngine, onlyNums) {
   // 유료(나노바나나 API) 선택 시 순환을 건너뛰고 Gemini API 로 직접 생성.
   if (startEngine === 'gemini') return runGeminiImages(project, imagesDir, logger, styleId, onlyNums);
@@ -971,9 +988,15 @@ async function runRotatingImages(project, imagesDir, logger, styleId, startEngin
     try {
       if (engineId === 'genspark') {
         // Genspark 멀티계정: 한 계정이 한도면 다음 계정으로, 계정 모두 소진 시 다음 엔진으로.
+        //   한도 감지 시 메시지의 '재설정 시각'을 기억(쿨다운) → 그 전엔 접속 시도 없이 바로 다음 엔진으로.
         const GsAcc = require('./core/genspark-accounts');
         const accounts = GsAcc.activeAccounts();
-        if (!accounts.length) { logger('⚠ 모든 Genspark 계정 오늘 한도 — 다음 엔진으로'); continue; }
+        if (!accounts.length) {
+          const cools = GsAcc.list().accounts.map((a) => ({ a, t: GsAcc.cooldownUntil(a.id) })).filter((x) => x.t);
+          const till = cools.length ? ` (한도 재설정 ${fmtClock(Math.min(...cools.map((x) => x.t)))} 이후 재시도)` : '';
+          logger(`⏭ Genspark 건너뜀 — 모든 계정 한도/쿨다운${till} → 다음 엔진으로`);
+          continue;
+        }
         for (const acc of accounts) {
           if (S.abort) break;
           const stillNeed = need(); if (!stillNeed.length) break;
@@ -981,7 +1004,12 @@ async function runRotatingImages(project, imagesDir, logger, styleId, startEngin
           logger(`🔑 Genspark 계정: ${acc.label} — 남은 ${stillNeed.length}장`);
           const r = await P.generateImagesGenspark(project, imagesDir, logger, () => S.abort, stylePrompt, ns, pushDtoUpdate, acc.id);
           if (r && r.ok) GsAcc.markUsed(acc.id, r.ok); // 성공분만 카운트
-          if (r && r.limitReached) { logger(`⚠ Genspark 계정 "${acc.label}" 한도 — 다음 계정/엔진으로`); continue; }
+          if (r && r.limitReached) {
+            const until = parseLimitResetTime(typeof r.limitReached === 'string' ? r.limitReached : '');
+            GsAcc.setCooldown(acc.id, until);
+            logger(`⏸ Genspark 계정 "${acc.label}" 한도 — ${fmtClock(until)}까지 이 계정 건너뜀(재설정 시각 기억) → 다음 계정/엔진으로`);
+            continue;
+          }
           break; // 한도가 아닌 이유로 끝남(나머지는 차단/실패) → Genspark 더 시도 무의미
         }
       } else if (engineId === 'flow') {
@@ -1226,9 +1254,11 @@ async function deriveBgmMood(project, moodOverride, logger) {
   return BGM_DEFAULT_MOOD;
 }
 
-ipcMain.handle('image-build', async (_e, args = {}) => {
-  if (!S.parsed) throw new Error('대본을 먼저 여세요.');
+ipcMain.handle('image-build', (_e, args = {}) => {
   const { shortsNum = null, engine = 'genspark', styleId = null } = args;
+  // 단건 재생성(regen-group)과 같은 직렬 큐 — 브라우저 충돌(진행 중 작업 강제 종료) 방지
+  return enqueueImageJob(shortsNum ? `${shortsNum}편 이미지 생성` : '이미지 전체 생성', async () => {
+  if (!S.parsed) throw new Error('대본을 먼저 여세요.');
   S.abort = false;
   const stylePrompt = styleId ? (require('./core/style-store').getPrompt(styleId) || '') : '';
   // 프롬프트 없는 그룹 → API로 자동 생성 (내용 맞는 이미지)
@@ -1258,6 +1288,7 @@ ipcMain.handle('image-build', async (_e, args = {}) => {
   S.timings.image = (Date.now() - _imgT0) / 1000;
   pushDtoUpdate();
   return P.toDTO(S.parsed);
+  });
 });
 
 // 비주얼(이미지) 미생성 그룹 번호 — 이미지도 영상도 없는 그룹.
@@ -2202,23 +2233,38 @@ ipcMain.handle('video-group', async (_e, args = {}) => {
 });
 
 // 빈(또는 특정) 그룹 1개만 이미지 재생성 (Genspark 단일)
-ipcMain.handle('regen-group', async (_e, args = {}) => {
-  if (!S.parsed) throw new Error('대본을 먼저 여세요.');
+// ── 이미지 작업 직렬 큐 ── 단건 재생성/전체 생성이 동시에 돌면 같은 브라우저(Flow/Genspark)를
+//   두 작업이 잡아 먼저 것이 강제 종료됨("Target page ... has been closed") → 들어온 순서대로 하나씩 실행.
+let imageJobChain = Promise.resolve();
+let imageJobPending = 0;
+function enqueueImageJob(label, fn) {
+  imageJobPending++;
+  if (imageJobPending > 1) log(`⏳ ${label} — 이미지 작업 큐 대기 (앞에 ${imageJobPending - 1}건)`);
+  const run = () => fn();
+  const p = imageJobChain.then(run, run); // 앞 작업이 실패해도 다음 작업은 실행
+  imageJobChain = p.then(() => { imageJobPending--; }, () => { imageJobPending--; });
+  return p;
+}
+
+ipcMain.handle('regen-group', (_e, args = {}) => {
   const { shortsNum, groupNum, styleId = null, engine = 'genspark' } = args;
-  const pr = S.parsed.projects.find((p) => p.shortsNum === shortsNum);
-  const g = pr && pr.groups.find((x) => x.num === groupNum);
-  if (!g) return P.toDTO(S.parsed);
-  if (!g.imagePrompt || !g.imagePrompt.trim()) { log(`G${groupNum}: 이미지 프롬프트 없음`); return P.toDTO(S.parsed); }
-  S.abort = false;
-  const mediaDir = shortsDirs(S.outRoot, shortsNum).media;
-  log(`🔄 ${prLabel(pr)} G${groupNum} 이미지 재생성 (${engine})…`);
-  try {
-    g.imagePath = null; g.imageStatus = 'generating'; g.imageEngine = null; pushDtoUpdate(); // 강제 재생성(기존/캐시 우회)
-    await runRotatingImages(pr, mediaDir, log, styleId, engine, [groupNum]); // Flow+Genspark 순환, 이 그룹만
-    cacheGeneratedImages(pr, styleId, engine); // 새 결과 캐시 갱신(엔진 태그 맞춤)
-    log(`✓ G${groupNum} 재생성 완료`);
-  } catch (e) { log(`✗ G${groupNum} 재생성 실패: ${e.message}`); }
-  return P.toDTO(S.parsed);
+  return enqueueImageJob(`G${groupNum} 이미지 재생성`, async () => {
+    if (!S.parsed) throw new Error('대본을 먼저 여세요.');
+    const pr = S.parsed.projects.find((p) => p.shortsNum === shortsNum);
+    const g = pr && pr.groups.find((x) => x.num === groupNum);
+    if (!g) return P.toDTO(S.parsed);
+    if (!g.imagePrompt || !g.imagePrompt.trim()) { log(`G${groupNum}: 이미지 프롬프트 없음`); return P.toDTO(S.parsed); }
+    S.abort = false;
+    const mediaDir = shortsDirs(S.outRoot, shortsNum).media;
+    log(`🔄 ${prLabel(pr)} G${groupNum} 이미지 재생성 (${engine})…`);
+    try {
+      g.imagePath = null; g.imageStatus = 'generating'; g.imageEngine = null; pushDtoUpdate(); // 강제 재생성(기존/캐시 우회)
+      await runRotatingImages(pr, mediaDir, log, styleId, engine, [groupNum]); // Flow+Genspark 순환, 이 그룹만
+      cacheGeneratedImages(pr, styleId, engine); // 새 결과 캐시 갱신(엔진 태그 맞춤)
+      log(`✓ G${groupNum} 재생성 완료`);
+    } catch (e) { log(`✗ G${groupNum} 재생성 실패: ${e.message}`); }
+    return P.toDTO(S.parsed);
+  });
 });
 
 // ── 이미지 프롬프트 내보내기/가져오기/API (prompt-io) ──────────────

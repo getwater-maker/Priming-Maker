@@ -7,6 +7,20 @@
 **편별 Vrew 4.0.1 .vrew 파일**을 자동 생성하는 Electron 앱. PrimingFlow(D:\PrimingFlow)의 엔진을
 복사·재활용한 독립 클론.
 
+## 🖼 이미지 한도 쿨다운 기억 + 재생성 직렬 큐 (2026-07-14, v0.2.19)
+> 증상 ① 그룹 단건 재생성마다 한도 걸린 Genspark 에 접속→제출→한도 확인→Flow 폴백(시간 낭비)
+>      ② 재생성 진행 중 다른 그룹 생성 클릭 → 같은 브라우저를 잡아 먼저 작업이 죽음("Target page ... closed")
+- **한도 쿨다운**: genspark 한도 메시지("…7월 14일 오후 3:39에 재설정됩니다")에서 재설정 시각 파싱
+  (`parseLimitResetTime` main.js — 파싱불가/오파싱(24h 초과)은 지금+60분) → `accounts.js setCooldown/cooldownUntil`
+  (계정별, `~/.priming-maker/genspark-accounts.json` cooldowns) → activeAccounts/pickActive 가 쿨다운 계정 제외
+  → 순환이 접속 시도 없이 "⏭ Genspark 건너뜀(재설정 HH:MM 이후)" 로그 후 다음 엔진 직행.
+  pipeline.js limitReached 가 bool 대신 **감지 메시지 문자열**을 담아 반환(파싱용, truthy 호환).
+  ⚠ 한도 후 첫 1회는 여전히 접속함(감지해야 시각을 앎) — 그 1회가 쿨다운을 기록.
+- **직렬 큐**: main.js `enqueueImageJob` — regen-group·image-build 를 하나의 promise 체인으로 순차 실행.
+  뒤 클릭은 "⏳ 큐 대기 (앞에 N건)" 로그 후 자기 차례에 실행. 앞 작업 실패해도 다음 실행(체인 유지).
+  검증: 순차성·실패격리·반환값 단위테스트 + 쿨다운 스토어/파서 단위테스트(실메시지 7/14 15:39 정파싱) 통과.
+- make-all 의 이미지 단계는 큐 미적용(범위 밖 — 필요시 추후).
+
 ## 📖 러닝헤드 — 장 시작 페이지 밑줄 제거 + '제N회' 뒤 공백 (2026-07-13, v0.2.15)
 > 요청: ① 회차 시작 페이지의 헤더 밑줄(글자 없이 떠 있는 줄) 제거 ② 러닝헤드 "제16회여포의…"→"제16회 여포의…"
 - **② 공백**: `string-set: chapter-title content()` 를 h2 에서 뽑으면 h2 가 `<span.ch-no>제16회</span>여포의…`

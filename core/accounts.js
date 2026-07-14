@@ -81,21 +81,41 @@ function makeAccountStore(service, idPrefix, defaultCap = 45) {
     save(c);
     return n;
   }
+  // 서비스 실제 한도 도달 시 재설정 시각까지 계정 잠금 — 엔진이 감지한 "N시에 재설정" 메시지 기반.
+  //   쿨다운 중 계정은 pickActive/activeAccounts 에서 제외 → 순환이 접속 시도 없이 다음 엔진으로 직행.
+  function setCooldown(id, untilTs) {
+    const c = load();
+    c.cooldowns = c.cooldowns || {};
+    c.cooldowns[id] = untilTs;
+    save(c);
+    return untilTs;
+  }
+  function cooldownUntil(id) {
+    const c = load();
+    const t = c.cooldowns && c.cooldowns[id];
+    return (t && t > Date.now()) ? t : 0; // 지난 쿨다운 = 0(해제)
+  }
+  function _cooling(c, id) {
+    const t = c.cooldowns && c.cooldowns[id];
+    return !!(t && t > Date.now());
+  }
   function pickActive() {
     const c = load();
     const unlimited = !(c.dailyCap > 0); // dailyCap<=0 → 앱 캡 무제한
-    for (const a of _accounts(c)) { if (unlimited || countToday(c, a.id) < c.dailyCap) return a; }
+    for (const a of _accounts(c)) { if (!_cooling(c, a.id) && (unlimited || countToday(c, a.id) < c.dailyCap)) return a; }
     return null;
   }
   // 오늘 한도 안 찬 계정들(순서대로) — 순환에서 한 계정 소진 시 다음 계정으로.
   //   dailyCap<=0(무제한)이면 항상 모든 계정 활성 — 엔진이 실제 한도 메시지를 감지할 때만 전환.
+  //   단, 쿨다운(실제 한도 재설정 대기) 중 계정은 무제한이어도 제외.
   function activeAccounts() {
     const c = load();
-    if (!(c.dailyCap > 0)) return _accounts(c);
-    return _accounts(c).filter((a) => countToday(c, a.id) < c.dailyCap);
+    const base = _accounts(c).filter((a) => !_cooling(c, a.id));
+    if (!(c.dailyCap > 0)) return base;
+    return base.filter((a) => countToday(c, a.id) < c.dailyCap);
   }
 
-  return { load, save, list, add, remove, rename, setCap, markUsed, pickActive, activeAccounts, FILE };
+  return { load, save, list, add, remove, rename, setCap, markUsed, setCooldown, cooldownUntil, pickActive, activeAccounts, FILE };
 }
 
 module.exports = { makeAccountStore };

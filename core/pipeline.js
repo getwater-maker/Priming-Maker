@@ -366,7 +366,7 @@ async function generateImagesGenspark(project, imagesDir, logger, abortSignal, s
   const BATCH = 6;
   const MAX_SINGLE_TRY = 2;
   const results = new Array(idx.length);
-  let limitReached = false; // 사용 한도/제한 도달 → 순환에서 다음 엔진으로 넘기는 신호
+  let limitReached = false; // 사용 한도/제한 도달 → 순환에서 다음 엔진으로 넘기는 신호. 감지 메시지(문자열)가 담기면 재설정 시각 파싱용.
   try {
     for (let start = 0; start < idx.length; start += BATCH) {
       if (abortSignal && abortSignal()) break;
@@ -381,7 +381,8 @@ async function generateImagesGenspark(project, imagesDir, logger, abortSignal, s
       };
       log(`[Genspark] 배치 ${Math.floor(start / BATCH) + 1}: ${ps.length}장 한 번에 제출`);
       const r = await eng.generateImagesBatch({ prompts: ps, outputPaths: ops, abortSignal: abortSignal || (() => false), onSaved: mapSave });
-      if (r.some((x) => x && x.limit)) { limitReached = true; log('[Genspark] ⚠ 사용 한도/제한 도달 — 남은 이미지는 순환의 다음 엔진으로'); break; }
+      const limHit = r.find((x) => x && x.limit);
+      if (limHit) { limitReached = String(limHit.error || true); log('[Genspark] ⚠ 사용 한도/제한 도달 — 남은 이미지는 순환의 다음 엔진으로'); break; }
       for (let k = 0; k < ps.length; k++) if (r[k] && r[k].path) saved[k] = r[k];
 
       // 빠진 컷 → 단건 재생성 (6장이 다 나올 때까지)
@@ -400,7 +401,7 @@ async function generateImagesGenspark(project, imagesDir, logger, abortSignal, s
             log(`[Genspark] 단건 재생성 G${num} (시도 ${attempt}/${MAX_SINGLE_TRY})${prevBlocked ? ' · 프롬프트 순화' : ''}`);
             const rr = await eng.generateImagesBatch({ prompts: [usePrompt], outputPaths: [ops[k]], abortSignal: abortSignal || (() => false), onSaved: (_kk, p) => mapSave(k, p) });
             if (rr[0] && rr[0].path) { saved[k] = rr[0]; break; }
-            if (rr[0] && rr[0].limit) { limitReached = true; break; } // 한도 → 단건 중단
+            if (rr[0] && rr[0].limit) { limitReached = String(rr[0].error || true); break; } // 한도 → 단건 중단
             prevBlocked = !!(rr[0] && rr[0].blocked);
             if (prevBlocked) log(`[Genspark] G${num} NSFW 차단 감지 — 다음 시도는 프롬프트 순화`);
             else if (attempt < MAX_SINGLE_TRY) log(`[Genspark] G${num} 단건 실패 — 재시도`);
