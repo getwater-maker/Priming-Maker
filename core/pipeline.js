@@ -142,11 +142,22 @@ function listPresets() {
 }
 
 // ── TTS 매니저 (연결 완료 보장) ──────────────────────────
-async function makeTtsManager(logger, engine) {
-  const mgr = getTTS({ logger: logger || (() => {}) });
+//   OmniVoice/Supertonic 는 원격/로컬 서버라, 큰 작업 직후·모델 로딩 중엔 헬스체크(3초)를 순간 놓칠 수 있다.
+//   한 번 실패했다고 대본 하나를 통째로 스킵하지 않도록 몇 초 간격으로 재시도한 뒤에만 미가동으로 판정한다.
+async function makeTtsManager(logger, engine, opts = {}) {
+  const log = logger || (() => {});
+  const mgr = getTTS({ logger: log });
   await mgr.start();
   // start()는 omnivoice/supertonic 연결을 await하지 않음 → refreshProvider로 완료 대기
-  const ok = await mgr.refreshProvider(engine);
+  let ok = await mgr.refreshProvider(engine);
+  const retries = opts.retries != null ? opts.retries : 3;      // gemini(키기반)는 사실상 즉시 성공/실패
+  const delayMs = opts.retryDelayMs != null ? opts.retryDelayMs : 5000;
+  for (let i = 0; !ok && i < retries; i++) {
+    log(`[TTS] '${engine}' 연결 실패 — ${Math.round(delayMs / 1000)}초 후 재시도 (${i + 1}/${retries}, 서버 부하/모델 로딩 대기)`);
+    await new Promise((r) => setTimeout(r, delayMs));
+    ok = await mgr.refreshProvider(engine);
+  }
+  if (ok) log(`[TTS] '${engine}' 연결 확정`);
   return { mgr, ok };
 }
 

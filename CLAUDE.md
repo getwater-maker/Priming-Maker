@@ -7,6 +7,15 @@
 **편별 Vrew 4.0.1 .vrew 파일**을 자동 생성하는 Electron 앱. PrimingFlow(D:\PrimingFlow)의 엔진을
 복사·재활용한 독립 클론.
 
+## 🐞 큐에서 TTS 서버 순간 미응답 = 대본 통째 스킵 → 재시도 추가 (2026-07-15, v0.2.41)
+> 증상: 5개 큐 중 87회만 실패 — `TTS 엔진 'omnivoice' 미가동`. 직후 88·89회는 정상 연결.
+- **원인**: `makeTtsManager`(pipeline.js)가 대본 시작마다 `refreshProvider`→OmniVoice `/health`(3초 타임아웃) **1회**만 확인.
+  직전 86회의 대형 작업(TTS 983초+비디오 2418초, 중단) 직후 LAN OmniVoice(192.168.219.157:9881) 서버가 부하 회복/모델
+  재로딩 중이라 그 **3초 창**을 놓침 → 재시도 없이 그 대본 실패 처리(`다음 대본 계속`). 일시적(88·89회 즉시 정상)이었음.
+- **수정**: `makeTtsManager(logger, engine, opts)` 에 재시도 추가 — 실패 시 5초 간격 **3회** 재연결 후에만 미가동 판정.
+  모든 호출 경로(make-all·run-batch·tts-build·tts-group) 공통 적용. gemini(키기반)는 즉시 성공/실패라 영향 미미.
+  interactive 단건에서 서버가 진짜 꺼져 있으면 ~18초 대기 후 실패(수용 가능), 배치 무인 실행은 blip 견딤.
+
 ## 🐞 일괄첨부 시 앱 멈춤 — media:// 프로토콜 동기 파일읽기 → 스트리밍 (2026-07-15, v0.2.40)
 > 증상: 대본 선택 후 「📎 일괄첨부」로 여러 영상 첨부하면 프로그램이 멈춤(freeze).
 - **원인**: `protocol.handle('media')` 가 파일을 **동기**(`fs.readFileSync`/`fs.readSync`)로 통째 읽음(main.js:242).
