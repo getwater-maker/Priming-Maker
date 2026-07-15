@@ -1695,6 +1695,29 @@ ipcMain.handle('add-preset', (_e, args = {}) => {
   log(`채널 "${name}" 추가 (복사 원본: ${src.name || '기본값'})`);
   return P.listPresets();
 });
+// 채널 이름 변경 — id 는 유지하고 name 만 교체. 큐 항목이 참조하던 옛 이름도 새 이름으로 옮김.
+ipcMain.handle('rename-preset', (_e, args = {}) => {
+  const store = require('./tts/preset-store');
+  const oldName = String((args && args.oldName) || '').trim();
+  const newName = String((args && args.newName) || '').trim();
+  if (!newName) throw new Error('새 채널 이름을 입력하세요.');
+  const all = store.loadAll();
+  const p = all.find((x) => x.name === oldName);
+  if (!p) throw new Error('채널을 찾을 수 없습니다.');
+  if (newName !== oldName && all.some((x) => x.name === newName)) throw new Error('같은 이름의 채널이 이미 있습니다.');
+  store.update(p.id, { name: newName });
+  // 현재 세션 큐 항목·활성 프리셋의 채널 이름 참조 갱신(옛 이름 → 새 이름)
+  try {
+    for (const m of Object.keys(S.modes || {})) {
+      for (const it of (S.modes[m].items || [])) {
+        if (it.settings && it.settings.presetName === oldName) it.settings.presetName = newName;
+      }
+    }
+    if (S.preset && S.preset.name === oldName) S.preset.name = newName;
+  } catch {}
+  log(`채널 이름 변경: "${oldName}" → "${newName}"`);
+  return P.listPresets();
+});
 // 채널 삭제 — 마지막 1개는 보호.
 ipcMain.handle('remove-preset', (_e, args = {}) => {
   const store = require('./tts/preset-store');

@@ -7,6 +7,13 @@
 **편별 Vrew 4.0.1 .vrew 파일**을 자동 생성하는 Electron 앱. PrimingFlow(D:\PrimingFlow)의 엔진을
 복사·재활용한 독립 클론.
 
+## ✏ 채널(프리셋) 이름 변경 기능 추가 (2026-07-15, v0.2.43)
+> 요청: 채널명을 수정할 방법이 없었음(추가·삭제만 있었음).
+- IPC `rename-preset({oldName,newName})` — preset id 유지, name 만 교체. 중복·빈이름 방어. 현재 세션 큐 항목
+  `settings.presetName`·활성 `S.preset.name` 도 옛→새 이름으로 갱신(참조 깨짐 방지). preload `renamePreset`.
+- ⚙ 채널편집 모달 상단에 **채널 이름 입력란** 추가. `saveChannel` 이 origName(`ch._raw.name`)과 다르면
+  renamePreset 먼저 호출 후 새 이름으로 savePreset. 저장 시 presetName state 도 새 이름으로.
+
 ## 🐞 큐 만들기 시 완료(done) 항목 재작업·vrew 재열림 → 완료 건너뜀 (2026-07-15, v0.2.42)
 > 증상: 완료(86·88)·실패(87)·진행중(89)·대기(90) 섞인 큐에서 「만들기」 → 완료된 86·88도 다시 만들고
 >   그 .vrew 를 또 엶. 게다가 완료된 60컷+영상 대본으로 활성 전환·재렌더·vrew 재열기까지 겹쳐 앱이 잠깐 멈춤.

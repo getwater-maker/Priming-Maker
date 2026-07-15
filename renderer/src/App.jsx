@@ -961,10 +961,14 @@ export default function App() {
       aiNotice: { ...((ch._raw && ch._raw.aiNotice) || {}), enabled: !!ch.aiNotice },
     };
     if (ch.seed !== '' && ch.seed != null) patch.seed = parseInt(ch.seed, 10);
+    const origName = (ch._raw && ch._raw.name) || ch.name;
+    const newName = (ch.name || '').trim();
+    if (!newName) { logline('채널 이름을 입력하세요'); return; }
     try {
-      await api.savePreset({ name: ch.name, patch });
-      await loadPresets(); setPresetName(ch.name); await loadStyles();
-      setChOpen(false); setStatus('채널 설정 저장됨');
+      if (newName !== origName) await api.renamePreset({ oldName: origName, newName }); // 이름부터 바꾸고(같은 id) 그 이름으로 설정 저장
+      await api.savePreset({ name: newName, patch });
+      await loadPresets(); setPresetName(newName); await loadStyles();
+      setChOpen(false); setStatus(newName !== origName ? `채널 이름 변경·저장됨 ("${origName}" → "${newName}")` : '채널 설정 저장됨');
     } catch (e) { logline('저장 오류: ' + e.message); }
   }
   async function pickRef() { const f = await api.pickFile({ filters: [{ name: '음성', extensions: ['wav', 'mp3', 'flac', 'm4a'] }] }); if (f) setCh((c) => ({ ...c, voiceCloneRefAudio: f })); }
@@ -1596,7 +1600,10 @@ export default function App() {
       {chOpen && ch && (
         <div className="modal-bg show">
           <div className="modal-card wide">
-            <h3>⚙ 채널(프리셋) 편집 — {ch.name}</h3>
+            <h3>⚙ 채널(프리셋) 편집 — {(ch._raw && ch._raw.name) || ch.name}</h3>
+            <div className="frow"><label>채널 이름</label>
+              <input style={{ flex: 1, padding: 6, fontWeight: 700 }} value={ch.name || ''} placeholder="채널 이름"
+                onChange={(e) => setCh({ ...ch, name: e.target.value })} title="이름을 바꾸고 저장하면 채널명이 변경됩니다 (설정·큐 참조 유지)" /></div>
             <div className="frow"><label>시작 화면</label>
               <select style={{ flex: '0 0 220px', padding: 6 }} value={ch.startMode || 'longform'} onChange={(e) => setCh({ ...ch, startMode: e.target.value })}>
                 <option value="longform">롱폼 (16:9)</option>

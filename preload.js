@@ -63,6 +63,7 @@ contextBridge.exposeInMainWorld('api', {
   getPresetDetail: (name) => ipcRenderer.invoke('get-preset-detail', name),
   savePreset: (args) => ipcRenderer.invoke('save-preset', args),
   addPreset: (args) => ipcRenderer.invoke('add-preset', args),
+  renamePreset: (args) => ipcRenderer.invoke('rename-preset', args),
   removePreset: (args) => ipcRenderer.invoke('remove-preset', args),
   getGeminiKey: () => ipcRenderer.invoke('get-gemini-key'),
   setGeminiKey: (key) => ipcRenderer.invoke('set-gemini-key', key),
