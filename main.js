@@ -1678,7 +1678,7 @@ ipcMain.handle('save-preset', (_e, args = {}) => {
   if (!p) throw new Error('프리셋을 찾을 수 없습니다.');
   store.update(p.id, args.patch || {});
   log(`채널 "${args.name}" 설정 저장`);
-  return store.loadAll().map((x) => ({ name: x.name, engine: x.engine, isDefault: !!x.isDefault }));
+  return store.loadAll().map((x) => ({ name: x.name, engine: x.engine, isDefault: !!x.isDefault, group: x.group || '' }));
 });
 // 채널 추가 — 현재(또는 지정) 채널 설정을 복사해 새 이름으로 생성.
 ipcMain.handle('add-preset', (_e, args = {}) => {

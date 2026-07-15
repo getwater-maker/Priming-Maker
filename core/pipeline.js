@@ -138,7 +138,7 @@ function getPreset(name) {
   return name ? all.find((p) => p.name === name) || null : presetStore.getDefault();
 }
 function listPresets() {
-  return presetStore.loadAll().map((p) => ({ name: p.name, engine: p.engine, isDefault: !!p.isDefault }));
+  return presetStore.loadAll().map((p) => ({ name: p.name, engine: p.engine, isDefault: !!p.isDefault, group: p.group || '' }));
 }
 
 // ── TTS 매니저 (연결 완료 보장) ──────────────────────────

@@ -7,6 +7,13 @@
 **편별 Vrew 4.0.1 .vrew 파일**을 자동 생성하는 Electron 앱. PrimingFlow(D:\PrimingFlow)의 엔진을
 복사·재활용한 독립 클론.
 
+## 🗂 채널 드롭다운 그룹 구분선 (2026-07-15, v0.2.44)
+> 요청: 채널이 많아질 예정 → 구분자(-----)로 구분. 결정: **그룹 이름으로 자동 구분**(사용자 선택).
+- preset 에 `group` 필드 추가. listPresets·save-preset 반환에 group 포함. ⚙ 채널편집 모달에 **「그룹(구분)」 입력란**
+  (datalist 로 기존 그룹 자동완성) → saveChannel patch 에 group.
+- 헤더 채널 드롭다운: group 별로 묶고 그룹마다 `──── 그룹명 ────` **disabled option 구분선**(선택 불가) + 그룹 내
+  채널은 앞에 전각공백 들여쓰기. 그룹 없는 채널은 맨 위에. 빈 그룹이면 구분 없이 그대로.
+
 ## ✏ 채널(프리셋) 이름 변경 기능 추가 (2026-07-15, v0.2.43)
 > 요청: 채널명을 수정할 방법이 없었음(추가·삭제만 있었음).
 - IPC `rename-preset({oldName,newName})` — preset id 유지, name 만 교체. 중복·빈이름 방어. 현재 세션 큐 항목

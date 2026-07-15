@@ -845,7 +845,7 @@ export default function App() {
     };
     const sl = p.split || { introSentenceSize: p.introSentenceSize, mainSentenceSize: p.mainSentenceSize, shortLen: p.shortLen, longLen: p.longLen };
     setCh({
-      name: p.name || '', engine: p.engine || 'omnivoice', startMode: p.startMode || 'longform', voice: p.voice || '',
+      name: p.name || '', group: p.group || '', engine: p.engine || 'omnivoice', startMode: p.startMode || 'longform', voice: p.voice || '',
       voiceCloneRefAudio: p.voiceCloneRefAudio || '', voiceCloneRefText: p.voiceCloneRefText || '',
       scriptFolder: p.scriptFolder || '', seed: p.seed != null ? p.seed : '',
       aiNotice: !!(p.aiNotice && p.aiNotice.enabled),
@@ -941,6 +941,7 @@ export default function App() {
     const numOr = (v, d) => (v !== '' && v != null && !isNaN(Number(v)) ? Number(v) : d);
     const capToStyle = (c) => ({ size: String(c.size), align: c.align, yAlign: c.yAlign, yOffset: yOffsetOf(c) });
     const patch = {
+      group: (ch.group || '').trim(),                     // 드롭다운 구분(그룹) — 같은 그룹끼리 묶고 ─── 그룹명 ─── 구분선
       engine: ch.engine || 'omnivoice',
       startMode: ch.startMode || 'longform',              // 이 채널 선택 시 시작할 화면(모드)
       voice: ch.voice || '',                              // Supertonic 사전정의 음성(M1~F5) 등 — 저장
@@ -1340,7 +1341,18 @@ export default function App() {
               <button className={mode === 'book' ? 'active' : ''} onClick={() => switchMode('book')}>📖 출판</button>
             </span>
             <select title="채널(프리셋) — 고르면 그 채널의 시작 화면으로 전환" value={presetName} onChange={(e) => switchModeForChannel(e.target.value)}>
-              {presets.map((p) => <option key={p.name} value={p.name}>{p.name}</option>)}
+              {(() => {
+                // 그룹별 묶기 + ──── 그룹명 ──── 구분선(선택 불가). 그룹 없는 채널은 위에 먼저.
+                const order = []; const byGroup = new Map();
+                for (const p of (presets || [])) { const g = p.group || ''; if (!byGroup.has(g)) { byGroup.set(g, []); order.push(g); } byGroup.get(g).push(p); }
+                order.sort((a, b) => (a === '' ? -1 : b === '' ? 1 : 0));
+                const out = [];
+                for (const g of order) {
+                  if (g) out.push(<option key={`__sep_${g}`} value={`__sep_${g}`} disabled style={{ color: '#999' }}>{`──── ${g} ────`}</option>);
+                  for (const p of byGroup.get(g)) out.push(<option key={p.name} value={p.name}>{g ? `　${p.name}` : p.name}</option>);
+                }
+                return out;
+              })()}
             </select>
             <button className="ghost" title="채널(프리셋) 설정 편집" style={{ padding: '6px 9px' }} onClick={openChannelEditor}>⚙</button>
             <button className="ghost" title="새 채널 추가 (현재 채널 설정을 복사해서 시작)" style={{ padding: '6px 9px' }} onClick={addChannel}>＋ 채널</button>
@@ -1604,6 +1616,10 @@ export default function App() {
             <div className="frow"><label>채널 이름</label>
               <input style={{ flex: 1, padding: 6, fontWeight: 700 }} value={ch.name || ''} placeholder="채널 이름"
                 onChange={(e) => setCh({ ...ch, name: e.target.value })} title="이름을 바꾸고 저장하면 채널명이 변경됩니다 (설정·큐 참조 유지)" /></div>
+            <div className="frow"><label>그룹(구분)</label>
+              <input style={{ flex: 1, padding: 6 }} value={ch.group || ''} placeholder="예: 고전 / 역사 / 쇼츠 (비우면 구분 없음)" list="ch-group-list"
+                onChange={(e) => setCh({ ...ch, group: e.target.value })} title="같은 그룹 이름끼리 드롭다운에서 묶이고, 그룹마다 ─── 그룹명 ─── 구분선이 자동으로 들어갑니다" />
+              <datalist id="ch-group-list">{[...new Set((presets || []).map((p) => p.group).filter(Boolean))].map((g) => <option key={g} value={g} />)}</datalist></div>
             <div className="frow"><label>시작 화면</label>
               <select style={{ flex: '0 0 220px', padding: 6 }} value={ch.startMode || 'longform'} onChange={(e) => setCh({ ...ch, startMode: e.target.value })}>
                 <option value="longform">롱폼 (16:9)</option>
