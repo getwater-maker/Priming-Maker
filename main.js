@@ -2324,7 +2324,7 @@ ipcMain.handle('run-batch', async (_e, args = {}) => {
   if (!plan.length) throw new Error('실행할 대본이 큐에 없습니다.');
   S.abort = false;
   log(`⚡⚡ 큐 순차 제작 시작 — 총 ${plan.length}개`);
-  let okN = 0, failN = 0;
+  let okN = 0, failN = 0, skipN = 0;
   for (let i = 0; i < plan.length; i++) {
     if (S.abort) { log('⏹ 큐 중단됨 — 남은 대본 보존'); break; }
     const entry = plan[i] || {};
@@ -2333,6 +2333,9 @@ ipcMain.handle('run-batch', async (_e, args = {}) => {
     const q = S.modes[S.mode];
     const it = q.items.find((x) => x.id === entry.id);
     if (!it) { log(`(건너뜀) 큐 항목 없음 [${i + 1}/${plan.length}]`); continue; }
+    // 이미 완료(done)된 항목은 건너뜀 — 다시 만들지 않고 .vrew 도 다시 열지 않음(필요하면 vrew 버튼으로 열기).
+    //   활성 전환(무거운 대본 재렌더)·vrew 재열기를 안 하므로 만들기 눌렀을 때 멈춤도 크게 줄어듦.
+    if (it.status === 'done') { skipN++; log(`⏭ [${i + 1}/${plan.length}] 이미 완료 — 건너뜀: ${path.basename(it.scriptPath || '') || it.id}`); continue; }
     q.activeId = it.id; syncActiveToS();
     if (!S.parsed) { log(`(건너뜀) 대본 비어있음 [${i + 1}/${plan.length}]`); continue; }
     it.status = 'running'; pushDtoUpdate();
@@ -2362,7 +2365,7 @@ ipcMain.handle('run-batch', async (_e, args = {}) => {
     }
     pushDtoUpdate();
   }
-  log(`⚡⚡ 큐 제작 종료 — 성공 ${okN} · 실패 ${failN}`);
+  log(`⚡⚡ 큐 제작 종료 — 성공 ${okN} · 실패 ${failN}${skipN ? ` · 완료건너뜀 ${skipN}` : ''}`);
   try { if (S.outRoot) shell.openPath(S.outRoot); } catch {}
   return { dto: S.parsed ? P.toDTO(S.parsed) : null, queue: queueDTO() };
 });

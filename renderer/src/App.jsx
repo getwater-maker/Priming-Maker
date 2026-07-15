@@ -470,11 +470,12 @@ export default function App() {
     const Sh = (queue && queue.shorts && queue.shorts.items) || [];
     const plan = [];
     const n = Math.max(L.length, Sh.length);
+    // 이미 완료(done)된 항목은 제외 — 다시 만들지 않고 .vrew 도 다시 열지 않음(vrew 버튼으로 열면 됨).
     for (let i = 0; i < n; i++) {
-      if (L[i]) plan.push({ mode: 'longform', id: L[i].id, settings: L[i].settings || null });
-      if (Sh[i]) plan.push({ mode: 'shorts', id: Sh[i].id, settings: Sh[i].settings || null });
+      if (L[i] && L[i].status !== 'done') plan.push({ mode: 'longform', id: L[i].id, settings: L[i].settings || null });
+      if (Sh[i] && Sh[i].status !== 'done') plan.push({ mode: 'shorts', id: Sh[i].id, settings: Sh[i].settings || null });
     }
-    if (!plan.length) { setStatus('큐에 대본이 없습니다'); return; }
+    if (!plan.length) { setStatus('만들 대본이 없습니다 (모두 완료됨 — 다시 만들려면 해당 큐를 지우고 다시 여세요)'); return; }
     if (!ensurePromptsFilled(null, { image: 'all', video: videoEngine === 'none' ? 'none' : 'range' })) return; // 현재 표시 대본 기준 빈 프롬프트 검사 ('없음'은 i2v 불요)
     setStatus(`⚡⚡ 큐 순차 제작중… (${plan.length}개)`);
     try {
