@@ -7,6 +7,13 @@
 **편별 Vrew 4.0.1 .vrew 파일**을 자동 생성하는 Electron 앱. PrimingFlow(D:\PrimingFlow)의 엔진을
 복사·재활용한 독립 클론.
 
+## 🐞 화면 검색(Ctrl+F) 프리징 — 타이핑마다 findInPage → 디바운스 (2026-07-15, v0.2.45)
+> 증상: 검색 기능 쓰면 프리징. 원인: 검색 input onChange 가 **글자마다** `find-in-page` 호출.
+- Electron `findInPage` 는 호출당 전체 DOM 스캔+강조인데, 화면이 대본 수십 컷+영상 수십 개라 DOM 이 거대 →
+  타이핑 한 글자마다 풀스캔이 연달아 큐잉돼 렌더러가 밀려 멈춤.
+- **수정**: `runFind` 에 디바운스 — 타이핑(findNext=false)은 280ms 멈춘 뒤 1회만, Enter/화살표(findNext=true)는 즉시.
+  `findTimerRef` 로 이전 타이머 취소. closeFind 도 타이머 정리. (검색어 지우면 즉시 stopFindInPage)
+
 ## 🗂 채널 드롭다운 그룹 구분선 (2026-07-15, v0.2.44)
 > 요청: 채널이 많아질 예정 → 구분자(-----)로 구분. 결정: **그룹 이름으로 자동 구분**(사용자 선택).
 - preset 에 `group` 필드 추가. listPresets·save-preset 반환에 group 포함. ⚙ 채널편집 모달에 **「그룹(구분)」 입력란**

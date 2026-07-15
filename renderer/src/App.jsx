@@ -120,6 +120,7 @@ export default function App() {
   const [findOpen, setFindOpen] = useState(false);       // 화면 내 검색 바(Ctrl+F)
   const [findText, setFindText] = useState('');
   const [findRes, setFindRes] = useState({ active: 0, total: 0 });
+  const findTimerRef = useRef(null);                     // 검색 디바운스 타이머
   const [logText, setLogText] = useState('');
   const [logCollapsed, setLogCollapsed] = useState(true); // 최소화로 시작 — 로그바 클릭 시 펼침
 
@@ -1167,12 +1168,17 @@ export default function App() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
+  // findInPage 는 무거운 DOM(대본 수십 컷+영상)에서 호출당 전체 스캔이라, 타이핑마다 부르면 프리징.
+  //   → 타이핑(findNext=false)은 디바운스(280ms)로 멈춘 뒤 1번만, Enter/화살표(findNext=true)는 즉시.
   function runFind(text, findNext, forward) {
     setFindText(text);
+    if (findTimerRef.current) { clearTimeout(findTimerRef.current); findTimerRef.current = null; }
     if (!text) { api.findStop(); setFindRes({ active: 0, total: 0 }); return; }
-    api.findInPage({ text, findNext: !!findNext, forward: forward !== false });
+    const fire = () => api.findInPage({ text, findNext: !!findNext, forward: forward !== false });
+    if (findNext) fire();
+    else findTimerRef.current = setTimeout(fire, 280);
   }
-  function closeFind() { api.findStop(); setFindOpen(false); setFindRes({ active: 0, total: 0 }); }
+  function closeFind() { if (findTimerRef.current) { clearTimeout(findTimerRef.current); findTimerRef.current = null; } api.findStop(); setFindOpen(false); setFindRes({ active: 0, total: 0 }); }
   // ComfyUI 설정을 마운트 시 로드 — 헤더 드롭다운이 등록된 워크플로(z-image·Krea2 등) 목록을 알도록.
   useEffect(() => {
     api.getComfyImageConfig().then((c) => {
