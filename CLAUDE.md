@@ -7,6 +7,17 @@
 **편별 Vrew 4.0.1 .vrew 파일**을 자동 생성하는 Electron 앱. PrimingFlow(D:\PrimingFlow)의 엔진을
 복사·재활용한 독립 클론.
 
+## 🐞 일괄첨부 시 앱 멈춤 — media:// 프로토콜 동기 파일읽기 → 스트리밍 (2026-07-15, v0.2.40)
+> 증상: 대본 선택 후 「📎 일괄첨부」로 여러 영상 첨부하면 프로그램이 멈춤(freeze).
+- **원인**: `protocol.handle('media')` 가 파일을 **동기**(`fs.readFileSync`/`fs.readSync`)로 통째 읽음(main.js:242).
+  영상 `<video>` 요소는 초기 로드 때 `Range: bytes=0-`(=전체)로 요청 → **206 분기도 파일 전체를 동기 읽기**.
+  일괄첨부로 여러 영상 썸네일이 동시에 media:// 를 요청 → **메인 프로세스가 동기 I/O 에 줄줄이 묶여 IPC 응답 불가 = 앱 전체 멈춤**.
+  (큰 mp4 여러 개 = 통째 버퍼 할당까지 겹쳐 메모리 급증.)
+- **수정**: `fs.createReadStream` + `require('stream').Readable.toWeb(...)` 로 **비동기 스트리밍** 응답(206/200 양쪽).
+  파일을 통째 메모리로 안 올리고 청크로 흘려보냄 → 동시에 여러 영상이 로드돼도 메인 프로세스가 안 멈춤.
+  Electron 33(Node 20)에서 `Readable.toWeb` + protocol.handle 스트림 바디 지원. 자막·미리보기 재생도 동일 경로라 함께 개선.
+- ⚠ bulk-attach 는 g.videoPath 를 **원본 선택 경로**로 지정(미디어폴더 복사 안 함) — 파일을 지우면 끊김(현행 유지, 별도).
+
 ## 🎬 ComfyUI i2v 비디오 엔진 (Wan 2.2 5B / LTX · 로컬·클라우드) 추가 (2026-07-15, v0.2.38)
 > 요청: Grok API 무료크레딧 불가+건당 과금 → ComfyUI i2v 로 전환. 사용자가 `D:\Priming-Maker\comfy\video_wan2_2_5B_ti2v.json`
 > 다운(일단 comfy 클라우드). 이미지 comfy 경로(comfy-image.js)를 비디오용으로 확장.

@@ -246,21 +246,20 @@ app.whenReady().then(() => {
       const stat = fs.statSync(p);
       const mime = _mimeOf(p);
       const range = request.headers.get('Range');
+      const { Readable } = require('stream');
       const m = range && /bytes=(\d+)-(\d*)/.exec(range);
       if (m) {
+        // Range 요청 — 해당 구간만 스트림(동기 readSync 로 통째 읽으면 여러 영상 동시 로드 시 메인 프로세스가 멈춤).
         const start = parseInt(m[1], 10);
         const end = m[2] ? Math.min(parseInt(m[2], 10), stat.size - 1) : stat.size - 1;
         const len = end - start + 1;
-        const fd = fs.openSync(p, 'r');
-        const buf = Buffer.alloc(len);
-        fs.readSync(fd, buf, 0, len, start);
-        fs.closeSync(fd);
-        return new Response(buf, { status: 206, headers: {
+        return new Response(Readable.toWeb(fs.createReadStream(p, { start, end })), { status: 206, headers: {
           'Content-Type': mime, 'Content-Length': String(len),
           'Content-Range': `bytes ${start}-${end}/${stat.size}`, 'Accept-Ranges': 'bytes',
         } });
       }
-      return new Response(fs.readFileSync(p), { status: 200, headers: {
+      // Range 없는 전체 요청 — 파일을 통째 메모리로 올리지 않고 스트림(일괄첨부로 큰 mp4 여러 개가 동시에 로드돼도 안 멈춤).
+      return new Response(Readable.toWeb(fs.createReadStream(p)), { status: 200, headers: {
         'Content-Type': mime, 'Content-Length': String(stat.size), 'Accept-Ranges': 'bytes',
       } });
     } catch (e) {
