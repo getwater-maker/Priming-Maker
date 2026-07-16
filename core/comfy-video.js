@@ -47,7 +47,8 @@ class ComfyVideo {
     this.cloud = !!cfg.cloud;
     this.apiKey = cfg.apiKey || '';
     let base = (cfg.baseUrl || 'http://127.0.0.1:8188').replace(/\/+$/, '');
-    if (this.cloud && /127\.0\.0\.1|localhost/.test(base)) base = 'https://cloud.comfy.org';
+    // 클라우드 체크 시엔 주소칸(로컬/LAN IP 등)과 무관하게 항상 comfy.org 로. (LAN IP+클라우드 혼합 오설정 방지)
+    if (this.cloud && !/cloud\.comfy\.org/i.test(base)) base = 'https://cloud.comfy.org';
     this.baseUrl = base;
     this.workflowPath = cfg.workflowPath || '';
     this.promptNodeId = cfg.promptNodeId || '';

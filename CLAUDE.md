@@ -7,6 +7,15 @@
 **편별 Vrew 4.0.1 .vrew 파일**을 자동 생성하는 Electron 앱. PrimingFlow(D:\PrimingFlow)의 엔진을
 복사·재활용한 독립 클론.
 
+## 🐞 ComfyUI 클라우드 체크 + LAN IP 혼합 → fetch failed → 클라우드면 항상 comfy.org (2026-07-17, v0.2.51)
+> 증상: 아내 PC 이미지 `fetch failed` 연발. 로그 "클라우드(Krea2) … http://100.112.7.63:8188" = 클라우드 체크 켠 채
+>   주소를 LAN(Tailscale) IP로 둠. 클라우드 방식(/api·X-API-Key)을 로컬 IP로 보내 실패. health()는 클라우드면
+>   apiKey만 확인(실접속 X)이라 "연결 OK" 오탐.
+- comfy-image/comfy-video 생성자: `cloud && localhost`일 때만 치환 → **`cloud && !cloud.comfy.org`면 항상 치환**.
+  클라우드 체크 시 주소칸(로컬/LAN IP)과 무관하게 cloud.comfy.org 로. 혼합 오설정 원천 차단.
+- 선택: **클라우드**=주소 무관·comfy.org(간단, 메인 PC 불필요) / **로컬 via Tailscale**=클라우드 해제+주소
+  100.x:8188+메인 PC ComfyUI `--listen`+방화벽 8188(현재 미가동·규칙 없음).
+
 ## 🐞 워크플로 추가 시 `prompt() is not supported` — window.prompt → 이름 모달 (2026-07-16, v0.2.50)
 > 증상: 아내 PC ⚙ ComfyUI ＋추가 시 `워크플로 추가 오류: prompt() is not supported`. (메인 PC는 설정파일 직접
 >   기록이라 안 겪음.) 원인: pickComfyWf/pickCvidWf 가 `window.prompt()` 사용 — 일부 Electron 렌더러에서 미지원/예외.
