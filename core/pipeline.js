@@ -378,6 +378,8 @@ async function generateImagesGenspark(project, imagesDir, logger, abortSignal, s
   const MAX_SINGLE_TRY = 2;
   const results = new Array(idx.length);
   let limitReached = false; // 사용 한도/제한 도달 → 순환에서 다음 엔진으로 넘기는 신호. 감지 메시지(문자열)가 담기면 재설정 시각 파싱용.
+  //   '__STALL__' = 한도 메시지 없이 연속 무응답(침묵 정체) — 과부하/한도 추정. 상위가 추정 쿨다운 설정.
+  let consecMiss = 0; const STALL_LIMIT = 3; // 연속 무응답 N장이면 조기 종료 → 다음 엔진(Flow)
   try {
     for (let start = 0; start < idx.length; start += BATCH) {
       if (abortSignal && abortSignal()) break;
@@ -395,6 +397,7 @@ async function generateImagesGenspark(project, imagesDir, logger, abortSignal, s
       const limHit = r.find((x) => x && x.limit);
       if (limHit) { limitReached = String(limHit.error || true); log('[Genspark] ⚠ 사용 한도/제한 도달 — 남은 이미지는 순환의 다음 엔진으로'); break; }
       for (let k = 0; k < ps.length; k++) if (r[k] && r[k].path) saved[k] = r[k];
+      if (saved.some((s) => s && s.path)) consecMiss = 0; // 배치에서 한 장이라도 나오면 정체 카운트 리셋
 
       // 빠진 컷 → 단건 재생성 (6장이 다 나올 때까지)
       const missing = [];
@@ -411,7 +414,7 @@ async function generateImagesGenspark(project, imagesDir, logger, abortSignal, s
             const usePrompt = prevBlocked ? softenForModeration(ps[k]) : ps[k];
             log(`[Genspark] 단건 재생성 G${num} (시도 ${attempt}/${MAX_SINGLE_TRY})${prevBlocked ? ' · 프롬프트 순화' : ''}`);
             const rr = await eng.generateImagesBatch({ prompts: [usePrompt], outputPaths: [ops[k]], abortSignal: abortSignal || (() => false), onSaved: (_kk, p) => mapSave(k, p) });
-            if (rr[0] && rr[0].path) { saved[k] = rr[0]; break; }
+            if (rr[0] && rr[0].path) { saved[k] = rr[0]; consecMiss = 0; break; }
             if (rr[0] && rr[0].limit) { limitReached = String(rr[0].error || true); break; } // 한도 → 단건 중단
             prevBlocked = !!(rr[0] && rr[0].blocked);
             if (prevBlocked) log(`[Genspark] G${num} NSFW 차단 감지 — 다음 시도는 프롬프트 순화`);
@@ -420,7 +423,14 @@ async function generateImagesGenspark(project, imagesDir, logger, abortSignal, s
           if (!(saved[k] && saved[k].path)) {
             const g = groups[idx[start + k]];
             if (prevBlocked) { g.imageStatus = 'blocked'; log(`[Genspark] ⛔ G${num} 모더레이션(NSFW)으로 막힘 — 순화로도 실패. 프롬프트 수정 또는 다른 엔진(ComfyUI) 필요`); }
-            else log(`[Genspark] ✗ G${num} 최종 실패`);
+            else {
+              log(`[Genspark] ✗ G${num} 최종 실패`);
+              // 한도 메시지 없이 연속 무응답(침묵 정체)이 STALL_LIMIT 장 쌓이면 과부하/한도로 추정 → 조기 종료(Flow 로).
+              if (++consecMiss >= STALL_LIMIT) {
+                limitReached = '__STALL__';
+                log(`[Genspark] ⚠ 연속 ${consecMiss}장 무응답(침묵 정체) — 한도/과부하로 추정, Genspark 중단하고 순환의 다음 엔진(Flow)으로`);
+              }
+            }
           }
         }
       }

@@ -1241,9 +1241,16 @@ async function runRotatingImages(project, imagesDir, logger, styleId, startEngin
           const r = await P.generateImagesGenspark(project, imagesDir, logger, () => S.abort, stylePrompt, ns, pushDtoUpdate, acc.id);
           if (r && r.ok) GsAcc.markUsed(acc.id, r.ok); // 성공분만 카운트
           if (r && r.limitReached) {
-            const until = parseLimitResetTime(typeof r.limitReached === 'string' ? r.limitReached : '');
-            GsAcc.setCooldown(acc.id, until);
-            logger(`⏸ Genspark 계정 "${acc.label}" 한도 — ${fmtClock(until)}까지 이 계정 건너뜀(재설정 시각 기억) → 다음 계정/엔진으로`);
+            if (r.limitReached === '__STALL__') {
+              // 한도 메시지 없이 침묵 정체 — 재설정 시각을 알 수 없으니 30분 추정 쿨다운. (실제론 과부하로 더 빨리 풀릴 수도)
+              const until = Date.now() + 30 * 60 * 1000;
+              GsAcc.setCooldown(acc.id, until);
+              logger(`⏸ Genspark 계정 "${acc.label}" 침묵 정체(무응답) — ${fmtClock(until)}까지 건너뜀(추정, 메시지 없음) → 다음 계정/엔진으로`);
+            } else {
+              const until = parseLimitResetTime(typeof r.limitReached === 'string' ? r.limitReached : '');
+              GsAcc.setCooldown(acc.id, until);
+              logger(`⏸ Genspark 계정 "${acc.label}" 한도 — ${fmtClock(until)}까지 이 계정 건너뜀(재설정 시각 기억) → 다음 계정/엔진으로`);
+            }
             continue;
           }
           break; // 한도가 아닌 이유로 끝남(나머지는 차단/실패) → Genspark 더 시도 무의미
