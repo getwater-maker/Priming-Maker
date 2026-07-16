@@ -335,9 +335,9 @@ export default function App() {
     if (s.presetName != null) setPresetName(s.presetName);
     if (s.styleId != null) setStyleId(s.styleId);
     if (s.ttsSpeed != null) setTtsSpeed(s.ttsSpeed);
-    // 제거된 엔진(comfy 이미지) → 순환으로 마이그레이션.
-    if (s.imgEngine != null) setImgEngine(s.imgEngine === 'comfy' ? 'rotate' : s.imgEngine);
-    // 제거된 영상 엔진(flow/comfy/wan)·레거시(grok10) → grok 으로 마이그레이션.
+    // comfy(z-image/Krea2)·gemini·rotate 는 유효 — 보존. 레거시 개별엔진(genspark/flow 단독)만 순환으로.
+    if (s.imgEngine != null) setImgEngine(['genspark', 'flow'].includes(s.imgEngine) ? 'rotate' : s.imgEngine);
+    // 제거된 영상 엔진(flow/wan)·레거시(grok10) → grok. comfy(::path)·grok-api 는 보존.
     if (s.videoEngine != null) setVideoEngine(['flow', 'wan', 'grok10'].includes(s.videoEngine) ? 'grok' : s.videoEngine);
     if (s.vidFrom != null) setVidFrom(s.vidFrom);
     if (s.vidTo != null) setVidTo(s.vidTo);
