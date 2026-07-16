@@ -46,7 +46,7 @@ class OmniVoiceProvider {
   }
 
   async init() {
-    const res = await quietGet(this.baseUrl + '/health', { timeoutMs: 3000 });
+    const res = await quietGet(this.baseUrl + '/health', { timeoutMs: 5000 });
     if (res.status === 200) {
       this.ready = true;
       return true;

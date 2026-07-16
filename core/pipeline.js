@@ -150,8 +150,9 @@ async function makeTtsManager(logger, engine, opts = {}) {
   await mgr.start();
   // start()는 omnivoice/supertonic 연결을 await하지 않음 → refreshProvider로 완료 대기
   let ok = await mgr.refreshProvider(engine);
-  const retries = opts.retries != null ? opts.retries : 3;      // gemini(키기반)는 사실상 즉시 성공/실패
-  const delayMs = opts.retryDelayMs != null ? opts.retryDelayMs : 5000;
+  // 원격 OmniVoice 는 유휴 후 첫 요청에 모델을 재로딩(콜드스타트 15~40초)할 수 있어, 그 창을 넘기도록 넉넉히 재시도.
+  const retries = opts.retries != null ? opts.retries : 6;      // gemini(키기반)는 사실상 즉시 성공/실패
+  const delayMs = opts.retryDelayMs != null ? opts.retryDelayMs : 6000; // 6회×6초 ≈ 36초 + 타임아웃 → 모델 로딩 견딤
   for (let i = 0; !ok && i < retries; i++) {
     log(`[TTS] '${engine}' 연결 실패 — ${Math.round(delayMs / 1000)}초 후 재시도 (${i + 1}/${retries}, 서버 부하/모델 로딩 대기)`);
     await new Promise((r) => setTimeout(r, delayMs));
