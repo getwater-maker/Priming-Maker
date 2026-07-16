@@ -7,6 +7,14 @@
 **편별 Vrew 4.0.1 .vrew 파일**을 자동 생성하는 Electron 앱. PrimingFlow(D:\PrimingFlow)의 엔진을
 복사·재활용한 독립 클론.
 
+## 🖧 TTS 서버 주소 설정 UI 추가 (다른 PC=Tailscale/LAN) (2026-07-16, v0.2.49)
+> 배경: 아내 PC를 Tailscale 씬클라이언트로. OmniVoice 주소를 앱에서 바꿀 UI가 없어(설정파일만) 추가.
+- IPC get/set/test-tts-server (tts-config setProvider). preload getTtsServers/setTtsServer/testTtsServer.
+- 헤더 「🖧 TTS서버」 버튼 → 모달(OmniVoice·Supertonic baseUrl + 연결테스트). 이 PC에만 저장(~/.flow-app/tts-config.json).
+- OmniVoice 는 방화벽 Private 규칙이 **Tailscale 인터페이스(Private)**까지 커버 → Tailscale IP(100.x)로 이미 접속됨.
+  ComfyUI 는 클라우드가 다PC에서 더 간단(메인 8188 미가동). Voice Design(qwen-design)은 로컬 spawn 전용 — 원격은 추후 코드.
+- ⚠ 다른 PC TTS 실패 주원인: OmniVoice 주소가 그 PC에서 안 닿는 IP. Public 프로필이면 방화벽 차단(Private로 바꾸거나 Tailscale).
+
 ## 🐞 TTS OmniVoice 콜드스타트(모델 재로딩) 연결 실패 → 재시도 창 확대 (2026-07-16, v0.2.48)
 > 증상: 아내 PC에서 `omnivoice 미가동`. 그러나 브라우저로 `192.168.219.157:9881/health` = `{"status":"ok"}` (닿음).
 - **원인**: 네트워크·방화벽 아님. OmniVoice 서버가 유휴 후 **모델 재로딩 중**(로딩 시 /health 503)이라 앱의 재시도 창

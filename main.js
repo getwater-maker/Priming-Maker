@@ -1753,6 +1753,21 @@ ipcMain.handle('set-xai-key', (_e, key) => {
   try { require('./tts/secret-store').set('xai', { key: String(key || '').trim() }); log('xAI API 키 저장됨'); return true; }
   catch (e) { log('xAI 키 저장 실패: ' + e.message); return false; }
 });
+// TTS 서버 주소(OmniVoice/Supertonic) — PC마다 다름(LAN/Tailscale). 다른 PC에서 메인 GPU 서버를 가리키게 설정.
+ipcMain.handle('get-tts-servers', () => { try { return require('./tts/tts-config').loadAll(); } catch { return {}; } });
+ipcMain.handle('set-tts-server', (_e, args = {}) => {
+  try {
+    const id = args.id, baseUrl = String(args.baseUrl || '').trim().replace(/\/$/, '');
+    if (id !== 'omnivoice' && id !== 'supertonic') throw new Error('알 수 없는 TTS provider');
+    require('./tts/tts-config').setProvider(id, { baseUrl });
+    log(`TTS 서버 주소 저장: ${id} → ${baseUrl || '(비움)'}`);
+    return require('./tts/tts-config').loadAll();
+  } catch (e) { return { error: String((e && e.message) || e) }; }
+});
+ipcMain.handle('test-tts-server', async (_e, args = {}) => {
+  try { const { quietGet } = require('./tts/quiet-http'); const base = String(args.baseUrl || '').trim().replace(/\/$/, ''); const r = await quietGet(base + '/health', { timeoutMs: 5000 }); return { ok: r.status === 200, status: r.status, error: r.error }; }
+  catch (e) { return { ok: false, error: String((e && e.message) || e) }; }
+});
 
 ipcMain.handle('pick-file', async (_e, args = {}) => {
   const r = await dialog.showOpenDialog(win, { properties: ['openFile'], filters: args.filters || [{ name: 'All', extensions: ['*'] }] });

@@ -164,6 +164,8 @@ export default function App() {
   const [giKey, setGiKey] = useState('');                // Gemini API 키(이미지 설정 팝업에서 입력) — secret-store 공용
   const [xaiOpen, setXaiOpen] = useState(false);         // Grok API(비디오) xAI 키 입력 모달
   const [xaiVal, setXaiVal] = useState('');
+  const [ttsSrvOpen, setTtsSrvOpen] = useState(false);   // TTS 서버 주소(OmniVoice/Supertonic) 설정 모달
+  const [ttsSrv, setTtsSrv] = useState({ omnivoice: { baseUrl: '' }, supertonic: { baseUrl: '' } });
   const [lora, setLora] = useState(null);                // LoRA 수집 설정 { enabled, dir, trigger, count }
   const [gsAccOpen, setGsAccOpen] = useState(false);
   const [gsAcc, setGsAcc] = useState(null);              // Genspark 멀티계정
@@ -729,6 +731,18 @@ export default function App() {
   async function renameGsAcc(id, label) { try { setGsAcc(await api.renameGensparkAccount(id, label)); } catch (e) { logline(e.message); } }
   async function changeGsCap(n) { try { setGsAcc(await api.setGensparkCap(n)); } catch (e) { logline(e.message); } }
   async function gsLogin(id) { setStatus('Genspark 로그인 창 여는 중…'); try { const r = await api.gensparkLogin(id); setStatus(r.ok ? '✓ Genspark 로그인 완료' : 'Genspark 로그인 실패: ' + (r.error || '')); } catch (e) { setStatus('Genspark 로그인 오류'); } }
+  // TTS 서버 주소(OmniVoice/Supertonic) — 다른 PC에서 메인 GPU 서버(LAN/Tailscale)를 가리키게.
+  async function openTtsSrv() {
+    try { const c = await api.getTtsServers(); if (c && !c.error) setTtsSrv({ omnivoice: { baseUrl: (c.omnivoice && c.omnivoice.baseUrl) || '' }, supertonic: { baseUrl: (c.supertonic && c.supertonic.baseUrl) || '' } }); } catch (_) {}
+    setTtsSrvOpen(true);
+  }
+  async function saveTtsSrv(id) {
+    try { await api.setTtsServer({ id, baseUrl: (ttsSrv[id] && ttsSrv[id].baseUrl) || '' }); setStatus(`TTS 서버(${id}) 저장됨`); } catch (e) { logline('TTS 서버 저장 오류: ' + e.message); }
+  }
+  async function testTtsSrv(id) {
+    setStatus(`${id} 연결 확인 중…`);
+    try { const r = await api.testTtsServer({ baseUrl: (ttsSrv[id] && ttsSrv[id].baseUrl) || '' }); setStatus(r && r.ok ? `✓ ${id} 연결 OK` : `✗ ${id} 연결 실패${r && (r.error || r.status) ? ` (${r.error || r.status})` : ''}`); } catch (e) { logline(e.message); }
+  }
   // Grok API(비디오) xAI 키
   async function setXaiKey() { try { setXaiVal(await api.getXaiKey() || ''); } catch (_) { setXaiVal(''); } setXaiOpen(true); }
   async function saveXaiKey() { try { await api.setXaiKey((xaiVal || '').trim()); setXaiOpen(false); setStatus('xAI API 키 저장됨'); } catch (e) { logline('xAI 키 저장 오류: ' + e.message); } }
@@ -1362,6 +1376,7 @@ export default function App() {
             </select>
             <button className="ghost" title="채널(프리셋) 설정 편집" style={{ padding: '6px 9px' }} onClick={openChannelEditor}>⚙</button>
             <button className="ghost" title="새 채널 추가 (현재 채널 설정을 복사해서 시작)" style={{ padding: '6px 9px' }} onClick={addChannel}>＋ 채널</button>
+            <button className="ghost" title="TTS 서버 주소(OmniVoice/Supertonic) — 다른 PC에서 메인 GPU 서버를 LAN/Tailscale 로 가리키게" style={{ padding: '6px 9px' }} onClick={openTtsSrv}>🖧 TTS서버</button>
             {!isPl && !isBk && (<>
               <span className="hgroup">
                 <span className="glabel">대본</span>
@@ -1595,6 +1610,28 @@ export default function App() {
               value={newChanName} onChange={(e) => setNewChanName(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') createChannel(); }} />
             <div className="mbtns"><button onClick={createChannel}>만들기</button><button className="ghost" onClick={() => setNewChanOpen(false)}>취소</button></div>
+          </div>
+        </div>
+      )}
+
+      {ttsSrvOpen && (
+        <div className="modal-bg show">
+          <div className="modal-card" style={{ maxWidth: 560 }}>
+            <h3>🖧 TTS 서버 주소</h3>
+            <div className="meta" style={{ marginBottom: 8, lineHeight: 1.5 }}>
+              OmniVoice·Supertonic 은 <b>메인 GPU PC</b>에서 도는 서버입니다. 다른 PC에서 쓰려면 그 주소를 메인 PC의
+              <b> LAN IP</b>(예: 192.168.x.x) 또는 <b>Tailscale IP</b>(예: 100.x.x.x)로 바꾸세요. (이 설정은 <b>이 PC에만</b> 저장됩니다)
+            </div>
+            <div className="frow"><label>OmniVoice</label>
+              <input style={{ flex: 1 }} placeholder="http://100.112.7.63:9881" value={ttsSrv.omnivoice.baseUrl}
+                onChange={(e) => setTtsSrv({ ...ttsSrv, omnivoice: { baseUrl: e.target.value } })} onBlur={() => saveTtsSrv('omnivoice')} />
+              <button className="ghost" style={{ flex: '0 0 auto' }} onClick={() => testTtsSrv('omnivoice')}>연결테스트</button></div>
+            <div className="frow"><label>Supertonic</label>
+              <input style={{ flex: 1 }} placeholder="http://127.0.0.1:9882" value={ttsSrv.supertonic.baseUrl}
+                onChange={(e) => setTtsSrv({ ...ttsSrv, supertonic: { baseUrl: e.target.value } })} onBlur={() => saveTtsSrv('supertonic')} />
+              <button className="ghost" style={{ flex: '0 0 auto' }} onClick={() => testTtsSrv('supertonic')}>연결테스트</button></div>
+            <div className="meta" style={{ marginTop: 4 }}>입력 후 칸 밖을 클릭하면 저장됩니다. 「연결테스트」 = 그 주소의 /health 확인.</div>
+            <div className="mbtns" style={{ marginTop: 10 }}><span style={{ flex: 1 }} /><button className="ghost" onClick={() => setTtsSrvOpen(false)}>닫기</button></div>
           </div>
         </div>
       )}
