@@ -166,6 +166,7 @@ export default function App() {
   const [xaiVal, setXaiVal] = useState('');
   const [ttsSrvOpen, setTtsSrvOpen] = useState(false);   // TTS 서버 주소(OmniVoice/Supertonic) 설정 모달
   const [ttsSrv, setTtsSrv] = useState({ omnivoice: { baseUrl: '' }, supertonic: { baseUrl: '' } });
+  const [nameAsk, setNameAsk] = useState(null);          // 이름 입력 모달 { title, value, resolve } — window.prompt 대체(Electron 미지원)
   const [lora, setLora] = useState(null);                // LoRA 수집 설정 { enabled, dir, trigger, count }
   const [gsAccOpen, setGsAccOpen] = useState(false);
   const [gsAcc, setGsAcc] = useState(null);              // Genspark 멀티계정
@@ -731,6 +732,10 @@ export default function App() {
   async function renameGsAcc(id, label) { try { setGsAcc(await api.renameGensparkAccount(id, label)); } catch (e) { logline(e.message); } }
   async function changeGsCap(n) { try { setGsAcc(await api.setGensparkCap(n)); } catch (e) { logline(e.message); } }
   async function gsLogin(id) { setStatus('Genspark 로그인 창 여는 중…'); try { const r = await api.gensparkLogin(id); setStatus(r.ok ? '✓ Genspark 로그인 완료' : 'Genspark 로그인 실패: ' + (r.error || '')); } catch (e) { setStatus('Genspark 로그인 오류'); } }
+  // window.prompt 대체 — Electron 렌더러에서 prompt()가 미지원/예외라, 이름 입력을 모달로 받아 Promise 로 반환.
+  function askName(title, def) { return new Promise((resolve) => setNameAsk({ title, value: def || '', resolve })); }
+  function nameAskOk() { if (nameAsk) { const r = nameAsk.resolve, v = (nameAsk.value || '').trim(); setNameAsk(null); r(v || null); } }
+  function nameAskCancel() { if (nameAsk) { const r = nameAsk.resolve; setNameAsk(null); r(null); } }
   // TTS 서버 주소(OmniVoice/Supertonic) — 다른 PC에서 메인 GPU 서버(LAN/Tailscale)를 가리키게.
   async function openTtsSrv() {
     try { const c = await api.getTtsServers(); if (c && !c.error) setTtsSrv({ omnivoice: { baseUrl: (c.omnivoice && c.omnivoice.baseUrl) || '' }, supertonic: { baseUrl: (c.supertonic && c.supertonic.baseUrl) || '' } }); } catch (_) {}
@@ -1227,7 +1232,7 @@ export default function App() {
       const r = await api.pickComfyWorkflow();
       if (!r || !r.path) return;
       const guess = (r.path.split(/[\\/]/).pop() || '워크플로').replace(/\.json$/i, '');
-      const name = (window.prompt('이 워크플로 이름 (예: z-image, Krea2)', guess) || guess).trim();
+      const name = ((await askName('이 워크플로 이름 (예: z-image, Krea2)', guess)) || guess).trim();
       const list = Array.isArray(comfyCfg.workflows) ? comfyCfg.workflows.slice() : [];
       const i = list.findIndex((w) => w.path === r.path);
       if (i >= 0) list[i] = { name, path: r.path }; else list.push({ name, path: r.path });
@@ -1267,7 +1272,7 @@ export default function App() {
       const r = await api.pickComfyVideoWorkflow();
       if (!r || !r.path) return;
       const guess = (r.path.split(/[\\/]/).pop() || '워크플로').replace(/\.json$/i, '');
-      const name = (window.prompt('이 i2v 워크플로 이름 (예: Wan2.2 5B, LTX)', guess) || guess).trim();
+      const name = ((await askName('이 i2v 워크플로 이름 (예: Wan2.2 5B, LTX)', guess)) || guess).trim();
       const list = Array.isArray(cvidCfg.workflows) ? cvidCfg.workflows.slice() : [];
       const i = list.findIndex((w) => w.path === r.path);
       if (i >= 0) list[i] = { name, path: r.path }; else list.push({ name, path: r.path });
@@ -1610,6 +1615,18 @@ export default function App() {
               value={newChanName} onChange={(e) => setNewChanName(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') createChannel(); }} />
             <div className="mbtns"><button onClick={createChannel}>만들기</button><button className="ghost" onClick={() => setNewChanOpen(false)}>취소</button></div>
+          </div>
+        </div>
+      )}
+
+      {nameAsk && (
+        <div className="modal-bg show">
+          <div className="modal-card" style={{ maxWidth: 420 }}>
+            <h3>{nameAsk.title || '이름 입력'}</h3>
+            <input autoFocus style={{ width: '100%', boxSizing: 'border-box', padding: '7px 9px' }} value={nameAsk.value}
+              onChange={(e) => setNameAsk({ ...nameAsk, value: e.target.value })}
+              onKeyDown={(e) => { if (e.key === 'Enter') nameAskOk(); else if (e.key === 'Escape') nameAskCancel(); }} />
+            <div className="mbtns"><button onClick={nameAskOk}>확인</button><button className="ghost" onClick={nameAskCancel}>취소</button></div>
           </div>
         </div>
       )}

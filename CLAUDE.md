@@ -7,6 +7,12 @@
 **편별 Vrew 4.0.1 .vrew 파일**을 자동 생성하는 Electron 앱. PrimingFlow(D:\PrimingFlow)의 엔진을
 복사·재활용한 독립 클론.
 
+## 🐞 워크플로 추가 시 `prompt() is not supported` — window.prompt → 이름 모달 (2026-07-16, v0.2.50)
+> 증상: 아내 PC ⚙ ComfyUI ＋추가 시 `워크플로 추가 오류: prompt() is not supported`. (메인 PC는 설정파일 직접
+>   기록이라 안 겪음.) 원인: pickComfyWf/pickCvidWf 가 `window.prompt()` 사용 — 일부 Electron 렌더러에서 미지원/예외.
+- 프로미스 기반 **이름 입력 모달**(`askName`/`nameAsk`) 추가로 window.prompt 2곳 대체. Enter=확인/Esc=취소.
+- 이 로그로 확인된 정상 동작: OmniVoice **Tailscale 연결됨**(tts 컷 생성) + ComfyUI **클라우드 연결 OK**.
+
 ## 🖧 TTS 서버 주소 설정 UI 추가 (다른 PC=Tailscale/LAN) (2026-07-16, v0.2.49)
 > 배경: 아내 PC를 Tailscale 씬클라이언트로. OmniVoice 주소를 앱에서 바꿀 UI가 없어(설정파일만) 추가.
 - IPC get/set/test-tts-server (tts-config setProvider). preload getTtsServers/setTtsServer/testTtsServer.
