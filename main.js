@@ -1587,6 +1587,11 @@ ipcMain.handle('video-build', async (_e, args = {}) => {
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
   const { shortsNum = null, fromNum = null, toNum = null, engine = 'grok', flowVideoModel = 'Veo 3.1 - Lite', flowCount = 'x1', upscale = false, imgEngine = 'rotate', styleId = null } = args;
   if (engine === 'none') { log('비디오 엔진 "없음" — 이미지만 사용, 비디오 생성 안 함'); return P.toDTO(S.parsed); }
+  // Grok(브라우저) 한도 쿨다운 중이면 브라우저 접속 없이 건너뜀 (grok-api/comfy 는 해당 없음)
+  if (engine === 'grok' || engine === 'grok10') {
+    const _gc = grokCoolUntil();
+    if (_gc) { log(`⏭ Grok 한도 — ${fmtClock(_gc)}까지 영상 생성 건너뜀 (재설정 후 다시 시도)`); return P.toDTO(S.parsed); }
+  }
   S.abort = false;
   S.grokLimit = null;
   const _vidT0 = Date.now();
@@ -2556,6 +2561,11 @@ ipcMain.handle('video-group', async (_e, args = {}) => {
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
   const { shortsNum, groupNum, engine = 'grok', flowVideoModel = 'Veo 3.1 - Lite', flowCount = 'x1', upscale = false, imgEngine = 'rotate', styleId = null } = args;
   if (engine === 'none') { log('비디오 엔진 "없음" — 이미지만 사용, 비디오 생성 안 함'); return P.toDTO(S.parsed); }
+  // Grok(브라우저) 한도 쿨다운 중이면 브라우저 접속 없이 건너뜀 (grok-api/comfy 는 해당 없음)
+  if (engine === 'grok' || engine === 'grok10') {
+    const _gc = grokCoolUntil();
+    if (_gc) { log(`⏭ Grok 한도 — ${fmtClock(_gc)}까지 영상 생성 건너뜀 (재설정 후 다시 시도)`); return P.toDTO(S.parsed); }
+  }
   const pr = S.parsed.projects.find((p) => p.shortsNum === shortsNum);
   const g = pr && pr.groups.find((x) => x.num === groupNum);
   if (!g) return P.toDTO(S.parsed);

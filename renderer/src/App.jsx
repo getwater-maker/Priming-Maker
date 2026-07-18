@@ -20,6 +20,13 @@ function fmtSec(s) {
   if (s <= 0) return '–';
   return s < 60 ? s.toFixed(1) + 's' : Math.floor(s / 60) + ':' + String(Math.round(s % 60)).padStart(2, '0');
 }
+// 타임스탬프 → "7월 18일 오전 11:08" — 한도 재설정(생성 가능) 시각 표시용.
+function fmtKoTime(ts) {
+  const d = new Date(ts);
+  const ap = d.getHours() < 12 ? '오전' : '오후';
+  let h = d.getHours() % 12; if (h === 0) h = 12;
+  return `${d.getMonth() + 1}월 ${d.getDate()}일 ${ap} ${h}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
 // 초 → "N분 N초" (1시간 이상이면 "N시간 N분 N초"). 합계 표시용.
 function fmtMinSec(s) {
   s = Math.max(0, Math.round(Number(s) || 0));
@@ -1412,18 +1419,6 @@ export default function App() {
                 {autoSavedAt ? `✓ 자동저장 ${new Date(autoSavedAt).toLocaleTimeString()}` : '자동저장 켜짐'}
               </span>
             )}
-            {gsCool && gsCool.until > 0 && (
-              <span title={`Genspark 이미지가 5시간 한도에 도달했습니다. ${gsCool.label} 이후 자동으로 다시 시도합니다. 그 전까지는 Genspark 에 접속하지 않고 Flow 등 다른 엔진으로 생성합니다. 앱을 껐다 켜도 이 시각은 유지됩니다.`}
-                style={{ marginLeft: 8, padding: '3px 9px', borderRadius: 6, background: '#fde8e8', color: '#a3352b', fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap' }}>
-                ⏸ Genspark 재설정 {gsCool.label}
-              </span>
-            )}
-            {grokCool && grokCool.until > 0 && (
-              <span title={`Grok 영상이 한도에 도달했습니다. ${grokCool.label} 이후 재설정됩니다. 그 전까지는 영상 생성을 건너뛰고 이미지만 만듭니다(헛되이 브라우저를 띄우지 않음). 앱을 껐다 켜도 이 시각은 유지됩니다.`}
-                style={{ marginLeft: 8, padding: '3px 9px', borderRadius: 6, background: '#e8eefd', color: '#2b45a3', fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap' }}>
-                ⏸ Grok 재설정 {grokCool.label}
-              </span>
-            )}
           </div>
         </div>
         {/* 제작 파이프라인 행 — 작업 순서대로 ①음성 → ②이미지 → ③비디오 → ④완성 그룹 */}
@@ -1527,6 +1522,18 @@ export default function App() {
 
       {/* 분할/합치기 바 — 스크롤 내려도 항상 보이도록 topsticky(고정) 안. (플리·출판 모드 제외) */}
       {!isPl && !isBk && <div id="capbar">
+        {gsCool && gsCool.until > 0 && (
+          <span title={`Genspark 이미지가 5시간 한도에 도달했습니다. 이 시각 이후 자동으로 다시 시도합니다. 그 전까지는 순환(무료)이 Genspark 에 접속하지 않고 바로 Flow 로 이미지를 만듭니다. 앱을 껐다 켜도 유지됩니다.`}
+            style={{ padding: '3px 9px', borderRadius: 6, background: '#fde8e8', color: '#a3352b', fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap' }}>
+            🖼 젠스파크 이미지 생성가능시간: {fmtKoTime(gsCool.until)}
+          </span>
+        )}
+        {grokCool && grokCool.until > 0 && (
+          <span title={`Grok 영상이 한도에 도달했습니다. 이 시각 이후 재설정됩니다. 그 전까지는 Grok(브라우저) 영상 생성을 건너뛰고 이미지만 만듭니다(헛되이 브라우저를 띄우지 않음). 앱을 껐다 켜도 유지됩니다.`}
+            style={{ padding: '3px 9px', borderRadius: 6, background: '#e8eefd', color: '#2b45a3', fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap' }}>
+            🎬 Grok 비디오 생성가능시간: {fmtKoTime(grokCool.until)}
+          </span>
+        )}
         <span className="grow" />
         {splitBar}
         {!isLf && <button className="ghost" title="TTS 후 캡 미만 그룹들을 한 그룹으로 합치기" onClick={mergeGroups}>🔗 합치기</button>}

@@ -7,6 +7,16 @@
 **편별 Vrew 4.0.1 .vrew 파일**을 자동 생성하는 Electron 앱. PrimingFlow(D:\PrimingFlow)의 엔진을
 복사·재활용한 독립 클론.
 
+## ⏸ 한도 배지 통계줄 앞 이동 + Grok 수동 버튼 쿨다운 스킵 (2026-07-18, v0.2.52)
+> 요청: Genspark "7월 18일 오전 11:08에 재설정" 팝업 시 그 시각을 **capbar(분할·AI고지·⏱통계 줄) 맨 앞**에
+>   "젠스파크 이미지 생성가능시간: 7월 18일 오전 11:08" 로 표시 + 순환이면 Genspark 건너뛰고 Flow 직행. Grok 도 동일.
+- **이미 있던 것(확인)**: 한도 메시지 파싱→계정 쿨다운 기록(v0.2.19)·순환의 Genspark 무접속 건너뜀→Flow 직행,
+  Grok 쿨다운 기록+make-all 3단계 생략(v0.2.30). 이번 팝업도 정상 기록돼 있었음(cooldowns.default=7/18 11:08).
+- **바꾼 것**: ① 헤더 구석의 gsCool/grokCool 배지를 **capbar 맨 앞**으로 이동, 문구 "🖼 젠스파크 이미지 생성가능시간:
+  7월 18일 오전 11:08"(fmtKoTime — 12시간제 한국어) / "🎬 Grok 비디오 생성가능시간: …". 60초 폴링·재시작 유지 그대로.
+  ② **video-build/video-group**(수동 🎬 버튼)에도 grok/grok10 이면 grokCoolUntil() 스킵 가드 추가(브라우저 안 띄움) —
+  기존엔 make-all 파이프라인에만 있었음. grok-api/comfy 는 쿨다운 무관(가드 제외).
+
 ## 🐞 ComfyUI 클라우드 체크 + LAN IP 혼합 → fetch failed → 클라우드면 항상 comfy.org (2026-07-17, v0.2.51)
 > 증상: 아내 PC 이미지 `fetch failed` 연발. 로그 "클라우드(Krea2) … http://100.112.7.63:8188" = 클라우드 체크 켠 채
 >   주소를 LAN(Tailscale) IP로 둠. 클라우드 방식(/api·X-API-Key)을 로컬 IP로 보내 실패. health()는 클라우드면
