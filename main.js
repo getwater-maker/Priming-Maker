@@ -2398,7 +2398,9 @@ ipcMain.handle('run-batch', async (_e, args = {}) => {
     it.status = 'running'; pushDtoUpdate();
     const label = (S.parsed.fileTitle) || (it.scriptPath || '');
     log(`▶ [${i + 1}/${plan.length}] ${S.mode === 'longform' ? '롱폼' : '쇼츠'} · ${label}`);
-    const s = entry.settings || {};
+    // 항목 설정은 **서버쪽 it.settings(진짜 최신)** 우선 — 렌더러 plan(entry.settings)은 디바운스 저장이
+    //   DTO 로 안 돌아와 stale 일 수 있음(예: 이미지 도구를 comfy 로 바꿔도 plan 엔 옛 rotate 가 실려 순환 실행됨).
+    const s = { ...(entry.settings || {}), ...(it.settings || {}) };
     try {
       // 비디오·이미지 엔진은 **항목별 값 우선**(이 작업엔 이 도구, 저 작업엔 저 도구). 항목에 없으면 헤더(공통) 폴백.
       //   제거된 영상엔진(flow/wan/grok10)은 grok 으로 보정. (comfy::path·grok-api 는 그대로)

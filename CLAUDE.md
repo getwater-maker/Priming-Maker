@@ -7,6 +7,16 @@
 **편별 Vrew 4.0.1 .vrew 파일**을 자동 생성하는 Electron 앱. PrimingFlow(D:\PrimingFlow)의 엔진을
 복사·재활용한 독립 클론.
 
+## 🐞 큐 만들기가 항목 이미지도구(comfy)를 무시하고 순환 실행 → 서버 it.settings 우선 (2026-07-19, v0.2.55)
+> 증상: 이미지 도구를 ComfyUI Z-image 로 바꿨는데 「만들기(큐)」 시 Genspark→Flow(순환)로 만듦. workspace.json 의
+>   큐 항목들은 모두 `imgEngine:"comfy"` 였음(서버 저장은 정상).
+- **원인**: `set-queue-settings`(디바운스)는 서버 `it.settings` 만 갱신하고 **렌더러로 DTO 를 안 되돌림** →
+  렌더러 `queue.items[].settings` 가 stale. run-batch 가 렌더러 plan 의 `entry.settings`(=stale, imgEngine 옛값)를
+  써서 순환 실행. 서버 it.settings(comfy)는 무시됨.
+- **수정**: run-batch 가 `const s = { ...entry.settings, ...it.settings }` — **서버쪽 it.settings(진짜 최신) 우선**.
+  imgEngine 뿐 아니라 videoEngine·presetName·배속·스타일 등 항목별 설정 전부 최신값으로 실행됨.
+- make-all(단건)은 헤더 state 를 직접 넘겨 무관(스테일 없음). 큐 경로만 영향.
+
 ## ⬆ 업스케일 중인 그룹 시각 표시 (2026-07-18, v0.2.54)
 > 요청: 업스케일 시 어느 그룹 영상을 처리 중인지 화면에 보이게.
 - maybeUpscale(main.js): 각 그룹 업스케일 전 `g.videoStatus='upscaling'`+pushDtoUpdate, 끝나면 'done'+pushDtoUpdate.
