@@ -46,7 +46,9 @@ class ComfyVideo {
   constructor(cfg = {}, logger = () => {}) {
     this.cloud = !!cfg.cloud;
     this.apiKey = cfg.apiKey || '';
-    let base = (cfg.baseUrl || 'http://127.0.0.1:8188').replace(/\/+$/, '');
+    let base = String(cfg.baseUrl || 'http://127.0.0.1:8188').trim().replace(/\/+$/, '');
+    if (base && !/^https?:\/\//i.test(base)) base = 'http://' + base;   // 스킴 없이 입력해도 동작
+    base = base.replace(/(:\d+)(?::\d+)+$/, '$1');                      // "host:8188:8188" 같은 포트 중복 오타 보정
     // 클라우드 체크 시엔 주소칸(로컬/LAN IP 등)과 무관하게 항상 comfy.org 로. (LAN IP+클라우드 혼합 오설정 방지)
     if (this.cloud && !/cloud\.comfy\.org/i.test(base)) base = 'https://cloud.comfy.org';
     this.baseUrl = base;

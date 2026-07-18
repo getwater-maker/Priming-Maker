@@ -1762,7 +1762,10 @@ ipcMain.handle('set-xai-key', (_e, key) => {
 ipcMain.handle('get-tts-servers', () => { try { return require('./tts/tts-config').loadAll(); } catch { return {}; } });
 ipcMain.handle('set-tts-server', (_e, args = {}) => {
   try {
-    const id = args.id, baseUrl = String(args.baseUrl || '').trim().replace(/\/$/, '');
+    const id = args.id;
+    let baseUrl = String(args.baseUrl || '').trim().replace(/\/+$/, '');
+    if (baseUrl && !/^https?:\/\//i.test(baseUrl)) baseUrl = 'http://' + baseUrl; // 스킴 없이 입력해도 동작
+    baseUrl = baseUrl.replace(/(:\d+)(?::\d+)+$/, '$1');                          // 포트 중복 오타 보정
     if (id !== 'omnivoice' && id !== 'supertonic') throw new Error('알 수 없는 TTS provider');
     require('./tts/tts-config').setProvider(id, { baseUrl });
     log(`TTS 서버 주소 저장: ${id} → ${baseUrl || '(비움)'}`);
