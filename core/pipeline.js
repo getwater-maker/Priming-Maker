@@ -124,7 +124,7 @@ function toDTO(parseResult) {
             imagePath: (g.imagePath && fs.existsSync(g.imagePath)) ? g.imagePath : null,
             videoPath: (g.videoPath && fs.existsSync(g.videoPath)) ? g.videoPath : null,
             imageStatus: g.imageStatus || null, // 'generating' | 'done' | 'fail'
-            videoStatus: g.videoStatus || null, // 'generating' | 'done' | 'fail'
+            videoStatus: g.videoStatus || null, // 'generating' | 'upscaling' | 'done' | 'fail'
           };
         }),
       };

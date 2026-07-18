@@ -1371,15 +1371,19 @@ async function maybeUpscale(project, logger, enabled) {
   if (!targets.length) return;
   const Upscaler = require('./core/upscaler');
   const [W, H] = (project.aspect === '1:1') ? [1080, 1080] : (project.aspect === '16:9') ? [1920, 1080] : [1080, 1920];
+  let done = 0;
   for (const g of targets) {
     if (S.abort) { logger('⏹ 업스케일 중단'); break; }
     const out = g.videoPath.replace(/\.mp4$/i, '_1080.mp4');
+    g.videoStatus = 'upscaling'; pushDtoUpdate(); // ← 어느 그룹을 업스케일 중인지 UI 썸네일에 표시
     try {
-      logger(`⬆ G${g.num} 영상 업스케일 → ${W}x${H}…`);
+      logger(`⬆ [${done + 1}/${targets.length}] G${g.num} 영상 업스케일 → ${W}x${H}…`);
       const r = await Upscaler.upscaleVideo(g.videoPath, out, { width: W, height: H, logger, abortSignal: () => S.abort });
-      if (r && r.ok) { g.videoPath = out; pushDtoUpdate(); }
+      if (r && r.ok) { g.videoPath = out; }
     } catch (e) { logger(`업스케일 실패 G${g.num}: ${e.message}`); }
+    g.videoStatus = 'done'; done++; pushDtoUpdate(); // ← 표시 해제(영상은 그대로 존재)
   }
+  logger(`⬆ 업스케일 완료 (${done}/${targets.length})`);
 }
 
 // 긴 대본 대응 — 그룹들을 "요청서 추정 크기" 기준 청크로 분할 (Set<"sn-num"> 배열).

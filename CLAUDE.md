@@ -7,6 +7,13 @@
 **편별 Vrew 4.0.1 .vrew 파일**을 자동 생성하는 Electron 앱. PrimingFlow(D:\PrimingFlow)의 엔진을
 복사·재활용한 독립 클론.
 
+## ⬆ 업스케일 중인 그룹 시각 표시 (2026-07-18, v0.2.54)
+> 요청: 업스케일 시 어느 그룹 영상을 처리 중인지 화면에 보이게.
+- maybeUpscale(main.js): 각 그룹 업스케일 전 `g.videoStatus='upscaling'`+pushDtoUpdate, 끝나면 'done'+pushDtoUpdate.
+  로그도 `⬆ [i/N] G{num} 영상 업스케일 → WxH…` + 종료 `⬆ 업스케일 완료 (n/N)`.
+- toDTO videoStatus 에 'upscaling' 추가(주석). App.jsx Thumb: videoPath 있고 videoStatus==='upscaling' 이면
+  영상 썸네일 위에 genOv('⬆ 업스케일 중…') 스피너 오버레이(이미지 'generating' 오버레이와 동일 패턴).
+
 ## 🐞 서버 주소 오타(포트 중복·스킴 누락) → 자동 보정 (2026-07-18, v0.2.53)
 > 증상: 로컬 GPU 이미지 `X ComfyUI 연결 실패 (127.0.0.1:8188:8188)` — 주소칸에 포트가 두 번 + http:// 누락.
 >   ComfyUI 자체는 127.0.0.1:8188 정상 리스닝 중이었음(주소 오타가 유일한 원인).

@@ -2333,6 +2333,7 @@ function Thumb({ c, isLf, onAttach, onClear, onPreview }) {
         <video className={'thumb' + cls} src={media(c.videoPath)} muted loop playsInline preload="metadata" />
         <button className="vidplay" title="재생 / 정지" onClick={(e) => { const v = e.currentTarget.parentElement.querySelector('video'); if (!v) return; if (v.paused) { v.play(); e.currentTarget.classList.add('playing'); } else { v.pause(); e.currentTarget.classList.remove('playing'); } }}>▶</button>
         <span className="playbadge">🎬 영상</span>{clearBtn}
+        {c.videoStatus === 'upscaling' ? genOv('⬆ 업스케일 중…') : null}
       </div>
     );
   }
