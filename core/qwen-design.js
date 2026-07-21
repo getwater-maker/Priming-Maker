@@ -27,15 +27,15 @@ function _readCfgDir() {
   return null;
 }
 
-// qwen-design 폴더 탐색: 설정 → 앱 옆(__dirname/../qwen-design) → D:\Priming-Maker\qwen-design.
+// qwen-design 폴더 탐색: 설정 → 앱 옆(__dirname/../qwen-design) → D:\Priming\qwen-design.
 // venv\Scripts\python.exe 가 있는 곳을 정본으로 본다(= 최초설치.bat 로 만든 곳).
 function resolveDir() {
   if (S.dir && _hasVenv(S.dir)) return S.dir;
   const cands = [
     _readCfgDir(),
     path.join(__dirname, '..', 'qwen-design'),
-    path.join('D:', '\\', 'Priming-Maker', 'qwen-design'),
-    'D:\\Priming-Maker\\qwen-design',
+    path.join('D:', '\\', 'Priming', 'qwen-design'),
+    'D:\\Priming\\qwen-design',
   ].filter(Boolean);
   for (const d of cands) { if (_hasVenv(d)) { S.dir = d; return d; } }
   // venv 없이 폴더만 있으면 그거라도(설치 전 안내용)

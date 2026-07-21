@@ -81,9 +81,12 @@ class ComfyVideo {
     fd.append('type', 'input');
     fd.append('overwrite', 'true');
     const r = await fetch(this._url('/upload/image'), { method: 'POST', headers: this._headers(), body: fd });
-    if (!r.ok) throw new Error(`이미지 업로드 실패 (${r.status})`);
-    const j = await r.json();
-    return j.subfolder ? `${j.subfolder}/${j.name}` : j.name;
+    if (!r.ok) { const t = await r.text().catch(() => ''); throw new Error(`이미지 업로드 실패 (${r.status}) ${t.slice(0, 200)}`); }
+    const j = await r.json().catch(() => ({}));
+    const name = j.subfolder ? `${j.subfolder}/${j.name}` : j.name;
+    this.log(`[ComfyVid] 이미지 업로드 → "${name}" (status ${r.status}, resp ${JSON.stringify(j).slice(0, 160)})`);
+    if (!name) throw new Error('업로드 응답에 파일명이 없습니다 — /upload/image 응답 형식 확인 필요: ' + JSON.stringify(j).slice(0, 200));
+    return name;
   }
   _scanVideo(outputs) {
     outputs = outputs || {};
@@ -130,18 +133,29 @@ class ComfyVideo {
         this.log('[ComfyVid] LoadImage 노드 자동 주입 → ' + (graph[i2vId].class_type) + '.start_image');
       }
     }
-    // ── 프롬프트 주입 (Positive CLIPTextEncode, Negative 회피) ──
+    // ── 프롬프트 주입 ──
+    //   Wan 등: Positive CLIPTextEncode 의 리터럴 text.
+    //   LTX 등(서브그래프): 프롬프트가 "Prompt" 문자열 Primitive → TextGenerate → CLIPTextEncode(text=링크)로 흐름
+    //     → CLIPTextEncode 에 넣으면 링크라 무시(또는 네거티브 리터럴을 덮어쓸 위험) → 문자열 Primitive 의 value 에 주입.
     if (prompt) {
-      const inject = (n) => { if (!n || !n.inputs) return false; for (const k of ['text', 'prompt', 'positive', 'positive_prompt']) { if (k in n.inputs && typeof n.inputs[k] !== 'object') { n.inputs[k] = String(prompt); return true; } } return false; };
-      if (this.promptNodeId && graph[this.promptNodeId]) inject(graph[this.promptNodeId]);
-      else {
-        const clipIds = ids.filter((id) => graph[id].class_type === 'CLIPTextEncode' && 'text' in (graph[id].inputs || {}));
-        const titleOf = (id) => ((graph[id]._meta && graph[id]._meta.title) || '').toLowerCase();
-        const isNeg = (id) => /negative|부정/.test(titleOf(id));
-        const isPos = (id) => /positive|긍정/.test(titleOf(id));
-        const pId = clipIds.find(isPos) || clipIds.filter((id) => !isNeg(id))[0] || clipIds[0];
-        if (pId) inject(graph[pId]);
+      const titleOf = (id) => ((graph[id]._meta && graph[id]._meta.title) || '').toLowerCase();
+      const isNeg = (id) => /negative|부정|worst|nsfw|bad ?quality/.test(titleOf(id)) || /negative/.test((graph[id].class_type || '').toLowerCase());
+      const setLit = (n, keys) => { if (!n || !n.inputs) return false; for (const k of keys) { if (k in n.inputs && typeof n.inputs[k] !== 'object') { n.inputs[k] = String(prompt); return true; } } return false; };
+      let done = false;
+      if (this.promptNodeId && graph[this.promptNodeId]) done = setLit(graph[this.promptNodeId], ['value', 'text', 'prompt', 'positive', 'positive_prompt', 'string']);
+      if (!done) {
+        // ① 문자열 Primitive("Prompt") — LTX 등 모던 서브그래프
+        const strIds = ids.filter((id) => /PrimitiveString|StringMultiline|String \(/i.test(graph[id].class_type || '') && !isNeg(id));
+        const pStr = strIds.find((id) => /prompt|positive|긍정|프롬프트/.test(titleOf(id))) || strIds[0];
+        if (pStr) done = setLit(graph[pStr], ['value', 'string', 'text']);
       }
+      if (!done) {
+        // ② Positive CLIPTextEncode 의 리터럴 text(네거티브·링크 제외) — Wan 등 전통 그래프
+        const clipIds = ids.filter((id) => graph[id].class_type === 'CLIPTextEncode' && typeof (graph[id].inputs || {}).text !== 'object' && 'text' in (graph[id].inputs || {}) && !isNeg(id));
+        const pId = clipIds.find((id) => /positive|긍정/.test(titleOf(id))) || clipIds[0];
+        if (pId) done = setLit(graph[pId], ['text']);
+      }
+      if (!done) this.log('[ComfyVid] ⚠ 프롬프트 주입 대상 노드를 못 찾음 — 워크플로 기본 프롬프트로 진행합니다.');
     }
     // ── seed 랜덤(0~2^31-1) ──
     for (const id of ids) {
@@ -150,16 +164,36 @@ class ComfyVideo {
       if (typeof inp.noise_seed === 'number') inp.noise_seed = rnd;
     }
     // ── 해상도(비율) ──
+    const _titleOf = (id) => ((graph[id]._meta && graph[id]._meta.title) || '').toLowerCase();
+    const _isPrimNum = (id) => /Primitive(Int|Float)?/i.test(graph[id].class_type || '') && typeof (graph[id].inputs || {}).value === 'number';
     if (this.sendDims && aspect) {
       const d = this._videoDims(aspect);
-      for (const id of ids) { const inp = graph[id].inputs || {}; if (typeof inp.width === 'number' && typeof inp.height === 'number') { inp.width = d.w; inp.height = d.h; break; } }
+      let set = false;
+      // ① 같은 노드에 width+height 리터럴 (Wan 등)
+      for (const id of ids) { const inp = graph[id].inputs || {}; if (typeof inp.width === 'number' && typeof inp.height === 'number') { inp.width = d.w; inp.height = d.h; set = true; break; } }
+      // ② 별도 Primitive("Width"/"Height") — LTX 등
+      if (!set) {
+        const wId = ids.find((id) => _isPrimNum(id) && /width|가로|너비/.test(_titleOf(id)));
+        const hId = ids.find((id) => _isPrimNum(id) && /height|세로|높이/.test(_titleOf(id)));
+        if (wId) { graph[wId].inputs.value = d.w; set = true; }
+        if (hId) { graph[hId].inputs.value = d.h; set = true; }
+      }
     }
     // ── 길이(초→프레임 length) ──
     if (durSec) {
       let sec = Math.max(1, Math.ceil(Number(durSec) || 0));
       if (this.videoMaxSec > 0) sec = Math.min(this.videoMaxSec, sec);
       const frames = this._snap4(Math.round(sec * this.fps));
-      for (const id of ids) { const inp = graph[id].inputs || {}; if (typeof inp.length === 'number') { inp.length = frames; break; } if (typeof inp.num_frames === 'number') { inp.num_frames = frames; break; } }
+      let set = false;
+      // ① latent 노드의 리터럴 length/num_frames (프레임) — Wan 등
+      for (const id of ids) { const inp = graph[id].inputs || {}; if (typeof inp.length === 'number') { inp.length = frames; set = true; break; } if (typeof inp.num_frames === 'number') { inp.num_frames = frames; set = true; break; } }
+      // ② 별도 Primitive — "Duration"(초 단위) 우선, 없으면 "Length/Frames"(프레임) — LTX 등
+      if (!set) {
+        const durId = ids.find((id) => _isPrimNum(id) && /duration|길이|초\b|sec/.test(_titleOf(id)));
+        if (durId) { graph[durId].inputs.value = sec; set = true; }        // Duration = 초(내부 math 가 프레임 계산)
+        else { const frId = ids.find((id) => _isPrimNum(id) && /length|frames?|프레임/.test(_titleOf(id))); if (frId) { graph[frId].inputs.value = frames; set = true; } }
+      }
+      if (!set) this.log('[ComfyVid] ⚠ 길이 주입 대상을 못 찾음 — 워크플로 기본 길이로 진행합니다.');
     }
     return graph;
   }
@@ -171,6 +205,7 @@ class ComfyVideo {
     if (!r.ok) { const t = await r.text().catch(() => ''); throw new Error(`/prompt 큐 실패 (${r.status}): ${t.slice(0, 300)}`); }
     const j = await r.json();
     if (j.node_errors && Object.keys(j.node_errors).length) throw new Error('워크플로 노드 오류: ' + JSON.stringify(j.node_errors).slice(0, 300));
+    this.log(`[ComfyVid] 큐 접수 → prompt_id=${j.prompt_id || '(없음)'} (resp keys: ${Object.keys(j).join(',')})`);
     return j.prompt_id;
   }
   async _waitCloud(promptId, abortSignal) {
@@ -238,6 +273,12 @@ class ComfyVideo {
       if (!(await this.health())) return { success: false, error: `ComfyUI 연결 실패 (${this.baseUrl})${this.cloud ? ' — API 키/구독 확인' : ''}` };
       const uploadName = await this._uploadImage(imagePath);
       const graph = this._buildGraph(uploadName, prompt, aspect, durationSec);
+      // 진단: 큐로 실제 전송되는 그래프에 우리 이미지·프롬프트가 들어갔는지 확인(클라우드가 이를 무시하는지 판별용)
+      try {
+        const liIds = Object.keys(graph).filter((id) => graph[id].class_type === 'LoadImage');
+        const imgVal = liIds.map((id) => graph[id].inputs && graph[id].inputs.image).join(', ');
+        this.log(`[ComfyVid] 큐 전송 그래프 확인 → LoadImage=[${imgVal}] · 프롬프트="${String(prompt || '').slice(0, 45)}…" · 노드수 ${Object.keys(graph).length}`);
+      } catch {}
       const promptId = await this._queue(graph);
       const vid = this.cloud ? await this._waitCloud(promptId, abortSignal) : await this._waitLocal(promptId, abortSignal);
       const out = await this._download(vid, outputPath);

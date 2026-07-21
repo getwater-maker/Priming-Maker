@@ -7,6 +7,23 @@
 **편별 Vrew 4.0.1 .vrew 파일**을 자동 생성하는 Electron 앱. PrimingFlow(D:\PrimingFlow)의 엔진을
 복사·재활용한 독립 클론.
 
+## 🐞 LTX2.3 i2v — 사용자 이미지 대신 "이집트 여왕" 영상이 나옴 → 프롬프트·해상도·길이 주입 실패 (2026-07-21, v0.2.56)
+> 증상: LTX2.3 비디오 생성 시 그룹 이미지가 아니라 LTX 샘플이미지(egyptian queen)가 i2v 되는 것처럼 보임.
+- **실측 진단(클라우드 `/api/jobs` 로 실행된 그래프 회수 — 강력한 디버깅 수단)**: 이미지 업로드·주입은 구버전에서도
+  정상이었음(실행 그래프 LoadImage=사용자 이미지 해시, `/api/view` 로 내려받아 육안 확인 = 조선 수채화).
+  진짜 원인 = **프롬프트 미주입**: LTX 워크플로는 프롬프트가 PrimitiveStringMultiline("Prompt")→TextGenerateLTX2Prompt
+  (Gemma 증강)→CLIPTextEncode(text=**링크**) 구조라, 구코드(CLIPTextEncode 리터럴만 주입)가 대상 못 찾고 **기본 프롬프트
+  ("Egyptian royal in blue-and-gold headdress…" = 샘플이미지 묘사문)가 그대로 실행** → 2단계 i2v(2단 strength 0.7)+
+  프롬프트 증강(EnablePromptEnh=true)이 영상 내용을 프롬프트 쪽으로 끌고 가 샘플이미지가 쓰인 것처럼 보임.
+  해상도(1280×720 기본)·길이(5초 기본, TTS 무시)도 미주입이었음.
+- **수정(comfy-video.js — 작업트리에 있던 미발행분 검증 후 발행)**: 프롬프트→문자열 Primitive("Prompt") value(네거티브
+  제외), 해상도→Width/Height PrimitiveInt, 길이→Duration Primitive(초, 없으면 Length/Frames=프레임) 주입 + 업로드·큐
+  진단 로그. 실워크플로 단위검증(이미지·프롬프트·1280×704·6초 주입 확인). `comfy/video_ltx2_3_i2v.json` 저장소 추가.
+- **폴더명 이관**(D:\Priming-Maker→D:\Priming): 코드 폴백 경로(ace-step/qwen-design/lora-collect)·홈 설정파일
+  (comfy-image-config·lora-collect·tts-presets scriptFolder)·문서(cd 경로) 갱신. GitHub 저장소명은 그대로(발행 무영향).
+- ⚠ 사용자는 설치본(라이트 업데이트) 사용 — **발행 후 앱 재시작해야 반영**. 실행 그래프 확인법: `/api/jobs?limit=N` →
+  `/api/jobs/{id}`.workflow.prompt (X-API-Key 헤더).
+
 ## 🐞 큐 만들기가 항목 이미지도구(comfy)를 무시하고 순환 실행 → 서버 it.settings 우선 (2026-07-19, v0.2.55)
 > 증상: 이미지 도구를 ComfyUI Z-image 로 바꿨는데 「만들기(큐)」 시 Genspark→Flow(순환)로 만듦. workspace.json 의
 >   큐 항목들은 모두 `imgEngine:"comfy"` 였음(서버 저장은 정상).
@@ -142,7 +159,7 @@
 - ⚠ bulk-attach 는 g.videoPath 를 **원본 선택 경로**로 지정(미디어폴더 복사 안 함) — 파일을 지우면 끊김(현행 유지, 별도).
 
 ## 🎬 ComfyUI i2v 비디오 엔진 (Wan 2.2 5B / LTX · 로컬·클라우드) 추가 (2026-07-15, v0.2.38)
-> 요청: Grok API 무료크레딧 불가+건당 과금 → ComfyUI i2v 로 전환. 사용자가 `D:\Priming-Maker\comfy\video_wan2_2_5B_ti2v.json`
+> 요청: Grok API 무료크레딧 불가+건당 과금 → ComfyUI i2v 로 전환. 사용자가 `D:\Priming\comfy\video_wan2_2_5B_ti2v.json`
 > 다운(일단 comfy 클라우드). 이미지 comfy 경로(comfy-image.js)를 비디오용으로 확장.
 - **엔진** `core/comfy-video.js`(구 comfy-engine.js i2v 로직 이식): `/upload/image` 로 그룹 이미지 업로드 →
   워크플로 LoadImage.image=업로드명. **LoadImage 없으면 자동 주입** → i2v latent 노드(class_type ~/ImageToVideo/)의
@@ -491,7 +508,7 @@
   이면 `runComfyVideos(...,{wan:true})` 가 cfg 를 `{workflowPath:wanWorkflowPath, videoFps:wanFps, videoMaxSec:wanMaxSec, timeoutSec:wanTimeoutSec}`
   로 오버라이드. 캐시 태그 `comfy-wan`. **클라우드(comfy.org) 설정(cloud/apiKey)은 그대로 물려받음** — Wan 도 클라우드에서 동작.
 - comfy-config: `wanWorkflowPath`·`wanFps(16)`·`wanMaxSec(0=videoMaxSec)`·`wanTimeoutSec(0=timeoutSec)`·`videoFps(0=초)` 추가.
-- **클라우드 Wan = 단일 API 노드 `Wan2ImageToVideoApi`** (예: `D:\Priming-Maker\Wan2.7 I2V\api_wan2_7_i2v.json`).
+- **클라우드 Wan = 단일 API 노드 `Wan2ImageToVideoApi`** (예: `D:\Priming\Wan2.7 I2V\api_wan2_7_i2v.json`).
   로컬 Wan(CLIPTextEncode+WanImageToVideo.length 프레임)과 다름 → 엔진이 둘 다 처리:
   - 프롬프트 주입(`_buildGraph`): CLIPTextEncode.text 없으면 **`model.prompt`/prompt/positive** 키 자동 주입(부정 프롬프트 보존).
   - 길이 주입(`_setVideoDuration`): 필드명으로 초/프레임 자동 판별 — **`model.duration`/duration/seconds=초**, `length`/`num_frames`=프레임(초×videoFps).
@@ -500,7 +517,7 @@
   - ❌ `Wan2ImageToVideoApi`(API 노드) = comfy.org 가 파트너(Alibaba) 유료 API 를 중계 → **API 크레딧 과금** + 헤드리스 REST 는 계정 인증 필요
     (`_queue` 가 `extra_data.api_key_comfy_org` 전달로 "Unauthorized" 대응). 길이=`model.duration`(초), 프롬프트=`model.prompt`.
   - ✅ **로컬노드 워크플로**(`UNETLoader`+`WanImageToVideo`+`CLIPTextEncode`+`KSamplerAdvanced`+`SaveVideo`) = 클라우드 GPU 에서
-    직접 실행 = **구독 GPU 시간만(추가 크레딧 X)**. 예: `D:\Priming-Maker\Wan2.2 I2V\video_wan2_2_14B_i2v.json`(Wan 2.2 14B, 검증됨).
+    직접 실행 = **구독 GPU 시간만(추가 크레딧 X)**. 예: `D:\Priming\Wan2.2 I2V\video_wan2_2_14B_i2v.json`(Wan 2.2 14B, 검증됨).
 - **로컬노드 Wan 2.2 주입 특이점**(comfy-engine 이 처리, 실측 검증):
   - 프롬프트: CLIPTextEncode 가 **긍정/부정 2개** → `_buildGraph` 가 **제목(positive/negative)으로 긍정 노드 선택**(부정에 주입 금지).
   - 길이: `Float (Duration)`(초) 프리미티브 → 워크플로가 `floor(초×fps+1)`로 프레임 자동계산. `_setVideoDuration` 브랜치③ 이
@@ -709,7 +726,7 @@
 
 ## 실행
 ```powershell
-cd D:\Shots-maker
+cd D:\Priming
 npm install   # 첫 실행 시
 npm start     # → electron .
 ```

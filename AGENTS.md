@@ -85,7 +85,7 @@
 
 ## 실행
 ```powershell
-cd D:\Shots-maker
+cd D:\Priming
 npm install   # 첫 실행 시
 npm start     # → electron .
 ```

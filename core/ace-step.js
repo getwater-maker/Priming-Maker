@@ -26,10 +26,10 @@ function _readCfgDir() {
 function _hasVenv(dir) { try { return !!dir && fs.existsSync(path.join(dir, 'venv', 'Scripts', 'python.exe')); } catch { return false; } }
 function pythonExe(dir) { return path.join(dir, 'venv', 'Scripts', 'python.exe'); }
 
-// ace-step 폴더 탐색: 설정 → 앱 옆(../ace-step) → D:\Priming-Maker\ace-step.
+// ace-step 폴더 탐색: 설정 → 앱 옆(../ace-step) → D:\Priming\ace-step.
 function resolveDir() {
   if (S.dir && _hasVenv(S.dir)) return S.dir;
-  const cands = [_readCfgDir(), path.join(__dirname, '..', 'ace-step'), 'D:\\Priming-Maker\\ace-step'].filter(Boolean);
+  const cands = [_readCfgDir(), path.join(__dirname, '..', 'ace-step'), 'D:\\Priming\\ace-step'].filter(Boolean);
   for (const d of cands) { if (_hasVenv(d)) { S.dir = d; return d; } }
   for (const d of cands) { try { if (fs.existsSync(path.join(d, 'ace_step_server.py'))) { S.dir = d; return d; } } catch {} }
   return null;
