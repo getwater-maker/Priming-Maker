@@ -7,6 +7,20 @@
 **편별 Vrew 4.0.1 .vrew 파일**을 자동 생성하는 Electron 앱. PrimingFlow(D:\PrimingFlow)의 엔진을
 복사·재활용한 독립 클론.
 
+## 🐞 X로 지운 이미지가 만들기 때 캐시에서 부활 + 중단인데 폴더 열림 (2026-07-22, v0.2.60)
+> 증상 ① 그룹 이미지를 X로 지운 뒤 만들기 → 지웠던 그 이미지가 그대로 다시 들어옴. ② 중단 눌러도 완료된 것처럼
+>   출력폴더가 열림.
+- **Bug 1 원인(이미지 전용)**: `clear-asset`(X)는 `imagePath=null` 만 하고 미디어캐시는 안 지움 → `prefillImageCache`
+  가 만들기 시작 시 같은 키(prompt+style+aspect+engine) 캐시를 찾아 옛 이미지를 복사해 넣음. (비디오는 `MC.get(videoKey)`
+  prefill 자체가 없어 부활 안 함 — 안전.)
+  - 수정: clear-asset 이미지 삭제 시 `g.imageCleared=true` + 저장해둔 `g._imgCacheKey` 로 캐시파일 `MC.del`.
+    prefillImageCache 는 `imageCleared` 그룹 건너뜀. cacheGeneratedImages 는 새 이미지 캐시 시 key 저장 + 플래그 해제
+    (재생성 후엔 재활용 허용). → 지운 그룹은 캐시 무시하고 새로 생성. 순서: prefill(skip)→생성→cache(플래그 해제).
+- **Bug 2 원인**: `runMakeAllCore` 4단계 vrew·폴더는 이미 `if(!S.abort)` 로 중단 시 생략됨. 그러나 **run-batch(큐 제작)
+  핸들러 끝의 최종 폴더열기 `shell.openPath(S.outRoot)` 가 중단 무관하게 항상 실행**됨.
+  - 수정: `if (!S.abort) { shell.openPath(...) }` 가드 추가. 이제 중단 시 폴더 안 열림(vrew 는 원래 생략됨).
+- ⚠ 앱 재시작 반영(라이트). deps 무변경.
+
 ## 🐞 큐 항목 전환 시 영상범위·배속·스타일·AI고지 초기화 → 항목별 값 보존 (2026-07-22, v0.2.59)
 > 증상: 헤더 영상범위(vidFrom~vidTo)를 바꾸고 다른 롱폼 큐를 클릭하면 초기화됨(1번 파일 1~5, 2번 파일 1~3 불가).
 - **원인 2개(둘 다 기본값 useEffect 가 applySettings 복원값을 덮어씀)**:

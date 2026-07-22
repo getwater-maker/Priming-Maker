@@ -1342,6 +1342,7 @@ function prefillImageCache(project, mediaDir, styleId, engine) {
   for (const g of project.groups) {
     if (!g.imagePrompt || !g.imagePrompt.trim()) continue;
     if (hasVisual(g)) continue; // 이미지/영상 이미 있으면 캐시 프리필도 건너뜀
+    if (g.imageCleared) continue; // 사용자가 X로 지운 그룹 — 캐시로 되살리지 않고 새로 생성
     const hit = MC.get(MC.imageKey(g.imagePrompt, styleId || '', project.aspect || '9:16', engine));
     if (!hit) continue;
     try { fs.mkdirSync(mediaDir, { recursive: true }); const out = path.join(mediaDir, `${String(g.num).padStart(2, '0')}.${hit.ext}`); fs.copyFileSync(hit.file, out); g.imagePath = out; g.imageStatus = 'done'; n++; } catch {}
@@ -1354,7 +1355,9 @@ function cacheGeneratedImages(project, styleId, engine) {
   const MC = require('./core/media-cache');
   for (const g of project.groups) {
     if (!g.imagePrompt || !g.imagePath || !fs.existsSync(g.imagePath)) continue;
-    MC.put(MC.imageKey(g.imagePrompt, styleId || '', project.aspect || '9:16', engine), g.imagePath, path.extname(g.imagePath).slice(1));
+    const key = MC.imageKey(g.imagePrompt, styleId || '', project.aspect || '9:16', engine);
+    MC.put(key, g.imagePath, path.extname(g.imagePath).slice(1));
+    g._imgCacheKey = key; g.imageCleared = false; // 새 이미지 캐시 저장 → 삭제플래그 해제(이후 재활용 허용)
   }
 }
 // 그룹에 이미지 '또는' 비디오가 이미 있으면 비주얼 완성 — 이미지 생성 건너뛰기 판정.
@@ -1680,6 +1683,8 @@ ipcMain.handle('clear-asset', (_e, args = {}) => {
       log(`영상 삭제: ${pr.title} G${groupNum} (이미지 유지)`);
     } else {
       g.imagePath = null; g.imageStatus = 'idle';
+      g.imageCleared = true; // 만들기 때 캐시로 되살아나지 않게 — 새로 생성하도록 표시
+      try { if (g._imgCacheKey) { require('./core/media-cache').del(g._imgCacheKey); g._imgCacheKey = null; } } catch {} // 캐시 파일도 실제 삭제
       log(`이미지 삭제: ${pr.title} G${groupNum}`);
     }
   }
@@ -2428,7 +2433,7 @@ ipcMain.handle('run-batch', (_e, args = {}) => enqueueTtsJob('큐 순차 제작'
     pushDtoUpdate();
   }
   log(`⚡⚡ 큐 제작 종료 — 성공 ${okN} · 실패 ${failN}${skipN ? ` · 완료건너뜀 ${skipN}` : ''}`);
-  try { if (S.outRoot) shell.openPath(S.outRoot); } catch {}
+  if (!S.abort) { try { if (S.outRoot) shell.openPath(S.outRoot); } catch {} } // 중단 시엔 폴더 자동 열기 생략(완료된 것처럼 보이지 않게)
   return { dto: S.parsed ? P.toDTO(S.parsed) : null, queue: queueDTO() };
 }));
 
