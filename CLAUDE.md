@@ -7,6 +7,17 @@
 **편별 Vrew 4.0.1 .vrew 파일**을 자동 생성하는 Electron 앱. PrimingFlow(D:\PrimingFlow)의 엔진을
 복사·재활용한 독립 클론.
 
+## 🔀 ComfyUI 서버 프로필(comfy.org ↔ RunPod) 드롭다운 전환 (2026-07-23, v0.2.64)
+> 요청: comfy.org 클라우드와 RunPod(자가 GPU)를 골라 쓰며 몇 번 써보고 최종 결정하겠다. 지금 상태에서 comfy.org도
+>   쓸 수 있게. (배경: RunPod RTX PRO 4500 이 comfy.org 대비 느림 — 이미지 ~30초/장, i2v 8분+. comfy.org 는 이미지 ~5초.)
+- **comfy-image/comfy-video config 에 `servers[]`·`activeServer` 추가**(DEFAULTS). 엔진은 무변경 — 여전히 baseUrl/cloud/apiKey
+  를 읽음. servers 는 저장된 프로필 목록 `[{name,baseUrl,cloud,apiKey}]`, 선택 시 그 값을 live 필드로 복사(saveCfg).
+- **⚙ ComfyUI 이미지/비디오 모달에 「서버」 드롭다운** 추가(워크플로 드롭다운과 동일 패턴): 프로필 선택→주소·클라우드·키 한 번에
+  전환, 💾저장(현재 설정을 이름 붙여 프로필로), 🗑삭제. App.jsx pickComfyServer/saveComfyServer/removeComfyServer(+Cvid 짝).
+- **홈 config 두 개에 프로필 2개 선주입**: RunPod(cloud:false, `02kqro91c1m3q7-8188.proxy.runpod.net`) · comfy.org(cloud:true,
+  cloud.comfy.org + apiKey). activeServer=RunPod. → 앱에서 드롭다운만 바꿔 comfy.org↔RunPod 즉시 전환.
+- ⚠ 앱 재시작 반영(라이트). deps 무변경. RunPod URL 은 파드별 — 파드 바뀌면 프로필 주소 갱신 필요.
+
 ## 🎬 LTX2.3 i2v 실사화 → Prompt Enhance(Gemma 증강) 자동 OFF (2026-07-22, v0.2.63)
 > 증상: 이미지는 수채화로 잘 나오는데 i2v 영상은 사진처럼 실사화됨. 사용자 비디오 프롬프트엔 "실사" 단어 없음.
 - **원인 2가지**: ① 비디오 프롬프트에 화풍 앵커(watercolor 등)가 0개 — i2v 디노이즈가 텍스처를 다시 그릴 때 붙잡을 말이

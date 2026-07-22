@@ -1264,6 +1264,25 @@ export default function App() {
     const list = (comfyCfg.workflows || []).filter((w) => w.path !== comfyCfg.workflowPath);
     await saveComfyCfg({ workflows: list, workflowPath: list[0] ? list[0].path : '' });
   }
+  // ── 서버 프로필(comfy.org/RunPod 전환) — 이미지 ──
+  async function pickComfyServer(name) {
+    const s = (comfyCfg.servers || []).find((x) => x.name === name);
+    if (!s) return;
+    await saveComfyCfg({ baseUrl: s.baseUrl || '', cloud: !!s.cloud, apiKey: s.apiKey || '', activeServer: name });
+  }
+  async function saveComfyServer() {
+    const name = ((await askName('이 서버 프로필 이름 (예: comfy.org, RunPod)', comfyCfg.activeServer || '')) || '').trim();
+    if (!name) return;
+    const list = Array.isArray(comfyCfg.servers) ? comfyCfg.servers.slice() : [];
+    const entry = { name, baseUrl: (comfyCfg.baseUrl || '').trim(), cloud: !!comfyCfg.cloud, apiKey: (comfyCfg.apiKey || '').trim() };
+    const i = list.findIndex((x) => x.name === name);
+    if (i >= 0) list[i] = entry; else list.push(entry);
+    await saveComfyCfg({ servers: list, activeServer: name });
+  }
+  async function removeComfyServer() {
+    const list = (comfyCfg.servers || []).filter((x) => x.name !== comfyCfg.activeServer);
+    await saveComfyCfg({ servers: list, activeServer: '' });
+  }
   // 헤더 이미지 드롭다운에서 ComfyUI 워크플로별 항목(comfy::<path>) 선택 → 엔진=comfy + 활성 워크플로 지정
   function onPickImgEngine(val) {
     if (val && val.indexOf('comfy::') === 0) {
@@ -1299,6 +1318,25 @@ export default function App() {
       if (i >= 0) list[i] = { name, path: r.path }; else list.push({ name, path: r.path });
       await saveCvidCfg({ workflows: list, workflowPath: r.path });
     } catch (e) { logline('i2v 워크플로 추가 오류: ' + e.message); }
+  }
+  // ── 서버 프로필(comfy.org/RunPod 전환) — 비디오 ──
+  async function pickCvidServer(name) {
+    const s = (cvidCfg.servers || []).find((x) => x.name === name);
+    if (!s) return;
+    await saveCvidCfg({ baseUrl: s.baseUrl || '', cloud: !!s.cloud, apiKey: s.apiKey || '', activeServer: name });
+  }
+  async function saveCvidServer() {
+    const name = ((await askName('이 서버 프로필 이름 (예: comfy.org, RunPod)', cvidCfg.activeServer || '')) || '').trim();
+    if (!name) return;
+    const list = Array.isArray(cvidCfg.servers) ? cvidCfg.servers.slice() : [];
+    const entry = { name, baseUrl: (cvidCfg.baseUrl || '').trim(), cloud: !!cvidCfg.cloud, apiKey: (cvidCfg.apiKey || '').trim() };
+    const i = list.findIndex((x) => x.name === name);
+    if (i >= 0) list[i] = entry; else list.push(entry);
+    await saveCvidCfg({ servers: list, activeServer: name });
+  }
+  async function removeCvidServer() {
+    const list = (cvidCfg.servers || []).filter((x) => x.name !== cvidCfg.activeServer);
+    await saveCvidCfg({ servers: list, activeServer: '' });
   }
   async function removeCvidWf() {
     const list = (cvidCfg.workflows || []).filter((w) => w.path !== cvidCfg.workflowPath);
@@ -1893,6 +1931,14 @@ export default function App() {
           <div className="modal-card">
             <h3>⚙ ComfyUI 이미지 (z-image · Krea2 등 · 로컬/클라우드)</h3>
             <div className="meta" style={{ marginBottom: 8 }}>ComfyUI 에서 워크플로를 <b>「저장(API 포맷)」</b>한 JSON 을 <b>＋추가</b>로 여러 개 등록하고, 드롭다운으로 골라 쓰세요(z-image·Krea2 등). 헤더 이미지 방식을 <b>ComfyUI(z-image)</b>로 고르면 선택된 워크플로로 이미지를 만듭니다.</div>
+            <div className="frow"><label>서버</label>
+              <select style={{ flex: 1 }} value={comfyCfg.activeServer || ''} title="저장된 서버(comfy.org/RunPod)로 전환 — 주소·클라우드·키를 한 번에 적용"
+                onChange={(e) => { if (e.target.value) pickComfyServer(e.target.value); }}>
+                <option value="">— 서버 프로필 선택(comfy.org/RunPod) —</option>
+                {(comfyCfg.servers || []).map((s) => <option key={s.name} value={s.name}>{s.name}{s.cloud ? ' (클라우드)' : ''}</option>)}
+              </select>
+              <button className="ghost" title="현재 주소·클라우드·키를 이름 붙여 서버 프로필로 저장" onClick={saveComfyServer}>💾 저장</button>
+              <button className="ghost" title="선택된 서버 프로필 삭제" disabled={!comfyCfg.activeServer} onClick={removeComfyServer}>🗑</button></div>
             <div className="frow"><label>주소</label>
               <input style={{ flex: 1 }} value={comfyCfg.baseUrl || ''} placeholder="http://127.0.0.1:8188"
                 onChange={(e) => setComfyCfg({ ...comfyCfg, baseUrl: e.target.value })} onBlur={() => saveComfyCfg({ baseUrl: (comfyCfg.baseUrl || '').trim() })} /></div>
@@ -1933,6 +1979,14 @@ export default function App() {
           <div className="modal-card wide">
             <h3>⚙ ComfyUI 비디오 i2v (Wan 2.2 · LTX 등 · 로컬/클라우드)</h3>
             <div className="meta" style={{ marginBottom: 8 }}>그룹 이미지를 업로드해 <b>이미지→비디오</b>로 만듭니다. ComfyUI 에서 i2v 워크플로를 <b>「저장(API 포맷)」</b>한 JSON 을 <b>＋추가</b>로 등록하세요. (Wan 2.2는 <b>Load Image → start_image</b> 연결이 있어야 하며, 없으면 앱이 자동 주입을 시도합니다.)</div>
+            <div className="frow"><label>서버</label>
+              <select style={{ flex: 1 }} value={cvidCfg.activeServer || ''} title="저장된 서버(comfy.org/RunPod)로 전환 — 주소·클라우드·키를 한 번에 적용"
+                onChange={(e) => { if (e.target.value) pickCvidServer(e.target.value); }}>
+                <option value="">— 서버 프로필 선택(comfy.org/RunPod) —</option>
+                {(cvidCfg.servers || []).map((s) => <option key={s.name} value={s.name}>{s.name}{s.cloud ? ' (클라우드)' : ''}</option>)}
+              </select>
+              <button className="ghost" title="현재 주소·클라우드·키를 이름 붙여 서버 프로필로 저장" onClick={saveCvidServer}>💾 저장</button>
+              <button className="ghost" title="선택된 서버 프로필 삭제" disabled={!cvidCfg.activeServer} onClick={removeCvidServer}>🗑</button></div>
             <div className="frow"><label>주소</label>
               <input style={{ flex: 1 }} value={cvidCfg.baseUrl || ''} placeholder="http://127.0.0.1:8188"
                 onChange={(e) => setCvidCfg({ ...cvidCfg, baseUrl: e.target.value })} onBlur={() => saveCvidCfg({ baseUrl: (cvidCfg.baseUrl || '').trim() })} /></div>

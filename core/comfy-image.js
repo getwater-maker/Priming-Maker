@@ -27,6 +27,8 @@ const DEFAULTS = {
   heightNodeId: '',
   sendDims: true,          // 프로젝트 비율에 맞춰 해상도 주입(끄면 워크플로 기본 해상도 사용)
   timeoutSec: 300,
+  servers: [],             // 저장된 서버 프로필 [{name, baseUrl, cloud, apiKey}] — 드롭다운으로 전환(comfy.org/RunPod 등)
+  activeServer: '',        // 현재 선택된 서버 프로필 이름(표시용)
 };
 function loadConfig() {
   try { if (fs.existsSync(CFG_PATH)) return { ...DEFAULTS, ...JSON.parse(fs.readFileSync(CFG_PATH, 'utf8')) }; } catch {}

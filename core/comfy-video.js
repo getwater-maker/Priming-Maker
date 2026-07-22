@@ -28,6 +28,8 @@ const DEFAULTS = {
   videoMaxSec: 8,          // i2v 최대 길이(초) — 클라우드 GPU 시간/비용 상한. 0=제한없음(TTS 길이 그대로)
   sendDims: true,          // 비율에 맞춰 해상도 주입
   timeoutSec: 600,
+  servers: [],             // 저장된 서버 프로필 [{name, baseUrl, cloud, apiKey}] — 드롭다운으로 전환(comfy.org/RunPod 등)
+  activeServer: '',        // 현재 선택된 서버 프로필 이름(표시용)
 };
 function loadConfig() {
   try { if (fs.existsSync(CFG_PATH)) return { ...DEFAULTS, ...JSON.parse(fs.readFileSync(CFG_PATH, 'utf8')) }; } catch {}
