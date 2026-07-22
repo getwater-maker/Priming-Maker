@@ -7,6 +7,19 @@
 **편별 Vrew 4.0.1 .vrew 파일**을 자동 생성하는 Electron 앱. PrimingFlow(D:\PrimingFlow)의 엔진을
 복사·재활용한 독립 클론.
 
+## 🐞 큐 항목 전환 시 영상범위·배속·스타일·AI고지 초기화 → 항목별 값 보존 (2026-07-22, v0.2.59)
+> 증상: 헤더 영상범위(vidFrom~vidTo)를 바꾸고 다른 롱폼 큐를 클릭하면 초기화됨(1번 파일 1~5, 2번 파일 1~3 불가).
+- **원인 2개(둘 다 기본값 useEffect 가 applySettings 복원값을 덮어씀)**:
+  ① 범위 기본값 effect(deps: dto.fileTitle·isLf·introSig·lastNum) — 항목 전환 시 dto.fileTitle 바뀌면 `setVidFrom(1)
+     ·setVidTo(도입부끝/마지막)` 로 복원된 범위를 덮음.
+  ② 프리셋/모드 기본값 effect(deps: presetName·mode·modeProfiles) — 채널이 다른 항목으로 전환 시 fire 되어
+     `setTtsSpeed·setStyleId·setAiNotice` 를 프리셋 기본값으로 덮음(같은 채널 항목끼린 안 걸림).
+- **수정(App.jsx, ref 가드)**: `hasStoredRangeRef`(항목에 저장된 범위 있으면 범위 effect skip)·`restoringItemRef`
+  (복원 중이면 프리셋 effect 가 배속·스타일·AI고지 덮어쓰기 skip, 단 자막·분할은 채널값이라 무조건 적용). applySettings
+  진입 시 두 ref set, **사용자가 채널 직접 선택(switchModeForChannel)·새 대본 열기(openScript)·모드 전환(switchMode)**
+  때만 clear → 그때만 기본값 적용. → 항목별 범위·배속·스타일·AI고지가 큐 전환에도 유지됨. 빌드 통과.
+- ⚠ 앱 재시작 반영(라이트). deps 무변경.
+
 ## 🖼 이미지 '생성 중' 스피너 — 만드는 그룹 카드에만 표시 (2026-07-22, v0.2.58)
 > 요청: 배치 이미지 생성 시 "이미지 생성 중"이 안 뜨거나 엉뚱하게 떴음 → 실제로 그 순간 만드는 그룹 카드에만.
 - 원인: `runComfyImages`(comfy 배치)가 그룹 생성 직전 `g.imageStatus='generating'` 을 안 켜고, 실패 시에도

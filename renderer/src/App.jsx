@@ -92,6 +92,11 @@ export default function App() {
   const [videoEngine, setVideoEngine] = useState('grok'); // 'grok' | 'none' — Grok i2v 또는 이미지만
   const [vidFrom, setVidFrom] = useState(1);   // I2V 범위 시작 그룹
   const [vidTo, setVidTo] = useState(1);        // I2V 범위 끝 그룹 (롱폼 기본=도입부 끝)
+  // 항목 복원(applySettings) 중엔 기본값 effect 들이 항목별 저장값을 덮어쓰지 않게 하는 가드.
+  //   hasStoredRangeRef: 이 항목에 저장된 영상범위가 있으면 범위 기본값 계산을 건너뜀.
+  //   restoringItemRef: 항목 복원 중이면 프리셋/모드 기본값(배속·스타일·AI고지) 덮어쓰기를 건너뜀.
+  const hasStoredRangeRef = useRef(false);
+  const restoringItemRef = useRef(false);
   const [timings, setTimings] = useState({ tts: 0, image: 0, video: 0, make: 0 }); // 작업 소요시간(초)
   const [flowVideoModel, setFlowVideoModel] = useState('Veo 3.1 - Lite');
   const [flowCount, setFlowCount] = useState('1x');
@@ -258,10 +263,14 @@ export default function App() {
         if (cap.yOffset != null) applyCaptionYOffset(cap.yOffset);
       } else { applyCaptionDefaults(prof); }
       const sp = mode === 'longform' ? p.speedLong : p.speedShort;
-      setTtsSpeed(String(sp != null ? sp : (prof.defaultTtsSpeed != null ? prof.defaultTtsSpeed : 1.0)));
       const st = mode === 'longform' ? p.styleLong : p.styleShort;
-      setStyleId(st || p.styleId || 'chibi');
-      setAiNotice(mode === 'longform'); // AI 고지 기본값: 롱폼 ON · 쇼츠 OFF (사용자가 토글로 변경)
+      // 항목 복원 중이면 배속·스타일·AI고지는 항목별 저장값(applySettings)이 우선 — 프리셋 기본값으로 덮지 않음.
+      //   (자막·분할은 항목별 저장 대상이 아니라 채널값을 그대로 따르므로 무조건 적용)
+      if (!restoringItemRef.current) {
+        setTtsSpeed(String(sp != null ? sp : (prof.defaultTtsSpeed != null ? prof.defaultTtsSpeed : 1.0)));
+        setStyleId(st || p.styleId || 'chibi');
+        setAiNotice(mode === 'longform'); // AI 고지 기본값: 롱폼 ON · 쇼츠 OFF (사용자가 토글로 변경)
+      }
       const sl = p.split || { introSentenceSize: p.introSentenceSize, mainSentenceSize: p.mainSentenceSize, shortLen: p.shortLen, longLen: p.longLen };
       setSplitOpts({ intro: sl.introSentenceSize || 3, main: sl.mainSentenceSize || 10, short: sl.shortLen || 10, long: sl.longLen || 20, mode: sl.splitMode === 'sentence' ? 'sentence' : (sl.splitMode === 'h2' ? 'h2' : 'h3') });
     }).catch(() => {});
@@ -276,6 +285,7 @@ export default function App() {
   const _lastNum = _cuts0.length ? _cuts0[_cuts0.length - 1].num : 0;
   useEffect(() => {
     if (!_cuts0.length) return;
+    if (hasStoredRangeRef.current) return; // 항목에 저장된 영상범위가 있으면 기본값으로 덮어쓰지 않음(항목별 범위 유지)
     if (isLf) {
       const introNums = _cuts0.filter((c) => c.isIntro).map((c) => c.num);
       setVidFrom(1); setVidTo(introNums.length ? Math.max(...introNums) : _lastNum);
@@ -342,6 +352,7 @@ export default function App() {
   }
   function applySettings(s) {
     if (!s) return;
+    restoringItemRef.current = true; // 이 복원 동안 프리셋 기본값 effect 가 배속·스타일·AI고지를 덮지 않게
     if (s.presetName != null) setPresetName(s.presetName);
     if (s.styleId != null) setStyleId(s.styleId);
     if (s.ttsSpeed != null) setTtsSpeed(s.ttsSpeed);
@@ -351,6 +362,7 @@ export default function App() {
     if (s.videoEngine != null) setVideoEngine(['flow', 'wan', 'grok10'].includes(s.videoEngine) ? 'grok' : s.videoEngine);
     if (s.vidFrom != null) setVidFrom(s.vidFrom);
     if (s.vidTo != null) setVidTo(s.vidTo);
+    hasStoredRangeRef.current = (s.vidFrom != null || s.vidTo != null); // 저장된 범위 있으면 기본값 effect 억제
     if (s.flowVideoModel != null) setFlowVideoModel(s.flowVideoModel);
     if (s.flowCount != null) setFlowCount(s.flowCount);
     if (s.aiNotice != null) setAiNotice(!!s.aiNotice);
@@ -360,6 +372,7 @@ export default function App() {
   async function openScript() {
     const r = await api.openScript({ presetName: presetName || null, mode });
     if (!r) return;
+    hasStoredRangeRef.current = false; restoringItemRef.current = false; // 새 대본 = 기본 범위·채널 기본값 계산 허용
     // 대본 형식 자동 판별 → 맞는 탭(롱폼/쇼츠)으로 전환 (잘못된 탭에서 열림 방지)
     const switched = r.mode && r.mode !== mode;
     if (switched) { setMode(r.mode); setAspect(r.mode === 'longform' ? '16:9' : '9:16'); }
@@ -892,6 +905,7 @@ export default function App() {
   }
   // 채널(프리셋) 선택 시 그 채널이 지정한 시작 화면(startMode)으로 전환.
   async function switchModeForChannel(name) {
+    restoringItemRef.current = false; // 사용자가 채널을 직접 골랐으니 그 채널 기본값(배속·스타일·AI고지)을 적용
     setPresetName(name);
     try {
       const p = await api.getPresetDetail(name);
@@ -2128,6 +2142,7 @@ export default function App() {
 
   async function switchMode(m) {
     if (m === mode) return;
+    hasStoredRangeRef.current = false; restoringItemRef.current = false; // 모드 전환 = 그 모드 기본값 계산 허용
     setMode(m);
     setAspect(m === 'shorts' ? '9:16' : '16:9');
     // 모드별 보관된 대본으로 전환 (없으면 빈 화면). 롱폼/쇼츠/플리 대본은 독립.
