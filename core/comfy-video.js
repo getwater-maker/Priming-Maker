@@ -157,6 +157,22 @@ class ComfyVideo {
       }
       if (!done) this.log('[ComfyVid] ⚠ 프롬프트 주입 대상 노드를 못 찾음 — 워크플로 기본 프롬프트로 진행합니다.');
     }
+    // ── 프롬프트 증강(Prompt Enhance) 끄기 ──
+    //   LTX2.3 등은 "Enable Prompt Enhance" 불리언이 켜져 있으면 Gemma(LLM)가 우리 프롬프트를 영화적으로 재작성해
+    //   realism(실사) 어휘를 얹음 → 수채화 등 화풍이 i2v 에서 사진처럼 변질됨. 우리 프롬프트를 그대로 쓰도록 강제 OFF.
+    {
+      const enhIds = ids.filter((id) => {
+        const t = ((graph[id]._meta && graph[id]._meta.title) || '').toLowerCase();
+        const isBool = /PrimitiveBoolean|Boolean/i.test(graph[id].class_type || '') || typeof (graph[id].inputs || {}).value === 'boolean';
+        return isBool && (/prompt.?enhanc|enhanc.?prompt|프롬프트.?(증강|향상|보강)/.test(t));
+      });
+      for (const id of enhIds) {
+        if (graph[id].inputs && graph[id].inputs.value === true) {
+          graph[id].inputs.value = false;
+          this.log(`[ComfyVid] 프롬프트 증강(Prompt Enhance) OFF — 화풍 보존(입력 프롬프트 그대로)`);
+        }
+      }
+    }
     // ── seed 랜덤(0~2^31-1) ──
     for (const id of ids) {
       const inp = graph[id].inputs || {}; const rnd = Math.floor(Math.random() * 2147483647);
