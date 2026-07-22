@@ -1405,17 +1405,24 @@ async function maybeUpscale(project, logger, enabled) {
   const Upscaler = require('./core/upscaler');
   const [W, H] = (project.aspect === '1:1') ? [1080, 1080] : (project.aspect === '16:9') ? [1920, 1080] : [1080, 1920];
   let done = 0;
+  // ⚠ 경로 교체(NN.mp4→NN_1080.mp4)를 루프 안에서 pushDtoUpdate 하면, 그 그룹 <video> src 가 바뀌어 썸네일이
+  //   리로드(빈 화면→다시 뜸)된다. 순차 업스케일이라 "하나 끝날 때마다 하나씩 깜빡" 이 반복됨. → 경로 교체는
+  //   모아뒀다가 끝에 한 번만 반영. 루프 중엔 videoStatus(오버레이)만 바꿔 어느 그룹 처리 중인지만 표시(src 무변경).
+  const swaps = [];
   for (const g of targets) {
     if (S.abort) { logger('⏹ 업스케일 중단'); break; }
     const out = g.videoPath.replace(/\.mp4$/i, '_1080.mp4');
-    g.videoStatus = 'upscaling'; pushDtoUpdate(); // ← 어느 그룹을 업스케일 중인지 UI 썸네일에 표시
+    g.videoStatus = 'upscaling'; pushDtoUpdate(); // ← 오버레이만(src 그대로라 썸네일 리로드 없음)
     try {
       logger(`⬆ [${done + 1}/${targets.length}] G${g.num} 영상 업스케일 → ${W}x${H}…`);
       const r = await Upscaler.upscaleVideo(g.videoPath, out, { width: W, height: H, logger, abortSignal: () => S.abort });
-      if (r && r.ok) { g.videoPath = out; }
+      if (r && r.ok) swaps.push([g, out]); // 경로 교체는 미룸(끝에 일괄)
     } catch (e) { logger(`업스케일 실패 G${g.num}: ${e.message}`); }
-    g.videoStatus = 'done'; done++; pushDtoUpdate(); // ← 표시 해제(영상은 그대로 존재)
+    g.videoStatus = 'done'; done++; pushDtoUpdate(); // ← 오버레이 해제(src 여전히 원본이라 리로드 없음)
   }
+  // 모든 업스케일이 끝난 뒤 경로를 한 번에 교체 → 썸네일 리로드가 있어도 마지막에 1회(순차 깜빡임 제거).
+  for (const [g, out] of swaps) g.videoPath = out;
+  if (swaps.length) pushDtoUpdate();
   logger(`⬆ 업스케일 완료 (${done}/${targets.length})`);
 }
 
