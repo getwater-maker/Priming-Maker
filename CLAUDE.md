@@ -7,6 +7,17 @@
 **편별 Vrew 4.0.1 .vrew 파일**을 자동 생성하는 Electron 앱. PrimingFlow(D:\PrimingFlow)의 엔진을
 복사·재활용한 독립 클론.
 
+## 🖼 이미지 '생성 중' 스피너 — 만드는 그룹 카드에만 표시 (2026-07-22, v0.2.58)
+> 요청: 배치 이미지 생성 시 "이미지 생성 중"이 안 뜨거나 엉뚱하게 떴음 → 실제로 그 순간 만드는 그룹 카드에만.
+- 원인: `runComfyImages`(comfy 배치)가 그룹 생성 직전 `g.imageStatus='generating'` 을 안 켜고, 실패 시에도
+  상태를 안 바꿔서 comfy 경로엔 스피너가 아예 안 떴음(빈 '+'). (UI App.jsx:2348 은 imageStatus==='generating'
+  일 때만 `🖼 이미지 생성 중…` 오버레이 렌더 — regen-group 단건만 이걸 설정하고 있었음.)
+- 수정(main.js runComfyImages 루프): 각 그룹 textToImage 직전 `imageStatus='generating'`+pushDtoUpdate,
+  끝나면 성공 'done'/실패 'fail'+pushDtoUpdate. **순차 루프라 항상 1개 그룹만 'generating'** → 딱 그 카드에만
+  스피너. 실패에도 해제해 고착 방지. (genspark/flow 는 6장 배치 병렬이라 '1개만'이 애매 — comfy 경로만 적용,
+  사용자가 comfy Krea2 로 이전 중이라 실사용 경로.)
+- ⚠ 앱 재시작 반영(라이트). deps 무변경.
+
 ## 🐞 TTS 동시 실행 → `TTS provider 'omnivoice' not available` 크래시 → TTS 직렬 큐 (2026-07-22, v0.2.57)
 > 증상: 아내와 동시 작업(또는 한 사람이 🎤 그룹재생성 + 전체 TTS빌드 동시 클릭) 시 `tts G1 컷N`·`tts 롱폼 컷N`
 >   이 번갈아 찍히다 `⚠ 컷N TTS 실패 — TTS provider 'omnivoice' not available` + 전체빌드의 `🗑 전체삭제`가

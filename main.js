@@ -1091,9 +1091,12 @@ async function runComfyImages(project, imagesDir, logger, styleId, onlyNums) {
     if (S.abort) { logger('⏹ 중단됨'); break; }
     const prompt = P.buildImagePrompt(stylePrompt, g.imagePrompt);
     const base = path.join(imagesDir, String(g.num).padStart(2, '0') + '.png');
+    // 지금 만드는 이 그룹 카드에만 '🖼 이미지 생성 중…' 스피너. 순차 처리라 항상 1개만 켜짐.
+    g.imageStatus = 'generating'; pushDtoUpdate();
     const r = await eng.textToImage({ prompt, aspect: project.aspect || '9:16', outputPath: base, abortSignal: () => S.abort });
-    if (r.success) { g.imagePath = r.imagePath; g.imageStatus = 'done'; logger(`  ✓ G${g.num} → ${path.basename(r.imagePath)}`); pushDtoUpdate(); }
-    else { logger(`  ✗ G${g.num} 실패: ${r.error}`); }
+    if (r.success) { g.imagePath = r.imagePath; g.imageStatus = 'done'; logger(`  ✓ G${g.num} → ${path.basename(r.imagePath)}`); }
+    else { g.imageStatus = 'fail'; logger(`  ✗ G${g.num} 실패: ${r.error}`); } // 성공/실패 모두 스피너 해제(고착 방지)
+    pushDtoUpdate();
   }
 }
 
