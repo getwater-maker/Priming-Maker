@@ -7,6 +7,20 @@
 **편별 Vrew 4.0.1 .vrew 파일**을 자동 생성하는 Electron 앱. PrimingFlow(D:\PrimingFlow)의 엔진을
 복사·재활용한 독립 클론.
 
+## 🐞 중단 눌러도 '이미지 생성 중' 스피너 고착 + 전 그룹 동시 표시 → 정리 + 배치만 표시 (2026-07-22, v0.2.62)
+> 증상: 중단 눌러도 여러 그룹 카드가 계속 `🖼 이미지 생성 중…` 스피너를 돎. + 만들 때 지금 만드는 그룹만이 아니라
+>   전 그룹이 한꺼번에 '생성 중'으로 뜸(v0.2.58 은 comfy 경로만 1개씩 적용).
+- **Bug 1(스피너 고착)**: 중단(`abort` IPC)이 `S.abort=true` 만 하고 그룹의 `imageStatus/videoStatus`('generating'·
+  'upscaling')는 안 건드림. genspark/flow 배치는 만들다 만 그룹이 'generating' 에 남아 카드 스피너가 영원히 돎.
+  - 수정: `clearGeneratingStatus()` 신설 — 전 큐(longform/shorts)·활성 파싱본의 모든 그룹을 훑어 'generating'→
+    (자산 있으면 'done', 없으면 'idle'), 'upscaling'→동일 정리. abort 핸들러가 이걸 호출 + pushDtoUpdate. 어느 엔진
+    경로(comfy·genspark·flow·업스케일)든 중단 즉시 스피너 해제.
+- **Bug 2(전 그룹 동시 표시)**: `pipeline.js generateImagesGenspark` 가 시작 시 `idx.forEach(...imageStatus='generating')`
+  로 **대상 전체(예 33장)를 한꺼번에** 표시. → 그 선표시 제거하고, **배치 루프에서 지금 제출하는 6장만** 'generating'
+  표시(Genspark 는 한 번에 최대 6장이라 실제 동시 생성분 만큼만). 이전/이후 배치는 done/idle. finalize(444)가 남은
+  'generating'→'fail' 로 정리하는 건 그대로. (comfy 경로는 이미 v0.2.58 로 1개씩 — 무변경.)
+- ⚠ 앱 재시작 반영(라이트). deps 무변경.
+
 ## 🐞 큐 제작 시 이어받은 대본이 헤더 이미지·비디오 도구를 무시 → 헤더(큐 단위) 우선 (2026-07-22, v0.2.61)
 > 증상: 헤더에서 ComfyUI Krea2 로 골랐는데, 큐의 두 번째 대본(작업본 이어받기)이 `🔄 이미지 순환: genspark→flow`
 >   로 돌아감. 비디오도 같은 현상.

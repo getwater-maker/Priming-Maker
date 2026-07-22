@@ -1333,6 +1333,33 @@ function pushDtoUpdate() {
   try { if (win && !win.isDestroyed() && S.parsed) { const d = currentDTO(); if (d) { d.timings = { ...S.timings }; d.queue = queueDTO(); win.webContents.send('dto-update', d); } } } catch {}
   scheduleAutoSave(); // 데이터가 바뀔 때마다(디바운스) 자동저장
 }
+// 중단·종료 시 '생성 중' 스피너 고착 해제 — 어느 엔진 경로든(comfy 순차·genspark 배치·flow) 실제로 만들다 만 그룹의
+//   imageStatus/videoStatus 가 'generating'|'upscaling' 에 남으면 카드에 스피너가 영원히 돈다. 모든 큐의 전 그룹을 훑어
+//   자산 있으면 'done', 없으면 'idle' 로 정리한다. (in-flight 배치가 곧 끝나면 그때 done/fail 로 다시 갱신 — 무해)
+function clearGeneratingStatus() {
+  try {
+    for (const key of ['longform', 'shorts']) {
+      const q = S.modes && S.modes[key];
+      if (!q || !Array.isArray(q.items)) continue;
+      for (const it of q.items) {
+        const proj = it && it.parsed;
+        const prs = proj && Array.isArray(proj.projects) ? proj.projects : null;
+        if (!prs) continue;
+        for (const pr of prs) for (const g of (pr.groups || [])) {
+          if (g.imageStatus === 'generating') g.imageStatus = g.imagePath ? 'done' : 'idle';
+          if (g.videoStatus === 'generating' || g.videoStatus === 'upscaling') g.videoStatus = g.videoPath ? 'done' : 'idle';
+        }
+      }
+    }
+    // 활성 파싱본(S.parsed)도 정리 — items 에 안 실린 단건 열기 상태 대비.
+    if (S.parsed && Array.isArray(S.parsed.projects)) {
+      for (const pr of S.parsed.projects) for (const g of (pr.groups || [])) {
+        if (g.imageStatus === 'generating') g.imageStatus = g.imagePath ? 'done' : 'idle';
+        if (g.videoStatus === 'generating' || g.videoStatus === 'upscaling') g.videoStatus = g.videoPath ? 'done' : 'idle';
+      }
+    }
+  } catch {}
+}
 
 // ── 이미지 캐시(재활용) ── 키 = imagePrompt + style + aspect + engine. (H3=프롬프트 고정 → 잘 맞음)
 // 생성 전 프리필 — 캐시에 있으면 media-N 으로 복사하고 g.imagePath 설정(엔진이 건너뜀).
@@ -2455,6 +2482,9 @@ ipcMain.handle('abort', () => {
   S.abort = true;
   // Flow 엔진은 자체 _stopped 플래그로 멈춤 — abort 시 명시적으로 stop() 호출
   try { if (S.flowEng && typeof S.flowEng.stop === 'function') S.flowEng.stop(); } catch {}
+  // 중단 즉시 '생성 중' 스피너 고착 해제 — 만들다 만 그룹 카드가 계속 스피너를 돌리지 않게.
+  clearGeneratingStatus();
+  pushDtoUpdate();
   log('⏹ 중단 요청 — 현재 단계 마치는 대로 멈춥니다');
 });
 

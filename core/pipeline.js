@@ -359,10 +359,6 @@ async function generateImagesGenspark(project, imagesDir, logger, abortSignal, s
     && (!onlyNums || onlyNums.includes(groups[i].num)));
   if (!idx.length) { (logger || (() => {}))('이미지 프롬프트가 있는 컷이 없음'); return []; }
 
-  // 대상 그룹을 '생성 중'으로 표시 → UI 즉시 반영 (사용자가 진행 상황을 바로 인지)
-  idx.forEach((i) => { if (!groups[i].imagePath) groups[i].imageStatus = 'generating'; });
-  if (onProgress) { try { onProgress(); } catch {} }
-
   const log = logger || (() => {});
   // 모든 엔진(Genspark/Flow/…) 공통 최종 프롬프트 — 스타일 앞 + 대본 + no text/no watermark.
   const prompts = idx.map((i) => buildImagePrompt(stylePrompt, groups[i].imagePrompt));
@@ -388,6 +384,10 @@ async function generateImagesGenspark(project, imagesDir, logger, abortSignal, s
       const ps = prompts.slice(start, start + BATCH);
       const ops = outputPaths.slice(start, start + BATCH);
       const saved = new Array(ps.length).fill(null);
+      // 이 배치의 그룹만 '생성 중' 표시 → 지금 제출하는 그룹 카드에만 스피너(전 그룹 동시 표시 방지).
+      //   Genspark 는 한 번에 최대 6장 제출이라 최대 6개까지 동시 표시(실제로 동시에 만드는 만큼).
+      for (let k = 0; k < ps.length; k++) { const g = groups[idx[start + k]]; if (g && !g.imagePath) g.imageStatus = 'generating'; }
+      if (onProgress) { try { onProgress(); } catch {} }
       // 저장되는 즉시 그룹에 매핑 → UI 갱신
       const mapSave = (k, p) => {
         const g = groups[idx[start + k]];
