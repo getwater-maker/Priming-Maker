@@ -7,6 +7,18 @@
 **편별 Vrew 4.0.1 .vrew 파일**을 자동 생성하는 Electron 앱. PrimingFlow(D:\PrimingFlow)의 엔진을
 복사·재활용한 독립 클론.
 
+## 🐞 큐 제작 시 이어받은 대본이 헤더 이미지·비디오 도구를 무시 → 헤더(큐 단위) 우선 (2026-07-22, v0.2.61)
+> 증상: 헤더에서 ComfyUI Krea2 로 골랐는데, 큐의 두 번째 대본(작업본 이어받기)이 `🔄 이미지 순환: genspark→flow`
+>   로 돌아감. 비디오도 같은 현상.
+- **원인**: run-batch 가 `ie = (s.imgEngine!=null) ? s.imgEngine : common.imgEngine` — **항목 저장값(s) 우선, 헤더(common)
+  폴백**(v0.2.46 "항목별 도구" 설계). 이어받기한 대본은 저장된 옛 imgEngine(rotate/genspark)을 들고 있어, 헤더에서
+  comfy 로 바꿔도 그 값은 **그 시점 활성 항목에만** 저장되고 이어받은 항목은 옛 값으로 실행됨. videoEngine 도 동일.
+- **수정(로이 결정)**: 이미지·비디오 **생성 도구는 헤더(공통=큐 단위) 우선**으로 뒤집음 — `ie = (common.imgEngine!=null)
+  ? common.imgEngine : (s.imgEngine||'genspark')`, videoEngine 도 동일. "어느 서비스/GPU로 만드냐"는 큐 전체 공통
+  선택이므로 헤더에서 한 번 고르면 큐 전 항목에 적용. (스타일·배속·AI고지·영상범위·채널은 그대로 항목별 유지.)
+  렌더러는 이미 `common`에 헤더 imgEngine/videoEngine 을 실어 보내고 있었음(App.jsx:507 의도와 일치하게 정렬).
+- ⚠ 앱 재시작 반영(라이트). deps 무변경.
+
 ## 🐞 X로 지운 이미지가 만들기 때 캐시에서 부활 + 중단인데 폴더 열림 (2026-07-22, v0.2.60)
 > 증상 ① 그룹 이미지를 X로 지운 뒤 만들기 → 지웠던 그 이미지가 그대로 다시 들어옴. ② 중단 눌러도 완료된 것처럼
 >   출력폴더가 열림.

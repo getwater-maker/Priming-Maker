@@ -2410,11 +2410,13 @@ ipcMain.handle('run-batch', (_e, args = {}) => enqueueTtsJob('큐 순차 제작'
     //   DTO 로 안 돌아와 stale 일 수 있음(예: 이미지 도구를 comfy 로 바꿔도 plan 엔 옛 rotate 가 실려 순환 실행됨).
     const s = { ...(entry.settings || {}), ...(it.settings || {}) };
     try {
-      // 비디오·이미지 엔진은 **항목별 값 우선**(이 작업엔 이 도구, 저 작업엔 저 도구). 항목에 없으면 헤더(공통) 폴백.
+      // 이미지·비디오 생성 도구는 **헤더(공통=큐 단위) 우선** — "어느 서비스/GPU로 만드냐"는 큐 전체 공통 선택이라,
+      //   헤더에서 고른 도구(예 ComfyUI Krea2)를 큐 전 항목에 적용한다. 헤더값이 없을 때만 항목 저장값 폴백.
+      //   (예전엔 항목별 stale 값이 우선이라, 이어받기한 대본이 옛 순환/genspark 로 되돌아가던 문제 — 로이 결정 2026-07-22.)
       //   제거된 영상엔진(flow/wan/grok10)은 grok 으로 보정. (comfy::path·grok-api 는 그대로)
-      const rawVe = (s.videoEngine != null) ? s.videoEngine : (common.videoEngine != null ? common.videoEngine : 'grok');
+      const rawVe = (common.videoEngine != null) ? common.videoEngine : (s.videoEngine != null ? s.videoEngine : 'grok');
       const ve = (['flow', 'wan', 'grok10'].includes(rawVe)) ? 'grok' : rawVe;
-      const ie = (s.imgEngine != null) ? s.imgEngine : (common.imgEngine || 'genspark');
+      const ie = (common.imgEngine != null) ? common.imgEngine : (s.imgEngine || 'genspark');
       await runMakeAllCore({
         engine: ie, presetName: s.presetName || null, speed: s.ttsSpeed || null,
         styleId: s.styleId || null,
