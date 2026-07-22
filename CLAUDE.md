@@ -7,6 +7,36 @@
 **편별 Vrew 4.0.1 .vrew 파일**을 자동 생성하는 Electron 앱. PrimingFlow(D:\PrimingFlow)의 엔진을
 복사·재활용한 독립 클론.
 
+## 🐞 TTS 동시 실행 → `TTS provider 'omnivoice' not available` 크래시 → TTS 직렬 큐 (2026-07-22, v0.2.57)
+> 증상: 아내와 동시 작업(또는 한 사람이 🎤 그룹재생성 + 전체 TTS빌드 동시 클릭) 시 `tts G1 컷N`·`tts 롱폼 컷N`
+>   이 번갈아 찍히다 `⚠ 컷N TTS 실패 — TTS provider 'omnivoice' not available` + 전체빌드의 `🗑 전체삭제`가
+>   다른 작업 음성파일까지 지움.
+- **원인(코드 확정)**: `tts/tts-manager.js` `getInstance()` 가 **모듈 싱글톤** 반환 → tts-build·tts-group·make-all·
+  run-batch 가 **공용 TTS 매니저 하나를 공유**. 한 작업의 `refreshProvider`(provider stop+delete 후 재연결)·
+  `mgr.stop()`(providers 맵 전체 clear)가 **동시에 도는 다른 작업의 provider 를 없애** → `synthesize` 가
+  `providers.get('omnivoice')` 실패 → tts-manager.js:200 `not available` throw. (앱 내 동시 실행만 해당 —
+  두 PC 는 각자 매니저라 무관, 서버 쪽은 이벤트루프 블로킹으로 이미 직렬이라 OOM 무관.)
+- **수정(main.js)**: `enqueueImageJob` 패턴을 본떠 **`enqueueTtsJob(label, fn)` 직렬 큐** 신설(프로미스 체인 +
+  대기 카운터). tts-build·tts-group·make-all·run-batch 네 핸들러를 전부 이 큐로 감쌈(여는 줄 `=> enqueueTtsJob(
+  '…', async () => {` + 닫는 줄 `}))` — 본문 무변경). 한 번에 하나만 싱글톤을 건드림 → 충돌 0. 뒤 작업은 앞
+  작업 끝나면 자동 실행(손실 0). 실패 격리(앞 작업 실패해도 다음 실행).
+- **트레이드오프(수용)**: make-all/run-batch(긴 파이프라인)도 같은 큐라, 파이프라인 실행 중 클릭한 수동 🎤/빌드는
+  파이프라인이 끝날 때까지 대기(`⏳ … 큐 대기` 로그로 가시화). 크래시·손실보다 훨씬 나음. 단위검증: 겹친 3작업이
+  최대동시=1·A→B→C 순서·B실패에도 C실행 확인.
+- ⚠ 설치본 반영은 **앱 재시작**(라이트 업데이트). deps 무변경.
+
+## 🌡 OmniVoice 서버 GPU 온도 기록 로거 (2026-07-22)
+> 요청: 동시 TTS 시 GPU 온도 급상승 우려 → 실제 온도를 기록으로 남기게. (GPU=메인 PC=OmniVoice 서버에만 있음)
+- **위치**: OmniVoice 서버 `D:\Work\TTS_Engine\06_OmniVoice\api.py`(Priming 저장소 밖 — git/매니페스트 무관, **서버
+  재시작 필요**). Priming 앱은 무수정. 의존성 추가 없음(nvidia-smi 서브프로세스, venv 무수정).
+- **구현**: 별도 데몬 스레드가 3초마다 `nvidia-smi` 로 온도·전력·사용률·메모리·팬·클럭을 읽어 **작업 중일 때만**
+  `logs/gpu_YYYYMMDD.csv` 에 기록(유휴 잡음 제외, 작업 종료 직후 1줄=쿨다운 시작점 포함). `_model.generate()` 가
+  이벤트루프를 막아도 OS 스레드라 계속 측정됨. `/tts` 에 `active_tts` 카운터(inc/finally dec), `/gpu` 조회
+  엔드포인트(현재값+오늘 피크). 문법·nvidia-smi 파싱·CSV 단위검증 통과.
+- **실측 발견**: 부하 시 84°C·100%·150W(전력상한 이미 150)·팬 nvidia-smi상 0%. 팬 0%는 유휴 제로-RPM 모드거나
+  nvidia-smi가 이 카드 RPM 미판독일 가능성 큼(부하 때 실물 팬 회전 육안확인 필요). 84°C는 RTX3060 사양(93°C)
+  내 안전·스로틀 미발동. 전력상한은 이미 150이라 온도 저감 효과 없음 → 필요 시 팬 커브가 답.
+
 ## 🐞 LTX2.3 i2v — 사용자 이미지 대신 "이집트 여왕" 영상이 나옴 → 프롬프트·해상도·길이 주입 실패 (2026-07-21, v0.2.56)
 > 증상: LTX2.3 비디오 생성 시 그룹 이미지가 아니라 LTX 샘플이미지(egyptian queen)가 i2v 되는 것처럼 보임.
 - **실측 진단(클라우드 `/api/jobs` 로 실행된 그래프 회수 — 강력한 디버깅 수단)**: 이미지 업로드·주입은 구버전에서도

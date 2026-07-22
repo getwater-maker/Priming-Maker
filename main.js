@@ -798,7 +798,7 @@ ipcMain.handle('delete-tts', async () => {
   return currentDTO();
 });
 
-ipcMain.handle('tts-build', async (_e, args = {}) => {
+ipcMain.handle('tts-build', (_e, args = {}) => enqueueTtsJob('전체 TTS 변환', async () => {
   { const _b = gpuBusyReason(); if (_b) { log(`⚠ ${_b} 중에는 음성변환을 할 수 없습니다. 끝난 뒤 다시 시도하세요.`); return { ok: false, error: 'gpu-busy' }; } }
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
   const { shortsNum = null, dry = false, presetName = null, speed = 1.15, force = false } = args;
@@ -834,7 +834,7 @@ ipcMain.handle('tts-build', async (_e, args = {}) => {
   S.timings.tts = (Date.now() - _ttsT0) / 1000;
   pushDtoUpdate();
   return P.toDTO(S.parsed);
-});
+}));
 
 // Premiere Pro 임포트용 XML(FCP7 xmeml) — 편별 시퀀스 파일 생성. Premiere: 파일 > 가져오기.
 ipcMain.handle('export-premiere', async (_e, args = {}) => {
@@ -2365,16 +2365,16 @@ async function runMakeAllCore(opts = {}) {
     : `⚡ 전체 제작 완료 (TTS ${S.timings.tts.toFixed(1)}s · 이미지 ${S.timings.image.toFixed(1)}s · 비디오 ${S.timings.video.toFixed(1)}s · 전체 ${S.timings.make.toFixed(1)}s)`);
 }
 
-ipcMain.handle('make-all', async (_e, args = {}) => {
+ipcMain.handle('make-all', (_e, args = {}) => enqueueTtsJob('전체 만들기', async () => {
   await runMakeAllCore({ ...args, openVrew: true, openFolder: true });
   return P.toDTO(S.parsed);
-});
+}));
 
 // ── 큐 순차 제작 ── 교차 순서(L1→S1→L2→S2…)는 렌더러가 plan 으로 전달. 한 항목씩 runMakeAllCore.
 //   실패해도 해당 항목만 '실패' 표시 후 다음 진행.
 //   openEach(기본 true): 대본 완료 때마다 그 .vrew 를 순차적으로 자동 열기(단건과 동일). false 면 열지 않고
 //   큐가 끝난 뒤 출력폴더만 1번 열기(창 폭주 방지). 폴더 열기(openFolder)는 항목마다는 끔 — 끝에 1번만.
-ipcMain.handle('run-batch', async (_e, args = {}) => {
+ipcMain.handle('run-batch', (_e, args = {}) => enqueueTtsJob('큐 순차 제작', async () => {
   const plan = Array.isArray(args.plan) ? args.plan : [];
   const common = args.common || {};
   const openEach = args.openEach !== false; // 기본값 = 순차 열기
@@ -2427,7 +2427,7 @@ ipcMain.handle('run-batch', async (_e, args = {}) => {
   log(`⚡⚡ 큐 제작 종료 — 성공 ${okN} · 실패 ${failN}${skipN ? ` · 완료건너뜀 ${skipN}` : ''}`);
   try { if (S.outRoot) shell.openPath(S.outRoot); } catch {}
   return { dto: S.parsed ? P.toDTO(S.parsed) : null, queue: queueDTO() };
-});
+}));
 
 const TITLE_FIELDS = new Set(['titleLine1', 'titleLine2', 't1Size', 't1Color', 't1Align', 't2Size', 't2Color', 't2Align',
   'bgEnabled', 'bgFill', 'bgFillOp', 'bgStroke', 'bgStrokeOp', 'bgStrokeW', 'bgRound', 'bgDashed']);
@@ -2526,7 +2526,7 @@ ipcMain.handle('set-queue-settings', (_e, args = {}) => {
 });
 
 // 그룹 1개만 TTS 변환 (그 그룹의 문장들)
-ipcMain.handle('tts-group', async (_e, args = {}) => {
+ipcMain.handle('tts-group', (_e, args = {}) => enqueueTtsJob('그룹 TTS 변환', async () => {
   { const _b = gpuBusyReason(); if (_b) { log(`⚠ ${_b} 중에는 음성변환을 할 수 없습니다. 끝난 뒤 다시 시도하세요.`); return currentDTO(); } }
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
   const { shortsNum, groupNum, presetName = null, speed = null } = args;
@@ -2548,7 +2548,7 @@ ipcMain.handle('tts-group', async (_e, args = {}) => {
   try { await mgr.stop(); } catch {}
   pushDtoUpdate();
   return P.toDTO(S.parsed);
-});
+}));
 
 // 그룹 프롬프트 직접 수정 — 대본 이미지/비디오 프롬프트를 사용자가 모달에서 고쳐 저장.
 //   저장 후 regen-group(이미지)·video-group(비디오)을 호출하면 이 프롬프트로 재생성됨.
@@ -2620,6 +2620,21 @@ function enqueueImageJob(label, fn) {
   const run = () => fn();
   const p = imageJobChain.then(run, run); // 앞 작업이 실패해도 다음 작업은 실행
   imageJobChain = p.then(() => { imageJobPending--; }, () => { imageJobPending--; });
+  return p;
+}
+
+// TTS 작업 직렬 큐 — tts-build·tts-group·make-all·run-batch 는 공용 TTS 매니저(getInstance 싱글톤)를 쓴다.
+//   두 작업이 동시에 돌면 한쪽의 refreshProvider(provider 삭제 후 재연결)·mgr.stop()(provider 전부 비움)이
+//   다른 쪽이 쓰던 provider 를 없애 'TTS provider not available' 로 죽는다(+ 전체빌드의 전체삭제가 다른
+//   작업 결과물까지 지움). → 한 번에 하나만 실행되도록 줄 세운다. 뒤 작업은 앞 작업이 끝나면 자동 실행(손실 없음).
+let ttsJobChain = Promise.resolve();
+let ttsJobPending = 0;
+function enqueueTtsJob(label, fn) {
+  ttsJobPending++;
+  if (ttsJobPending > 1) log(`⏳ ${label} — TTS 작업 큐 대기 (앞에 ${ttsJobPending - 1}건 진행 중)`);
+  const run = () => fn();
+  const p = ttsJobChain.then(run, run); // 앞 작업이 실패해도 다음 작업은 실행
+  ttsJobChain = p.then(() => { ttsJobPending--; }, () => { ttsJobPending--; });
   return p;
 }
 
