@@ -274,6 +274,9 @@ export default function App() {
         setTtsSpeed(String(sp != null ? sp : (prof.defaultTtsSpeed != null ? prof.defaultTtsSpeed : 1.0)));
         setStyleId(st || p.styleId || 'chibi');
         setAiNotice(mode === 'longform'); // AI 고지 기본값: 롱폼 ON · 쇼츠 OFF (사용자가 토글로 변경)
+        // 채널이 지정한 이미지·비디오 제작 도구를 헤더 기본값으로 (있을 때만). 레거시값은 정규화.
+        if (p.imgEngine != null) setImgEngine(['genspark', 'flow'].includes(p.imgEngine) ? 'rotate' : p.imgEngine);
+        if (p.videoEngine != null) setVideoEngine(['flow', 'wan', 'grok10'].includes(p.videoEngine) ? 'grok' : p.videoEngine);
       }
       const sl = p.split || { introSentenceSize: p.introSentenceSize, mainSentenceSize: p.mainSentenceSize, shortLen: p.shortLen, longLen: p.longLen };
       setSplitOpts({ intro: sl.introSentenceSize || 3, main: sl.mainSentenceSize || 10, short: sl.shortLen || 10, long: sl.longLen || 20, mode: sl.splitMode === 'sentence' ? 'sentence' : (sl.splitMode === 'h2' ? 'h2' : 'h3') });
@@ -901,6 +904,7 @@ export default function App() {
       speedLong: p.speedLong != null ? p.speedLong : (lf.defaultTtsSpeed != null ? lf.defaultTtsSpeed : 1.15),
       speedShort: p.speedShort != null ? p.speedShort : (sh.defaultTtsSpeed != null ? sh.defaultTtsSpeed : 1.25),
       styleLong: p.styleLong || p.styleId || 'chibi', styleShort: p.styleShort || p.styleId || 'chibi',
+      imgEngine: p.imgEngine || 'rotate', videoEngine: p.videoEngine || 'grok', // 이미지·비디오 제작 도구 기본값(채널 단위)
       outLong: p.outLong || p.outputFolder || '', outShort: p.outShort || p.outputFolder || '',
       split: { intro: sl.introSentenceSize || 3, main: sl.mainSentenceSize || 10, short: sl.shortLen || 10, long: sl.longLen || 20, mode: sl.splitMode === 'sentence' ? 'sentence' : (sl.splitMode === 'h2' ? 'h2' : 'h3') },
       _raw: p,
@@ -1001,6 +1005,7 @@ export default function App() {
       capLong: capToStyle(ch.capLong), capShort: capToStyle(ch.capShort),
       speedLong: numOr(ch.speedLong, 1.15), speedShort: numOr(ch.speedShort, 1.25),
       styleLong: ch.styleLong, styleShort: ch.styleShort,
+      imgEngine: ch.imgEngine || 'rotate', videoEngine: ch.videoEngine || 'grok', // 이미지·비디오 제작 도구(채널 기본값)
       outLong: (ch.outLong || '').trim(), outShort: (ch.outShort || '').trim(),
       // 분할옵션(롱폼)
       split: { introSentenceSize: numOr(ch.split.intro, 3), mainSentenceSize: numOr(ch.split.main, 10), shortLen: numOr(ch.split.short, 10), longLen: numOr(ch.split.long, 20), splitMode: ch.split.mode === 'h2' ? 'h2' : (ch.split.mode === 'sentence' ? 'sentence' : 'h3') },
@@ -1822,6 +1827,28 @@ export default function App() {
                   <span className="l">스타일</span><select value={ch.styleShort} onChange={(e) => setCh({ ...ch, styleShort: e.target.value })}>{chStyles.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
               </div>
             </div>
+
+            <div className="subhead">🖼 이미지 도구 · 🎬 비디오 도구 (이 채널 기본값)</div>
+            <div className="twocol">
+              <div className="col">
+                <div className="crow"><span className="l">이미지</span>
+                  <select value={ch.imgEngine || 'rotate'} onChange={(e) => setCh({ ...ch, imgEngine: e.target.value })}>
+                    <option value="rotate">순환(무료)</option>
+                    <option value="gemini">유료(나노바나나2)</option>
+                    <option value="comfy">ComfyUI (Krea2·z-image 등)</option>
+                  </select></div>
+              </div>
+              <div className="col">
+                <div className="crow"><span className="l">비디오</span>
+                  <select value={ch.videoEngine || 'grok'} onChange={(e) => setCh({ ...ch, videoEngine: e.target.value })}>
+                    <option value="comfy">ComfyUI (LTX·Wan i2v)</option>
+                    <option value="grok">Grok (브라우저)</option>
+                    <option value="grok-api">Grok API (유료)</option>
+                    <option value="none">없음(이미지 고정)</option>
+                  </select></div>
+              </div>
+            </div>
+            <div className="meta" style={{ marginTop: 2 }}>ComfyUI 를 고르면 구체 워크플로(Krea2/LTX 등)·서버(RunPod/comfy.org)는 헤더 <b>⚙ ComfyUI</b> 설정을 따릅니다. 이 채널을 고르면 헤더 이미지·비디오 도구가 이 값으로 세팅됩니다.</div>
 
             <div className="subhead">📁 폴더 · 기타</div>
             <div className="frow"><label>대본 폴더</label><input placeholder="롱폼·쇼츠 공유" value={ch.scriptFolder} onChange={(e) => setCh({ ...ch, scriptFolder: e.target.value })} /><button className="ghost" style={{ flex: '0 0 auto' }} onClick={pickScript}>찾기</button></div>

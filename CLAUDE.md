@@ -7,6 +7,17 @@
 **편별 Vrew 4.0.1 .vrew 파일**을 자동 생성하는 Electron 앱. PrimingFlow(D:\PrimingFlow)의 엔진을
 복사·재활용한 독립 클론.
 
+## 🎛 채널편집에 이미지·비디오 제작 도구 기본값 (③ of A안) (2026-07-23, v0.2.67)
+> 요청: 채널편집 팝업에서 스타일 항목처럼 이미지·비디오 제작 도구를 골라 저장 → 그 채널 선택 시 헤더 기본값으로.
+- **preset 에 `imgEngine`·`videoEngine` 필드 추가**(채널 단위, per-mode 아님). save-preset 이 patch 를 generic 병합(preset-store.update
+  `{...old,...patch}`)이라 IPC 무변경. get-preset-detail 이 전체 반환 → 복원됨.
+- **채널편집 모달**: 「🖼 이미지 도구 · 🎬 비디오 도구」 섹션(스타일 옆) — 이미지(순환/유료/ComfyUI)·비디오(ComfyUI/Grok/Grok
+  API/없음) select. saveChannel patch 에 imgEngine/videoEngine, openChannelEditor setCh 에 기본값(rotate/grok).
+- **채널 선택 시 헤더 세팅**: 프리셋→상태 effect(restoringItemRef 가드 안)에서 `p.imgEngine`/`p.videoEngine` 있으면
+  setImgEngine/setVideoEngine(레거시 정규화). styleId 와 동일 패턴 — 항목 복원 중엔 항목값 우선(안 덮음).
+- 구체 워크플로(Krea2/LTX)·서버(RunPod/comfy.org)는 헤더 ⚙ ComfyUI 설정을 따름(채널은 "어느 도구"만). ⚠ 앱 재시작 반영.
+- 남은 것(A안): ①상단 버튼 큐 전체 + ②「이미지→비디오」 통합버튼(상단·대본위) — 다음 착수.
+
 ## ⚡ RunPod 파드 반자동 켜기/끄기 (과금 절감, 안정 우선 격리 구현) (2026-07-23, v0.2.66)
 > 요청: 내가 쓸 때만 파드 켜고 끝나면 꺼서 시간·비용 낭비 막기. (A안: ①②먼저 → ③나중. 안정 최우선.)
 - **`core/runpod.js` 신설**(격리): RunPod GraphQL(`api.runpod.io/graphql`)로 podResume/podStop/pod status. 키=secret-store
