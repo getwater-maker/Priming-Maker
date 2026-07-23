@@ -7,6 +7,19 @@
 **편별 Vrew 4.0.1 .vrew 파일**을 자동 생성하는 Electron 앱. PrimingFlow(D:\PrimingFlow)의 엔진을
 복사·재활용한 독립 클론.
 
+## ⚡ RunPod 파드 반자동 켜기/끄기 (과금 절감, 안정 우선 격리 구현) (2026-07-23, v0.2.66)
+> 요청: 내가 쓸 때만 파드 켜고 끝나면 꺼서 시간·비용 낭비 막기. (A안: ①②먼저 → ③나중. 안정 최우선.)
+- **`core/runpod.js` 신설**(격리): RunPod GraphQL(`api.runpod.io/graphql`)로 podResume/podStop/pod status. 키=secret-store
+  'runpod'. config(`~/.priming-maker/runpod-config.json`) `autoManage(기본 false)`·podId·gpuCount·readyTimeoutSec·stopOnAbort.
+  **podId 는 활성 ComfyUI 주소(`<podId>-8188.proxy.runpod.net`)에서 자동 추출.** waitComfyReady=주소 200 폴링(콜드스타트 대기).
+- **main.js**: `autoStartPodIfNeeded()`/`autoStopPodIfNeeded()` — autoManage ON + 활성 comfy 서버가 RunPod 일 때만. make-all·
+  run-batch 진입 시 자동 켜고(ComfyUI 뜰 때까지 대기, 실패면 제작 중단), 끝나면 finally 로 자동 정지. 수동 doStartPod/doStopPod +
+  IPC(get/set-runpod-key·config, runpod-start/stop/status). **autoManage 기본 OFF → 켜기 전엔 기존 동작 완전 무영향(안전).**
+- **App.jsx**: 헤더 「⚡ RunPod」 버튼 → 모달(API 키·반자동 토글·중단시끄기·podId(선택) + ▶켜기/⏹끄기/상태). 콜드스타트 경고 문구.
+- ⚠ **RunPod GraphQL 스키마 실측 필요**: 키 넣고 ▶켜기/상태 1회 확인(응답 로그로 남김). podResume/podStop input 이 다르면 쿼리만
+  보정. GPU 재고 없으면 켜기 실패로 표시. ⚠ 콜드스타트(부팅+모델로딩 ~1~3분)는 stop/start 의 본질적 대가 — 곧 재사용이면 켜둠 권장.
+- 남은 것: ①틈 제거(큐 한꺼번에), ③RunPod 작업을 TTS와 분리해 연속 처리(대본 안 섞이게 항목별 상태 분리 선행). 둘 다 미착수.
+
 ## 🐞 업스케일 중 영상 썸네일이 하나씩 깜빡이며 사라짐 → 경로 교체 끝에 일괄 (2026-07-23, v0.2.65)
 > 증상: 업스케일 단계에서 "하나 끝나면 하나 사라지고 계속 반복" — 그룹 영상 썸네일이 순차로 깜빡(빈 화면→재등장).
 - **원인**: `maybeUpscale` 이 그룹마다 업스케일 직후 `g.videoPath = NN_1080.mp4` 로 교체 + pushDtoUpdate → 그 그룹

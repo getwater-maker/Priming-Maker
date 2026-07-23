@@ -129,6 +129,10 @@ export default function App() {
   const [comfyCfg, setComfyCfg] = useState(null); // ComfyUI(z-image) 설정
   const [cvidOpen, setCvidOpen] = useState(false);
   const [cvidCfg, setCvidCfg] = useState(null); // ComfyUI 비디오(i2v Wan/LTX) 설정
+  const [rpOpen, setRpOpen] = useState(false);   // RunPod 파드 반자동 제어
+  const [rpCfg, setRpCfg] = useState(null);
+  const [rpKey, setRpKey] = useState('');
+  const [rpMsg, setRpMsg] = useState('');
   const [findOpen, setFindOpen] = useState(false);       // 화면 내 검색 바(Ctrl+F)
   const [findText, setFindText] = useState('');
   const [findRes, setFindRes] = useState({ active: 0, total: 0 });
@@ -1248,6 +1252,31 @@ export default function App() {
   async function saveComfyCfg(patch) {
     try { const c = await api.setComfyImageConfig(patch); setComfyCfg(c); } catch (e) { logline('ComfyUI 설정 저장 오류: ' + e.message); }
   }
+  // ── RunPod 파드 반자동 제어 ──
+  async function openRunpod() {
+    try {
+      const [c, k] = await Promise.all([api.getRunpodConfig(), api.getRunpodKey()]);
+      setRpCfg(c || {}); setRpKey(k || ''); setRpMsg(''); setRpOpen(true);
+    } catch (e) { logline('RunPod 설정 읽기 오류: ' + e.message); }
+  }
+  async function saveRpCfg(patch) {
+    try { const c = await api.setRunpodConfig(patch); setRpCfg(c); } catch (e) { logline('RunPod 설정 저장 오류: ' + e.message); }
+  }
+  async function rpStart() {
+    setRpMsg('파드 시작 중… (ComfyUI 기동까지 최대 몇 분)');
+    try { const r = await api.runpodStart(); setRpMsg(r === true ? '✅ 파드 준비 완료' : r === null ? '활성 ComfyUI 가 RunPod 주소가 아닙니다' : '✗ 시작 실패 — 로그/재고 확인'); }
+    catch (e) { setRpMsg('오류: ' + e.message); }
+  }
+  async function rpStop() {
+    setRpMsg('파드 정지 중…');
+    try { const r = await api.runpodStop(); setRpMsg(r === true ? '⏹ 정지 요청됨 — 과금 중단' : r === null ? '활성 ComfyUI 가 RunPod 주소가 아닙니다' : '✗ 정지 실패 — 로그 확인'); }
+    catch (e) { setRpMsg('오류: ' + e.message); }
+  }
+  async function rpCheck() {
+    setRpMsg('상태 확인 중…');
+    try { const r = await api.runpodStatus(); setRpMsg(r && r.ok ? `상태: ${r.status} · ComfyUI ${r.comfyAlive ? '응답 O' : '응답 X'} (podId ${r.podId})` : `✗ ${r && r.error ? r.error : '확인 실패'}`); }
+    catch (e) { setRpMsg('오류: ' + e.message); }
+  }
   async function pickComfyWf() {
     try {
       const r = await api.pickComfyWorkflow();
@@ -1441,6 +1470,7 @@ export default function App() {
             <button className="ghost" title="채널(프리셋) 설정 편집" style={{ padding: '6px 9px' }} onClick={openChannelEditor}>⚙</button>
             <button className="ghost" title="새 채널 추가 (현재 채널 설정을 복사해서 시작)" style={{ padding: '6px 9px' }} onClick={addChannel}>＋ 채널</button>
             <button className="ghost" title="TTS 서버 주소(OmniVoice/Supertonic) — 다른 PC에서 메인 GPU 서버를 LAN/Tailscale 로 가리키게" style={{ padding: '6px 9px' }} onClick={openTtsSrv}>🖧 TTS서버</button>
+            <button className="ghost" title="RunPod 파드 반자동 켜기/끄기 — 만들기 시 자동으로 켜고, 끝나면 꺼서 과금 절감" style={{ padding: '6px 9px' }} onClick={openRunpod}>⚡ RunPod</button>
             {!isPl && !isBk && (<>
               <span className="hgroup">
                 <span className="glabel">대본</span>
@@ -1970,6 +2000,40 @@ export default function App() {
               <button onClick={testComfy}>🔌 연결 테스트</button>
               <span style={{ flex: 1 }} />
               <button className="ghost" onClick={() => setComfyOpen(false)}>닫기</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {rpOpen && rpCfg && (
+        <div className="modal-bg show" onClick={(e) => { if (e.target.classList.contains('modal-bg')) setRpOpen(false); }}>
+          <div className="modal-card" style={{ maxWidth: 560 }}>
+            <h3>⚡ RunPod 파드 반자동</h3>
+            <div className="meta" style={{ marginBottom: 8, lineHeight: 1.5 }}>
+              만들기 시작 시 파드가 꺼져 있으면 <b>자동으로 켜고</b>(ComfyUI 뜰 때까지 대기), 큐/만들기가 <b>끝나면 자동으로 끕니다</b>(GPU 과금 중단).
+              활성 ComfyUI 서버가 <b>RunPod 주소</b>일 때만 작동합니다. podId 는 주소에서 자동 추출됩니다.
+            </div>
+            <div className="frow"><label>API 키</label>
+              <input type="password" style={{ flex: 1 }} placeholder="RunPod → Settings → API Keys 에서 발급" value={rpKey}
+                onChange={(e) => setRpKey(e.target.value)} onBlur={() => api.setRunpodKey((rpKey || '').trim())} /></div>
+            <div className="frow">
+              <label className="chk" style={{ display: 'flex', gap: 4, alignItems: 'center', width: 'auto' }}>
+                <input type="checkbox" style={{ width: 'auto' }} checked={!!rpCfg.autoManage} onChange={(e) => { const v = e.target.checked; setRpCfg({ ...rpCfg, autoManage: v }); saveRpCfg({ autoManage: v }); }} /> 반자동(만들기 시 자동 켜고, 끝나면 끄기)
+              </label></div>
+            <div className="frow">
+              <label className="chk" style={{ display: 'flex', gap: 4, alignItems: 'center', width: 'auto' }}>
+                <input type="checkbox" style={{ width: 'auto' }} checked={rpCfg.stopOnAbort !== false} onChange={(e) => { const v = e.target.checked; setRpCfg({ ...rpCfg, stopOnAbort: v }); saveRpCfg({ stopOnAbort: v }); }} /> 중단해도 파드 끄기(과금 절감)
+              </label></div>
+            <div className="frow"><label>podId(선택)</label>
+              <input style={{ flex: 1 }} placeholder="비우면 ComfyUI 주소에서 자동 추출" value={rpCfg.podId || ''}
+                onChange={(e) => setRpCfg({ ...rpCfg, podId: e.target.value })} onBlur={() => saveRpCfg({ podId: (rpCfg.podId || '').trim() })} /></div>
+            {rpMsg && <div className="meta" style={{ marginTop: 4 }}>{rpMsg}</div>}
+            <div className="meta" style={{ marginTop: 4 }}>⚠ 파드를 껐다 켜면 <b>콜드스타트</b>(부팅+모델 로딩 ~1~3분)가 붙습니다. 곧 다시 쓸 거면 켜둔 채로, 한동안 안 쓸 때 끄는 게 유리합니다.</div>
+            <div className="mbtns" style={{ marginTop: 10 }}>
+              <button onClick={rpStart}>▶ 파드 켜기</button>
+              <button onClick={rpStop}>⏹ 파드 끄기</button>
+              <button className="ghost" onClick={rpCheck}>상태</button>
+              <span style={{ flex: 1 }} />
+              <button className="ghost" onClick={() => setRpOpen(false)}>닫기</button>
             </div>
           </div>
         </div>
