@@ -7,6 +7,20 @@
 **편별 Vrew 4.0.1 .vrew 파일**을 자동 생성하는 Electron 앱. PrimingFlow(D:\PrimingFlow)의 엔진을
 복사·재활용한 독립 클론.
 
+## 🔼 상단 버튼 = 큐 전체 + 「이미지→비디오」 통합 버튼 (A안 ①②) (2026-07-23, v0.2.68)
+> 요청: 상단 이미지·비디오·TTS 버튼은 작업큐의 모든 대본을 관할(대본 위 버튼은 그 대본만). + 이미지 먼저 다 만들고
+>   비디오 만드는 통합 버튼을 상단·대본위 양쪽에 추가.
+- **안정 최우선 = 기존 단건 핸들러(image-build/video-build/tts-build) 무변경, 렌더러 큐 루프로 재사용.**
+  `runStageQueue(stage)`(App.jsx): 현재 모드 큐의 items 를 순회하며 각 항목 `selectQueueItem` → 해당 stage IPC 호출 →
+  끝나면 원래 보던 대본으로 복원. stage='tts'|'image'|'video'|'imgvid'.
+- **상단 버튼 재배선**: 🎤 TTS→runStageQueue('tts'), 🖼 이미지→('image'), 🎬 비디오→('video'), 신규 **🖼→🎬 이미지+비디오**
+  →('imgvid', 이미지 전부→비디오). 큐 1개면 그 1개만(기존과 동일 동작).
+- **대본 위 버튼**: 그대로 그 대본만(onImg/onVid). 신규 **🖼→🎬**(runImgVid) = 그 대본 이미지 전부→비디오.
+- **파드 반자동 연동**: runStageQueue 가 autoManage ON + GPU 단계(image/video/imgvid)면 루프 전 runpodStart 1회 · 후 runpodStop 1회
+  (TTS 는 OmniVoice 라 파드 무관 → 안 건드림). 헤더 이미지·비디오 도구가 큐 전 대본에 공통 적용(v0.2.61·v0.2.67 정합).
+- ⚠ 현재 모드 큐만 관할(롱폼 탭이면 롱폼 큐). 교차 모드는 「만들기」가 담당. 앱 재시작 반영, deps 무변경.
+- A안 ①②③ 완료. 남은 것: ③번(RunPod 작업을 TTS 와 분리해 연속 처리 — 큰 개조)은 별도 승인 후.
+
 ## 🎛 채널편집에 이미지·비디오 제작 도구 기본값 (③ of A안) (2026-07-23, v0.2.67)
 > 요청: 채널편집 팝업에서 스타일 항목처럼 이미지·비디오 제작 도구를 골라 저장 → 그 채널 선택 시 헤더 기본값으로.
 - **preset 에 `imgEngine`·`videoEngine` 필드 추가**(채널 단위, per-mode 아님). save-preset 이 patch 를 generic 병합(preset-store.update

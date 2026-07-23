@@ -471,6 +471,44 @@ export default function App() {
     try { const d = await api.bulkAttach({ shortsNum }); setDto(d); setStatus('일괄첨부 완료'); }
     catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
   }
+  // ── 상단 버튼 = 큐 전체(현재 모드) ── 그 단계를 큐의 모든 대본에 순차 적용. 기존 단건 핸들러를 항목마다 재사용(안정).
+  //   stage: 'tts' | 'image' | 'video' | 'imgvid'(이미지 전부 → 비디오). 대본 위 버튼은 그대로 그 대본만.
+  async function runStageQueue(stage) {
+    try { await api.setQueueSettings(currentSettings(), true); } catch (_) {} // 헤더값을 활성 항목에 반영
+    const items = (queue && queue[mode] && queue[mode].items) || [];
+    if (!items.length) { setStatus('대본을 먼저 여세요'); return; }
+    const label = { tts: 'TTS', image: '이미지', video: '비디오', imgvid: '이미지→비디오' }[stage] || stage;
+    const origId = (queue && queue[mode] && queue[mode].activeId) || (items[0] && items[0].id);
+    let rpAuto = false; try { const rc = await api.getRunpodConfig(); rpAuto = !!(rc && rc.autoManage); } catch (_) {}
+    const usesGpu = (stage !== 'tts'); // TTS 는 OmniVoice(파드와 무관)
+    if (rpAuto && usesGpu) { setStatus('RunPod 파드 시작 중…'); try { await api.runpodStart(); } catch (_) {} }
+    try {
+      for (let k = 0; k < items.length; k++) {
+        const it = items[k];
+        setStatus(`⚡ 큐 ${label} — ${k + 1}/${items.length}편…`);
+        try { await api.selectQueueItem(it.id); } catch (_) {}
+        try {
+          if (stage === 'tts') { const d = await api.ttsBuild({ shortsNum: null, dry: false, presetName: presetName || null, speed: ttsSpeed || null, clipMaxSec: _clipMaxSec() }); if (d) setDto(d); }
+          if (stage === 'image' || stage === 'imgvid') { const d = await api.imageBuild({ shortsNum: null, engine: imgEngine, styleId: styleId || null }); if (d) setDto(d); }
+          if ((stage === 'video' || stage === 'imgvid') && videoEngine !== 'none') { const d = await api.videoBuild({ shortsNum: null, fromNum: parseInt(vidFrom, 10) || 1, toNum: parseInt(vidTo, 10) || 1, engine: videoEngine, flowVideoModel, flowCount, imgEngine, styleId: styleId || null }); if (d) setDto(d); }
+        } catch (e) { logline(`큐 ${label} 오류: ${e.message}`); }
+      }
+    } finally {
+      if (rpAuto && usesGpu) { try { await api.runpodStop(); } catch (_) {} }
+    }
+    try { const r = await api.selectQueueItem(origId); if (r && r.dto) { setDto(r.dto); if (r.queue) setQueue(r.queue); } } catch (_) {} // 원래 보던 대본으로 복원
+    setStatus(`⚡ 큐 ${label} 완료`);
+  }
+  // 대본 위 통합 버튼 — 그 대본만: 이미지 전부 → 비디오.
+  async function runImgVid(shortsNum) {
+    if (!ensurePromptsFilled(shortsNum, { image: 'all', video: videoEngine === 'none' ? 'none' : 'range' })) return;
+    setStatus('이미지→비디오 생성중…');
+    try {
+      let d = await api.imageBuild({ shortsNum, engine: imgEngine, styleId: styleId || null }); if (d) setDto(d);
+      if (videoEngine !== 'none') { d = await api.videoBuild({ shortsNum, fromNum: parseInt(vidFrom, 10) || 1, toNum: parseInt(vidTo, 10) || 1, engine: videoEngine, flowVideoModel, flowCount, imgEngine, styleId: styleId || null }); if (d) setDto(d); }
+      setStatus('이미지→비디오 완료');
+    } catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
+  }
   async function runMake(shortsNum) {
     const args = {
       shortsNum, engine: imgEngine, presetName: presetName || null, speed: ttsSpeed || null,
@@ -1514,7 +1552,7 @@ export default function App() {
           <span className="hgroup">
             <span className="glabel">① 음성</span>
             <span title="음성 배속 (합성 1.0 → atempo 변환)">배속 <input type="number" value={ttsSpeed} step="0.05" min="0.5" max="2" style={{ width: 52 }} onChange={(e) => setTtsSpeed(e.target.value)} /></span>
-            <button disabled={!loaded} title="대본 전체 음성 합성 (이미 있는 문장은 건너뜀)" onClick={() => runTts(null)}>🎤 TTS</button>
+            <button disabled={!loaded} title="상단 버튼 = 작업큐의 모든 대본 음성 합성 (이미 있는 문장은 건너뜀)" onClick={() => runStageQueue('tts')}>🎤 TTS</button>
             <button className="ghost" disabled={!loaded} title="이미 만든 음성 파일·재활용 캐시를 삭제하고 화면의 시간기록도 지웁니다 (다음 변환은 전부 새로 합성)" onClick={deleteTtsAll}>🗑 삭제</button>
             <button className="ghost" title="발음사전 — TTS가 잘못 읽는 단어를 발음대로 교정(자막은 대본 그대로)" onClick={openDict}>📖 발음사전</button>
           </span>
@@ -1538,7 +1576,7 @@ export default function App() {
             </select>
             <button className="ghost" title="이미지 순환 순서·계정 · 나노바나나 키/모델 설정" onClick={openImgRotation}>⚙</button>
             {imgEngine === 'comfy' && <button className="ghost" title="ComfyUI 설정 — 로컬/클라우드 주소·API키·워크플로(z-image·Krea2) 추가/전환" onClick={openComfy}>⚙ ComfyUI</button>}
-            <button disabled={!loaded} title="프롬프트 있는 그룹의 이미지 생성 (이미 있는 그룹은 건너뜀)" onClick={() => runImg(null)}>🖼 이미지</button>
+            <button disabled={!loaded} title="상단 버튼 = 작업큐의 모든 대본 이미지 생성 (이미 있는 그룹은 건너뜀)" onClick={() => runStageQueue('image')}>🖼 이미지</button>
             {imgEngine === 'gemini' && (<>
               <button className="ghost" disabled={!loaded} title="나노바나나2 Lite 배치 제출 — 표준가의 50%로 이미지 생성을 예약합니다. 결과는 몇 시간 뒤(최대 24h)에 나오며 「📥 배치회수」로 가져옵니다. 앱을 껐다 켜도 유지됩니다." onClick={submitBatch}>🌙 배치제출</button>
               <button className="ghost" disabled={!loaded} title="제출한 배치 결과를 회수합니다. 완료됐으면 이미지를 가져와 매핑, 아직이면 진행 상태를 알려줍니다." onClick={retrieveBatch}>📥 배치회수{gsBatch && gsBatch.hasJob ? ' ●' : ''}</button>
@@ -1561,7 +1599,8 @@ export default function App() {
               ? <span className="meta" title="비디오 없이 이미지만으로 .vrew 생성 (켄번스)">이미지만(켄번스)</span>
               : (<>
                   <span title="영상으로 만들 그룹 범위 (N번~N번). 롱폼 기본=도입부 그룹만">범위 <input type="number" min="1" style={{ width: 44 }} value={vidFrom} onChange={(e) => setVidFrom(e.target.value)} />~<input type="number" min="1" style={{ width: 44 }} value={vidTo} onChange={(e) => setVidTo(e.target.value)} /></span>
-                  <button disabled={!loaded} title={`G${vidFrom}~G${vidTo} 그룹을 i2v 비디오로 변환 (이미지 있는 것만)`} onClick={() => runVid(null)}>🎬 비디오</button>
+                  <button disabled={!loaded} title={`상단 버튼 = 작업큐의 모든 대본 G${vidFrom}~G${vidTo} 그룹을 i2v 비디오로 변환`} onClick={() => runStageQueue('video')}>🎬 비디오</button>
+                  <button disabled={!loaded} title="작업큐의 모든 대본 — 이미지 전부 만든 뒤 비디오까지 (한 번에)" onClick={() => runStageQueue('imgvid')}>🖼→🎬 이미지+비디오</button>
                 </>)}
           </span>
           <span className="hgroup" style={{ marginLeft: 'auto' }}>
@@ -1661,7 +1700,7 @@ export default function App() {
             </div>
           )}
           <Cards dto={dto} isLf={isLf} capCharsN={effCap} bgmOn={bgmOn}
-            onTts={runTts} onImg={runImg} onVid={runVid} onBulk={runBulk}
+            onTts={runTts} onImg={runImg} onVid={runVid} onImgVid={runImgVid} onBulk={runBulk}
             onPlayShorts={playShorts} onPlayGroup={playGroup} onRegen={runRegen}
             onMake={runMake} onVrew={runVrew} onPremiere={runPremiere} onAttach={attachAsset} onClear={clearAsset}
             onTitleField={updateTitleField} onPreview={(kind, src) => setPreview({ kind, src })}
@@ -2401,7 +2440,7 @@ function PlaylistView({ dto, onMakeOne, onPreview, onPreviewMedia, onAttachBg, o
 }
 
 // ── 카드 목록 (편별 그룹/컷) ──────────────────────────────
-function Cards({ dto, isLf, capCharsN, bgmOn, onTts, onImg, onVid, onBulk, onPlayShorts, onPlayGroup, onRegen, onMake, onVrew, onPremiere, onAttach, onClear, onTitleField, onPreview, onPlayFrom, onGroupTts, onGroupVid, onShowPrompt, onSplit }) {
+function Cards({ dto, isLf, capCharsN, bgmOn, onTts, onImg, onVid, onImgVid, onBulk, onPlayShorts, onPlayGroup, onRegen, onMake, onVrew, onPremiere, onAttach, onClear, onTitleField, onPreview, onPlayFrom, onGroupTts, onGroupVid, onShowPrompt, onSplit }) {
   // dto.projects 부재 가드 — 출판/플리 dto 가 모드 전환 직후 한 프레임 남아 들어올 수 있음(크래시 방지)
   if (!dto || !dto.projects || !dto.projects.length) {
     return <div id="cards"><div className="empty">대본(.md)을 열면 편별 그룹과 컷이 여기에 표시됩니다.</div></div>;
@@ -2424,6 +2463,7 @@ function Cards({ dto, isLf, capCharsN, bgmOn, onTts, onImg, onVid, onBulk, onPla
                 <button className="ghost" onClick={() => onImg(pr.shortsNum)}>🖼 이미지</button>
                 <button className="ghost" title="폴더 선택 → 파일명 숫자로 그룹 자동첨부" onClick={() => onBulk(pr.shortsNum)}>📎 일괄첨부</button>
                 <button className="ghost" onClick={() => onVid(pr.shortsNum)}>🎬 비디오</button>
+                <button className="ghost" title="이 대본만 — 이미지 전부 만든 뒤 비디오까지 (한 번에)" onClick={() => onImgVid(pr.shortsNum)}>🖼→🎬</button>
                 <button className="ghost" onClick={() => onPlayShorts(pr.shortsNum)}>▶ 미리보기</button>
                 <button className="ghost" onClick={() => onMake(pr.shortsNum)}>⚡ 만들기</button>
                 <button onClick={() => onVrew(pr.shortsNum)}>💾 .vrew</button>
