@@ -30,9 +30,37 @@ const DEFAULTS = {
   servers: [],             // 저장된 서버 프로필 [{name, baseUrl, cloud, apiKey}] — 드롭다운으로 전환(comfy.org/RunPod 등)
   activeServer: '',        // 현재 선택된 서버 프로필 이름(표시용)
 };
+
+// ── 번들 워크플로 자동 등록 (설치폴더 기준, PC 무관 정합) — 비디오(comfy-video.js)와 동일 정책 ──
+const COMFY_DIR = path.join(__dirname, '..', 'comfy');
+const BUNDLED = [
+  { name: 'Z-Image Turbo', file: 'image_z_image_turbo.json' },
+  { name: 'Krea2 Turbo',   file: 'image_krea2_turbo_t2i (2).json' },
+];
+const DEFAULT_ACTIVE_FILE = 'image_z_image_turbo.json'; // 활성값이 비었거나 실재하지 않을 때 기본
+function _ensureBundled(cfg) {
+  const wfs = Array.isArray(cfg.workflows) ? cfg.workflows : [];
+  const bundledNames = new Set(BUNDLED.map((b) => b.file.toLowerCase()));
+  const customs = wfs.filter((w) => w && w.path && !bundledNames.has(path.basename(String(w.path)).toLowerCase()));
+  const bundled = [];
+  for (const b of BUNDLED) {
+    const p = path.join(COMFY_DIR, b.file);
+    if (fs.existsSync(p)) bundled.push({ name: b.name, path: p });
+  }
+  cfg.workflows = [...bundled, ...customs];
+  const curBn = path.basename(String(cfg.workflowPath || '')).toLowerCase();
+  const curBundled = bundled.find((w) => path.basename(w.path).toLowerCase() === curBn);
+  if (curBundled) cfg.workflowPath = curBundled.path;
+  else if (!cfg.workflowPath || !fs.existsSync(cfg.workflowPath)) {
+    const def = bundled.find((w) => path.basename(w.path).toLowerCase() === DEFAULT_ACTIVE_FILE.toLowerCase()) || bundled[0];
+    if (def) cfg.workflowPath = def.path;
+  }
+  return cfg;
+}
 function loadConfig() {
-  try { if (fs.existsSync(CFG_PATH)) return { ...DEFAULTS, ...JSON.parse(fs.readFileSync(CFG_PATH, 'utf8')) }; } catch {}
-  return { ...DEFAULTS };
+  let cfg = { ...DEFAULTS };
+  try { if (fs.existsSync(CFG_PATH)) cfg = { ...DEFAULTS, ...JSON.parse(fs.readFileSync(CFG_PATH, 'utf8')) }; } catch {}
+  return _ensureBundled(cfg);
 }
 function saveConfig(patch) {
   try {

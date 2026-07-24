@@ -7,6 +7,25 @@
 **편별 Vrew 4.0.1 .vrew 파일**을 자동 생성하는 Electron 앱. PrimingFlow(D:\PrimingFlow)의 엔진을
 복사·재활용한 독립 클론.
 
+## 🧩 ComfyUI 워크플로(이미지·비디오) 번들 자동 등록 — PC 무관 정합 (2026-07-24, v0.2.69)
+> 증상: 아내 PC(깃허브 설치본)는 버전(코드)은 업데이트되는데 비디오 도구 드롭다운에 **LTX 가 아니라 Wan** 만 뜸.
+- **원인(코드 확정)**: 워크플로 목록(`workflows[]`)·활성(`workflowPath`)은 **홈 설정파일**(`~/.priming-maker/comfy-video-config.json`,
+  `comfy-image-config.json`)에만 저장 — 라이트 업데이트는 설치폴더 코드만 교체하고 홈 설정은 안 건드림. 등록은 예전에 **내 PC
+  홈파일 수동 기록**("초기값 직접 기록")으로만 했고 경로가 **내 PC 절대경로(`D:\Priming\comfy\...`)**라 아내 PC 엔 전달 안 됨.
+  코드엔 워크플로 자동 등록 로직이 아예 없었음(DEFAULTS.workflows=[]). 반면 워크플로 JSON 파일(`comfy/*.json`)은 git-tracked
+  라 설치·업데이트로 모든 PC 에 내려가 있었음 — **파일은 있는데 "등록"만 안 된 상태.**
+- **수정(B안 = 번들은 항상 보장, 로이 결정)**: `comfy-video.js`·`comfy-image.js` 에 `_ensureBundled(cfg)` 추가 →
+  `loadConfig()` 가 매번 실행. **설치폴더 기준**(`COMFY_DIR = path.join(__dirname,'..','comfy')` — asar:false 라 dev·설치본 양쪽
+  정확) 으로 번들 워크플로(비디오=Wan2.2 5B·LTX2.3 / 이미지=Z-Image·Krea2)를 목록에 보장하고, **파일명(basename) 일치하는 기존
+  항목은 제거 후 재구성**(절대경로 표류·중복 정리). 사용자 커스텀 워크플로는 보존. **활성 경로 복구**: basename 이 번들과
+  일치하면 설치폴더 경로로 교정(사용자 선택 존중), 비었거나 실재하지 않으면(타 PC 절대경로 등) 기본(비디오 LTX2.3·이미지
+  Z-Image)로. cloud/apiKey/서버프로필 등 나머지 설정은 그대로 보존.
+- **효과**: 이제 **업데이트만으로 모든 PC 가 동일하게** Wan·LTX(및 Z-Image·Krea2)를 드롭다운에 갖게 됨. 아내 PC 는 기존 활성
+  (Wan)이 유지되되 옛 절대경로가 자기 설치폴더 경로로 복구되고 **LTX 도 선택 가능**. 새 설치는 기본 LTX. 내 PC 도 D:\Priming
+  경로 자동 정합(폴더 옮겨도 안 깨짐). loadConfig 는 in-memory 시드(파일 강제 재기록 안 함) — 다음 saveConfig 때 자연 영속.
+- 검증: dev PC(Wan·LTX·활성 LTX) / 아내PC 시뮬(옛 Wan 절대경로 1개 → 목록 2개·중복0·활성 Wan 복구·exists·cloud/apiKey 보존) /
+  새설치(빈 설정→LTX 기본) / 이미지(Z-Image·Krea2) 통과. ⚠ 앱 재시작 반영(라이트). deps 무변경.
+
 ## 🔼 상단 버튼 = 큐 전체 + 「이미지→비디오」 통합 버튼 (A안 ①②) (2026-07-23, v0.2.68)
 > 요청: 상단 이미지·비디오·TTS 버튼은 작업큐의 모든 대본을 관할(대본 위 버튼은 그 대본만). + 이미지 먼저 다 만들고
 >   비디오 만드는 통합 버튼을 상단·대본위 양쪽에 추가.

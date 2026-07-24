@@ -31,9 +31,44 @@ const DEFAULTS = {
   servers: [],             // 저장된 서버 프로필 [{name, baseUrl, cloud, apiKey}] — 드롭다운으로 전환(comfy.org/RunPod 등)
   activeServer: '',        // 현재 선택된 서버 프로필 이름(표시용)
 };
+
+// ── 번들 워크플로 자동 등록 (설치폴더 기준, PC 무관 정합) ──
+// 저장소 comfy/*.json 은 설치·라이트업데이트로 모든 PC 에 내려감. 그러나 워크플로 "등록"(workflows[])은
+// 예전엔 홈 설정파일 수동 기록에만 있어(내 PC 절대경로) 다른 PC 엔 안 갔음. → 코드가 항상 설치폴더 기준으로
+// 번들 워크플로를 보장(경로 재해석)하고 사용자 커스텀은 보존한다. __dirname='<install>/core' → COMFY_DIR='<install>/comfy'.
+const COMFY_DIR = path.join(__dirname, '..', 'comfy');
+const BUNDLED = [
+  { name: 'Wan2.2 5B', file: 'video_wan2_2_5B_ti2v.json' },
+  { name: 'LTX2.3',    file: 'video_ltx2_3_i2v.json' },
+];
+const DEFAULT_ACTIVE_FILE = 'video_ltx2_3_i2v.json'; // 활성값이 비었거나 실재하지 않을 때 기본
+function _ensureBundled(cfg) {
+  const wfs = Array.isArray(cfg.workflows) ? cfg.workflows : [];
+  const bundledNames = new Set(BUNDLED.map((b) => b.file.toLowerCase()));
+  // 1) 기존 목록에서 번들 파일명과 겹치는 항목 제거(경로 표류·이름 변형 정리) — 커스텀만 남김
+  const customs = wfs.filter((w) => w && w.path && !bundledNames.has(path.basename(String(w.path)).toLowerCase()));
+  // 2) 번들 워크플로를 설치폴더 절대경로로 재구성(파일 존재하는 것만)
+  const bundled = [];
+  for (const b of BUNDLED) {
+    const p = path.join(COMFY_DIR, b.file);
+    if (fs.existsSync(p)) bundled.push({ name: b.name, path: p });
+  }
+  cfg.workflows = [...bundled, ...customs];
+  // 3) 활성 워크플로 경로 재해석/복구
+  const curBn = path.basename(String(cfg.workflowPath || '')).toLowerCase();
+  const curBundled = bundled.find((w) => path.basename(w.path).toLowerCase() === curBn);
+  if (curBundled) cfg.workflowPath = curBundled.path;                          // 번들이면 설치폴더 경로로 교정(절대경로 표류 수정)
+  else if (!cfg.workflowPath || !fs.existsSync(cfg.workflowPath)) {            // 비었거나 실재하지 않으면(타 PC 절대경로 등) 기본 번들로
+    const def = bundled.find((w) => path.basename(w.path).toLowerCase() === DEFAULT_ACTIVE_FILE.toLowerCase()) || bundled[0];
+    if (def) cfg.workflowPath = def.path;
+  }
+  // 실재하는 커스텀 활성값은 그대로 둠(사용자 선택 존중)
+  return cfg;
+}
 function loadConfig() {
-  try { if (fs.existsSync(CFG_PATH)) return { ...DEFAULTS, ...JSON.parse(fs.readFileSync(CFG_PATH, 'utf8')) }; } catch {}
-  return { ...DEFAULTS };
+  let cfg = { ...DEFAULTS };
+  try { if (fs.existsSync(CFG_PATH)) cfg = { ...DEFAULTS, ...JSON.parse(fs.readFileSync(CFG_PATH, 'utf8')) }; } catch {}
+  return _ensureBundled(cfg);
 }
 function saveConfig(patch) {
   try {
