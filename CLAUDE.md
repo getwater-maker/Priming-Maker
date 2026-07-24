@@ -7,6 +7,24 @@
 **편별 Vrew 4.0.1 .vrew 파일**을 자동 생성하는 Electron 앱. PrimingFlow(D:\PrimingFlow)의 엔진을
 복사·재활용한 독립 클론.
 
+## 🧹 RunPod 전면 제거 + 설정 통합 팝업(⚙ 설정) (2026-07-24, v0.2.71)
+> 요청(로이): 런팟 안 씀 → 관련 기능 전부 제거. + 흩어진 API키/연결 버튼(제미나이·나노바나나·ComfyUI 이미지·비디오·
+>   xAI·TTS서버)을 **한 버튼 → 통합 팝업**으로.
+- **RunPod 제거**: `core/runpod.js` 삭제. main.js 의 `_runpodTarget`·`doStartPod/doStopPod`·`autoStartPodIfNeeded/
+  autoStopPodIfNeeded`·IPC(get/set-runpod-key·config, runpod-start/stop/status) 제거 + make-all·run-batch 의 파드
+  자동 시작/정지 훅 제거(try/finally 도 정리). preload 의 runpod API 7개 제거. App.jsx 의 rp 상태·openRunpod·rpStart/
+  Stop/Check·⚡RunPod 버튼·모달·runStageQueue 의 rpAuto 블록 제거. (comfy-image/video 의 servers[] '서버 프로필'
+  기능은 범용이라 유지 — 예시 텍스트에서 RunPod 문구만 정리. gemini-provider 의 'RunPodComfyProvider' 주석은 옛
+  인터페이스명 언급일 뿐 기능 아님 — 유지.)
+- **통합 설정 팝업**: 헤더에 단일 **「⚙ 설정」** 버튼(구 🖧TTS서버 자리) → 탭 4개 모달(`settingsOpen`·`settingsTab`):
+  ① 🖼 ComfyUI 이미지 ② 🎬 ComfyUI 비디오 ③ 🔑 API 키(제미나이/나노바나나 키·모델 + Grok/xAI 키) ④ 🖧 TTS 서버.
+  `openSettings(tab)` 이 5개 설정(comfy image/video·gemini key/cfg·xai key·tts servers)을 한 번에 로드. 기존 단독
+  모달(comfyOpen/cvidOpen/ttsSrvOpen/xaiOpen) JSX 제거 — 본문은 탭 패널로 이관(로직·저장 함수 그대로 재사용).
+  분산됐던 진입점 재배선: 이미지/비디오 드롭다운 옆 ⚙(openComfy/openCvid)→해당 탭, Grok API ⚙키→키 탭, 🖧→TTS 탭.
+  이미지 순환(⚙, openImgRotation)은 순서·계정 전용으로 남기고 **거기 있던 Gemini 키 블록은 키 탭으로 이동**(중복 제거).
+- ⚠ 앱 재시작 반영(라이트). deps 무변경. RunPod 홈 설정파일(`~/.priming-maker/runpod-config.json`)은 코드가 더는
+  안 읽음(방치 무해). comfy 서버 프로필에 옛 RunPod 항목이 있으면 드롭다운에 남지만 선택 안 하면 무영향.
+
 ## ⚡ 「이미지+비디오」 큐 처리 = 전 항목 이미지 → 전 항목 비디오 (콜드스타트 최소화) (2026-07-24, v0.2.70)
 > 지적(로이): 롱폼 작업큐 여러 개일 때 상단 🖼→🎬 를 누르면 항목마다 이미지→비디오→다음항목 이미지→비디오… 라
 >   ComfyUI 가 이미지↔비디오 모델을 번갈아 로드(콜드스타트). 전 항목 이미지 먼저·그다음 전 항목 비디오가 스왑 최소.

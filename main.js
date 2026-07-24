@@ -2407,77 +2407,10 @@ async function runMakeAllCore(opts = {}) {
     : `⚡ 전체 제작 완료 (TTS ${S.timings.tts.toFixed(1)}s · 이미지 ${S.timings.image.toFixed(1)}s · 비디오 ${S.timings.video.toFixed(1)}s · 전체 ${S.timings.make.toFixed(1)}s)`);
 }
 
-// ── RunPod 파드 반자동 제어 (과금 절감) ─────────────────────────────
-//   autoManage=false(기본)면 아무 동작 안 함(무영향). 활성 ComfyUI 서버가 RunPod(proxy.runpod.net)일 때만 작동.
-function _runpodTarget() {
-  const RP = require('./core/runpod');
-  let imgUrl = '', vidUrl = '';
-  try { imgUrl = require('./core/comfy-image').loadConfig().baseUrl || ''; } catch {}
-  try { vidUrl = require('./core/comfy-video').loadConfig().baseUrl || ''; } catch {}
-  const rpUrl = RP.isRunpodUrl(imgUrl) ? imgUrl : (RP.isRunpodUrl(vidUrl) ? vidUrl : '');
-  if (!rpUrl) return null;
-  const cfg = RP.loadConfig();
-  const podId = (cfg.podId && cfg.podId.trim()) || RP.extractPodId(rpUrl);
-  return { RP, cfg, rpUrl, podId };
-}
-// 수동/자동 공용 — 파드 켜고 ComfyUI 뜰 때까지 대기. 반환: true(준비)/false(실패)/null(대상아님)
-async function doStartPod() {
-  const t = _runpodTarget(); if (!t) { log('[RunPod] 활성 ComfyUI 가 RunPod 주소가 아님 — 건너뜀'); return null; }
-  const { RP, cfg, rpUrl, podId } = t;
-  if (!podId) { log('[RunPod] podId 를 주소에서 못 얻음 — 설정에서 podId 입력'); return false; }
-  if (!RP.getKey()) { log('[RunPod] API 키 없음 — ⚡ RunPod 설정에서 키 입력'); return false; }
-  if (await RP.comfyAlive(rpUrl)) { log('[RunPod] 파드 이미 실행 중 — 시작 생략'); return true; }
-  try {
-    log(`[RunPod] 파드 시작 요청 (podId=${podId})…`);
-    const st = await RP.podStart(podId, cfg.gpuCount || 1);
-    log(`[RunPod] 시작 응답: ${st} · ComfyUI 기동 대기(최대 ${cfg.readyTimeoutSec || 360}초)…`);
-    const ok = await RP.waitComfyReady(rpUrl, cfg.readyTimeoutSec || 360, log);
-    if (!ok) { log('[RunPod] ⚠ ComfyUI 기동 확인 실패 — GPU 재고 없음/부팅 지연 가능. 대시보드 확인'); return false; }
-    log('[RunPod] ✅ 파드 준비 완료'); return true;
-  } catch (e) { log('[RunPod] 파드 시작 실패: ' + e.message); return false; }
-}
-async function doStopPod() {
-  const t = _runpodTarget(); if (!t) { log('[RunPod] 활성 ComfyUI 가 RunPod 주소가 아님 — 건너뜀'); return null; }
-  const { RP, podId } = t;
-  if (!podId || !RP.getKey()) { log('[RunPod] podId/키 없음 — 정지 건너뜀'); return false; }
-  try { log(`[RunPod] 파드 정지 요청 (podId=${podId})…`); const st = await RP.podStop(podId); log(`[RunPod] 정지 응답: ${st} — GPU 과금 중단`); return true; }
-  catch (e) { log('[RunPod] 파드 정지 실패: ' + e.message + ' — 대시보드에서 수동 정지 권장'); return false; }
-}
-async function autoStartPodIfNeeded() {
-  const RP = require('./core/runpod'); const cfg = RP.loadConfig();
-  if (!cfg.autoManage) return true;      // 자동관리 OFF → 통과(무영향)
-  const r = await doStartPod();
-  return r === null ? true : r;          // 대상 아님(null) → 통과
-}
-async function autoStopPodIfNeeded() {
-  const RP = require('./core/runpod'); const cfg = RP.loadConfig();
-  if (!cfg.autoManage) return;
-  if (S.abort && cfg.stopOnAbort === false) { log('[RunPod] 중단됨 — 설정상 파드 유지(stopOnAbort off)'); return; }
-  await doStopPod();
-}
-ipcMain.handle('get-runpod-key', () => { try { return require('./core/runpod').getKey(); } catch { return ''; } });
-ipcMain.handle('set-runpod-key', (_e, key) => { try { require('./core/runpod').setKey(key); log('RunPod API 키 저장됨'); return true; } catch (e) { log('RunPod 키 저장 실패: ' + e.message); return false; } });
-ipcMain.handle('get-runpod-config', () => { try { return require('./core/runpod').loadConfig(); } catch { return {}; } });
-ipcMain.handle('set-runpod-config', (_e, patch) => { try { return require('./core/runpod').saveConfig(patch || {}); } catch (e) { log('RunPod 설정 저장 실패: ' + e.message); return {}; } });
-ipcMain.handle('runpod-start', async () => await doStartPod());
-ipcMain.handle('runpod-stop', async () => await doStopPod());
-ipcMain.handle('runpod-status', async () => {
-  const t = _runpodTarget(); if (!t) return { ok: false, error: '활성 ComfyUI 가 RunPod 주소가 아님' };
-  const { RP, podId, rpUrl } = t;
-  if (!podId) return { ok: false, error: 'podId 없음' };
-  if (!RP.getKey()) return { ok: false, error: 'API 키 없음' };
-  try { const st = await RP.podStatus(podId); const alive = await RP.comfyAlive(rpUrl); return { ok: true, status: st, comfyAlive: alive, podId }; }
-  catch (e) { return { ok: false, error: e.message }; }
-});
 
 ipcMain.handle('make-all', (_e, args = {}) => enqueueTtsJob('전체 만들기', async () => {
-  if ((await autoStartPodIfNeeded()) === false) { log('⛔ RunPod 파드 준비 실패 — 제작 중단(설정/재고 확인)'); return P.toDTO(S.parsed); }
-  try {
-    await runMakeAllCore({ ...args, openVrew: true, openFolder: true });
-    return P.toDTO(S.parsed);
-  } finally {
-    await autoStopPodIfNeeded();
-  }
+  await runMakeAllCore({ ...args, openVrew: true, openFolder: true });
+  return P.toDTO(S.parsed);
 }));
 
 // ── 큐 순차 제작 ── 교차 순서(L1→S1→L2→S2…)는 렌더러가 plan 으로 전달. 한 항목씩 runMakeAllCore.
@@ -2490,8 +2423,6 @@ ipcMain.handle('run-batch', (_e, args = {}) => enqueueTtsJob('큐 순차 제작'
   const openEach = args.openEach !== false; // 기본값 = 순차 열기
   if (!plan.length) throw new Error('실행할 대본이 큐에 없습니다.');
   S.abort = false;
-  if ((await autoStartPodIfNeeded()) === false) { log('⛔ RunPod 파드 준비 실패 — 큐 제작 중단(설정/재고 확인)'); return { dto: S.parsed ? P.toDTO(S.parsed) : null, queue: queueDTO() }; }
-  try {
   log(`⚡⚡ 큐 순차 제작 시작 — 총 ${plan.length}개`);
   let okN = 0, failN = 0, skipN = 0;
   for (let i = 0; i < plan.length; i++) {
@@ -2541,9 +2472,6 @@ ipcMain.handle('run-batch', (_e, args = {}) => enqueueTtsJob('큐 순차 제작'
   log(`⚡⚡ 큐 제작 종료 — 성공 ${okN} · 실패 ${failN}${skipN ? ` · 완료건너뜀 ${skipN}` : ''}`);
   if (!S.abort) { try { if (S.outRoot) shell.openPath(S.outRoot); } catch {} } // 중단 시엔 폴더 자동 열기 생략(완료된 것처럼 보이지 않게)
   return { dto: S.parsed ? P.toDTO(S.parsed) : null, queue: queueDTO() };
-  } finally {
-    await autoStopPodIfNeeded();
-  }
 }));
 
 const TITLE_FIELDS = new Set(['titleLine1', 'titleLine2', 't1Size', 't1Color', 't1Align', 't2Size', 't2Color', 't2Align',

@@ -129,10 +129,8 @@ export default function App() {
   const [comfyCfg, setComfyCfg] = useState(null); // ComfyUI(z-image) 설정
   const [cvidOpen, setCvidOpen] = useState(false);
   const [cvidCfg, setCvidCfg] = useState(null); // ComfyUI 비디오(i2v Wan/LTX) 설정
-  const [rpOpen, setRpOpen] = useState(false);   // RunPod 파드 반자동 제어
-  const [rpCfg, setRpCfg] = useState(null);
-  const [rpKey, setRpKey] = useState('');
-  const [rpMsg, setRpMsg] = useState('');
+  const [settingsOpen, setSettingsOpen] = useState(false); // 통합 설정 팝업(ComfyUI 이미지·비디오 · API키 · TTS서버)
+  const [settingsTab, setSettingsTab] = useState('img');   // 'img' | 'vid' | 'keys' | 'tts'
   const [findOpen, setFindOpen] = useState(false);       // 화면 내 검색 바(Ctrl+F)
   const [findText, setFindText] = useState('');
   const [findRes, setFindRes] = useState({ active: 0, total: 0 });
@@ -178,8 +176,7 @@ export default function App() {
   const [imgRot, setImgRot] = useState(null);            // { order:[], enabled:{} } 이미지 순환 설정
   const [giCfg, setGiCfg] = useState(null);              // Nano Banana 2 Lite (Gemini 이미지 API) 설정
   const [giKey, setGiKey] = useState('');                // Gemini API 키(이미지 설정 팝업에서 입력) — secret-store 공용
-  const [xaiOpen, setXaiOpen] = useState(false);         // Grok API(비디오) xAI 키 입력 모달
-  const [xaiVal, setXaiVal] = useState('');
+  const [xaiVal, setXaiVal] = useState('');              // xAI(Grok API) 키 — 통합 설정 팝업 '키' 탭
   const [ttsSrvOpen, setTtsSrvOpen] = useState(false);   // TTS 서버 주소(OmniVoice/Supertonic) 설정 모달
   const [ttsSrv, setTtsSrv] = useState({ omnivoice: { baseUrl: '' }, supertonic: { baseUrl: '' } });
   const [nameAsk, setNameAsk] = useState(null);          // 이름 입력 모달 { title, value, resolve } — window.prompt 대체(Electron 미지원)
@@ -479,28 +476,21 @@ export default function App() {
     if (!items.length) { setStatus('대본을 먼저 여세요'); return; }
     const label = { tts: 'TTS', image: '이미지', video: '비디오', imgvid: '이미지→비디오' }[stage] || stage;
     const origId = (queue && queue[mode] && queue[mode].activeId) || (items[0] && items[0].id);
-    let rpAuto = false; try { const rc = await api.getRunpodConfig(); rpAuto = !!(rc && rc.autoManage); } catch (_) {}
-    const usesGpu = (stage !== 'tts'); // TTS 는 OmniVoice(파드와 무관)
-    if (rpAuto && usesGpu) { setStatus('RunPod 파드 시작 중…'); try { await api.runpodStart(); } catch (_) {} }
-    try {
-      // 이미지+비디오는 콜드스타트(ComfyUI 이미지↔비디오 모델 스왑) 최소화를 위해 '전 항목 이미지 → 전 항목 비디오' 2패스로.
-      // (항목마다 이미지·비디오를 번갈아 하면 모델을 2×N번 다시 로드 → 배치로 묶어 스왑 1번.) 단일 stage 는 기존대로 1패스.
-      const phases = stage === 'imgvid' ? ['image', 'video'] : [stage];
-      for (const ph of phases) {
-        const plabel = { tts: 'TTS', image: '이미지', video: '비디오' }[ph] || ph;
-        for (let k = 0; k < items.length; k++) {
-          const it = items[k];
-          setStatus(`⚡ 큐 ${plabel} — ${k + 1}/${items.length}편…`);
-          try { await api.selectQueueItem(it.id); } catch (_) {}
-          try {
-            if (ph === 'tts') { const d = await api.ttsBuild({ shortsNum: null, dry: false, presetName: presetName || null, speed: ttsSpeed || null, clipMaxSec: _clipMaxSec() }); if (d) setDto(d); }
-            if (ph === 'image') { const d = await api.imageBuild({ shortsNum: null, engine: imgEngine, styleId: styleId || null }); if (d) setDto(d); }
-            if (ph === 'video' && videoEngine !== 'none') { const d = await api.videoBuild({ shortsNum: null, fromNum: parseInt(vidFrom, 10) || 1, toNum: parseInt(vidTo, 10) || 1, engine: videoEngine, flowVideoModel, flowCount, imgEngine, styleId: styleId || null }); if (d) setDto(d); }
-          } catch (e) { logline(`큐 ${plabel} 오류: ${e.message}`); }
-        }
+    // 이미지+비디오는 콜드스타트(ComfyUI 이미지↔비디오 모델 스왑) 최소화를 위해 '전 항목 이미지 → 전 항목 비디오' 2패스로.
+    // (항목마다 이미지·비디오를 번갈아 하면 모델을 2×N번 다시 로드 → 배치로 묶어 스왑 1번.) 단일 stage 는 기존대로 1패스.
+    const phases = stage === 'imgvid' ? ['image', 'video'] : [stage];
+    for (const ph of phases) {
+      const plabel = { tts: 'TTS', image: '이미지', video: '비디오' }[ph] || ph;
+      for (let k = 0; k < items.length; k++) {
+        const it = items[k];
+        setStatus(`⚡ 큐 ${plabel} — ${k + 1}/${items.length}편…`);
+        try { await api.selectQueueItem(it.id); } catch (_) {}
+        try {
+          if (ph === 'tts') { const d = await api.ttsBuild({ shortsNum: null, dry: false, presetName: presetName || null, speed: ttsSpeed || null, clipMaxSec: _clipMaxSec() }); if (d) setDto(d); }
+          if (ph === 'image') { const d = await api.imageBuild({ shortsNum: null, engine: imgEngine, styleId: styleId || null }); if (d) setDto(d); }
+          if (ph === 'video' && videoEngine !== 'none') { const d = await api.videoBuild({ shortsNum: null, fromNum: parseInt(vidFrom, 10) || 1, toNum: parseInt(vidTo, 10) || 1, engine: videoEngine, flowVideoModel, flowCount, imgEngine, styleId: styleId || null }); if (d) setDto(d); }
+        } catch (e) { logline(`큐 ${plabel} 오류: ${e.message}`); }
       }
-    } finally {
-      if (rpAuto && usesGpu) { try { await api.runpodStop(); } catch (_) {} }
     }
     try { const r = await api.selectQueueItem(origId); if (r && r.dto) { setDto(r.dto); if (r.queue) setQueue(r.queue); } } catch (_) {} // 원래 보던 대본으로 복원
     setStatus(`⚡ 큐 ${label} 완료`);
@@ -808,10 +798,7 @@ export default function App() {
   function nameAskOk() { if (nameAsk) { const r = nameAsk.resolve, v = (nameAsk.value || '').trim(); setNameAsk(null); r(v || null); } }
   function nameAskCancel() { if (nameAsk) { const r = nameAsk.resolve; setNameAsk(null); r(null); } }
   // TTS 서버 주소(OmniVoice/Supertonic) — 다른 PC에서 메인 GPU 서버(LAN/Tailscale)를 가리키게.
-  async function openTtsSrv() {
-    try { const c = await api.getTtsServers(); if (c && !c.error) setTtsSrv({ omnivoice: { baseUrl: (c.omnivoice && c.omnivoice.baseUrl) || '' }, supertonic: { baseUrl: (c.supertonic && c.supertonic.baseUrl) || '' } }); } catch (_) {}
-    setTtsSrvOpen(true);
-  }
+  async function openTtsSrv() { return openSettings('tts'); }
   async function saveTtsSrv(id) {
     try { await api.setTtsServer({ id, baseUrl: (ttsSrv[id] && ttsSrv[id].baseUrl) || '' }); setStatus(`TTS 서버(${id}) 저장됨`); } catch (e) { logline('TTS 서버 저장 오류: ' + e.message); }
   }
@@ -820,8 +807,6 @@ export default function App() {
     try { const r = await api.testTtsServer({ baseUrl: (ttsSrv[id] && ttsSrv[id].baseUrl) || '' }); setStatus(r && r.ok ? `✓ ${id} 연결 OK` : `✗ ${id} 연결 실패${r && (r.error || r.status) ? ` (${r.error || r.status})` : ''}`); } catch (e) { logline(e.message); }
   }
   // Grok API(비디오) xAI 키
-  async function setXaiKey() { try { setXaiVal(await api.getXaiKey() || ''); } catch (_) { setXaiVal(''); } setXaiOpen(true); }
-  async function saveXaiKey() { try { await api.setXaiKey((xaiVal || '').trim()); setXaiOpen(false); setStatus('xAI API 키 저장됨'); } catch (e) { logline('xAI 키 저장 오류: ' + e.message); } }
   // Grok 멀티계정
   async function openGrokAcc() { try { setGrokAcc(await api.getGrokAccounts()); setGrokAccOpen(true); } catch (e) { logline('Grok 계정 오류: ' + e.message); } }
   async function addGrokAcc() { try { setGrokAcc(await api.addGrokAccount('')); } catch (e) { logline(e.message); } }
@@ -1288,43 +1273,28 @@ export default function App() {
   // 나노바나나2 배치 — 현재 대본에 미회수 배치가 있는지 조회(엔진=gemini·대본 바뀔 때)
   const refreshBatch = () => { api.geminiBatchStatus().then(setGsBatch).catch(() => {}); };
   useEffect(() => { if (imgEngine === 'gemini') refreshBatch(); else setGsBatch(null); /* eslint-disable-next-line */ }, [imgEngine, ftitle]);
-  async function openComfy() {
+  // ── 통합 설정 팝업 — ComfyUI 이미지·비디오 · API키(제미나이/나노바나나·xAI) · TTS서버를 한 곳에서(탭). ──
+  async function openSettings(tab) {
+    setSettingsTab(tab || 'img');
     try {
-      const c = (await api.getComfyImageConfig()) || {};
-      // 마이그레이션: 목록이 비었는데 기존 단일 workflowPath 가 있으면 목록 첫 항목으로 편입
-      if ((!c.workflows || !c.workflows.length) && c.workflowPath) {
-        c.workflows = [{ name: (c.workflowPath.split(/[\\/]/).pop() || '워크플로').replace(/\.json$/i, ''), path: c.workflowPath }];
-      }
-      setComfyCfg(c); setComfyOpen(true);
-    } catch (e) { logline('ComfyUI 설정 읽기 오류: ' + e.message); }
+      const ci = (await api.getComfyImageConfig()) || {};
+      if ((!ci.workflows || !ci.workflows.length) && ci.workflowPath) ci.workflows = [{ name: (ci.workflowPath.split(/[\\/]/).pop() || '워크플로').replace(/\.json$/i, ''), path: ci.workflowPath }];
+      setComfyCfg(ci);
+    } catch (_) {}
+    try {
+      const cv = (await api.getComfyVideoConfig()) || {};
+      if ((!cv.workflows || !cv.workflows.length) && cv.workflowPath) cv.workflows = [{ name: (cv.workflowPath.split(/[\\/]/).pop() || '워크플로').replace(/\.json$/i, ''), path: cv.workflowPath }];
+      setCvidCfg(cv);
+    } catch (_) {}
+    try { setGiCfg(await api.getGeminiImageConfig()); } catch (_) {}
+    try { setGiKey(await api.getGeminiKey() || ''); } catch (_) {}
+    try { setXaiVal(await api.getXaiKey() || ''); } catch (_) {}
+    try { const c = await api.getTtsServers(); if (c && !c.error) setTtsSrv({ omnivoice: { baseUrl: (c.omnivoice && c.omnivoice.baseUrl) || '' }, supertonic: { baseUrl: (c.supertonic && c.supertonic.baseUrl) || '' } }); } catch (_) {}
+    setSettingsOpen(true);
   }
+  async function openComfy() { return openSettings('img'); }
   async function saveComfyCfg(patch) {
     try { const c = await api.setComfyImageConfig(patch); setComfyCfg(c); } catch (e) { logline('ComfyUI 설정 저장 오류: ' + e.message); }
-  }
-  // ── RunPod 파드 반자동 제어 ──
-  async function openRunpod() {
-    try {
-      const [c, k] = await Promise.all([api.getRunpodConfig(), api.getRunpodKey()]);
-      setRpCfg(c || {}); setRpKey(k || ''); setRpMsg(''); setRpOpen(true);
-    } catch (e) { logline('RunPod 설정 읽기 오류: ' + e.message); }
-  }
-  async function saveRpCfg(patch) {
-    try { const c = await api.setRunpodConfig(patch); setRpCfg(c); } catch (e) { logline('RunPod 설정 저장 오류: ' + e.message); }
-  }
-  async function rpStart() {
-    setRpMsg('파드 시작 중… (ComfyUI 기동까지 최대 몇 분)');
-    try { const r = await api.runpodStart(); setRpMsg(r === true ? '✅ 파드 준비 완료' : r === null ? '활성 ComfyUI 가 RunPod 주소가 아닙니다' : '✗ 시작 실패 — 로그/재고 확인'); }
-    catch (e) { setRpMsg('오류: ' + e.message); }
-  }
-  async function rpStop() {
-    setRpMsg('파드 정지 중…');
-    try { const r = await api.runpodStop(); setRpMsg(r === true ? '⏹ 정지 요청됨 — 과금 중단' : r === null ? '활성 ComfyUI 가 RunPod 주소가 아닙니다' : '✗ 정지 실패 — 로그 확인'); }
-    catch (e) { setRpMsg('오류: ' + e.message); }
-  }
-  async function rpCheck() {
-    setRpMsg('상태 확인 중…');
-    try { const r = await api.runpodStatus(); setRpMsg(r && r.ok ? `상태: ${r.status} · ComfyUI ${r.comfyAlive ? '응답 O' : '응답 X'} (podId ${r.podId})` : `✗ ${r && r.error ? r.error : '확인 실패'}`); }
-    catch (e) { setRpMsg('오류: ' + e.message); }
   }
   async function pickComfyWf() {
     try {
@@ -1375,13 +1345,7 @@ export default function App() {
     catch (e) { logline('연결 테스트 오류: ' + e.message); }
   }
   // ── ComfyUI 비디오(i2v Wan/LTX) ──
-  async function openCvid() {
-    try {
-      const c = (await api.getComfyVideoConfig()) || {};
-      if ((!c.workflows || !c.workflows.length) && c.workflowPath) c.workflows = [{ name: (c.workflowPath.split(/[\\/]/).pop() || '워크플로').replace(/\.json$/i, ''), path: c.workflowPath }];
-      setCvidCfg(c); setCvidOpen(true);
-    } catch (e) { logline('ComfyUI 비디오 설정 읽기 오류: ' + e.message); }
-  }
+  async function openCvid() { return openSettings('vid'); }
   async function saveCvidCfg(patch) {
     try { const c = await api.setComfyVideoConfig(patch); setCvidCfg(c); } catch (e) { logline('ComfyUI 비디오 설정 저장 오류: ' + e.message); }
   }
@@ -1518,8 +1482,7 @@ export default function App() {
             </select>
             <button className="ghost" title="채널(프리셋) 설정 편집" style={{ padding: '6px 9px' }} onClick={openChannelEditor}>⚙</button>
             <button className="ghost" title="새 채널 추가 (현재 채널 설정을 복사해서 시작)" style={{ padding: '6px 9px' }} onClick={addChannel}>＋ 채널</button>
-            <button className="ghost" title="TTS 서버 주소(OmniVoice/Supertonic) — 다른 PC에서 메인 GPU 서버를 LAN/Tailscale 로 가리키게" style={{ padding: '6px 9px' }} onClick={openTtsSrv}>🖧 TTS서버</button>
-            <button className="ghost" title="RunPod 파드 반자동 켜기/끄기 — 만들기 시 자동으로 켜고, 끝나면 꺼서 과금 절감" style={{ padding: '6px 9px' }} onClick={openRunpod}>⚡ RunPod</button>
+            <button className="ghost" title="통합 설정 — ComfyUI 이미지·비디오 연결/워크플로 · API 키(제미나이·나노바나나·Grok) · TTS 서버 주소" style={{ padding: '6px 9px' }} onClick={() => openSettings('img')}>⚙ 설정</button>
             {!isPl && !isBk && (<>
               <span className="hgroup">
                 <span className="glabel">대본</span>
@@ -1580,7 +1543,7 @@ export default function App() {
                 ? comfyCfg.workflows.map((w) => <option key={w.path} value={`comfy::${w.path}`}>ComfyUI: {w.name}</option>)
                 : <option value="comfy::">ComfyUI (워크플로 추가)</option>}
             </select>
-            <button className="ghost" title="이미지 순환 순서·계정 · 나노바나나 키/모델 설정" onClick={openImgRotation}>⚙</button>
+            <button className="ghost" title="이미지 순환 순서·계정 설정 (Genspark·Flow)" onClick={openImgRotation}>⚙</button>
             {imgEngine === 'comfy' && <button className="ghost" title="ComfyUI 설정 — 로컬/클라우드 주소·API키·워크플로(z-image·Krea2) 추가/전환" onClick={openComfy}>⚙ ComfyUI</button>}
             <button disabled={!loaded} title="상단 버튼 = 작업큐의 모든 대본 이미지 생성 (이미 있는 그룹은 건너뜀)" onClick={() => runStageQueue('image')}>🖼 이미지</button>
             {imgEngine === 'gemini' && (<>
@@ -1599,7 +1562,7 @@ export default function App() {
               <option value="none">없음 (이미지만)</option>
             </select>
             {videoEngine === 'grok' && <button className="ghost" title="Grok(X) 멀티계정 등록·로그인·한도" onClick={openGrokAcc}>⚙ 계정</button>}
-            {videoEngine === 'grok-api' && <button className="ghost" title="xAI API 키 입력 (console.x.ai) — 사용량 과금" onClick={setXaiKey}>⚙ 키</button>}
+            {videoEngine === 'grok-api' && <button className="ghost" title="xAI API 키 입력 (console.x.ai) — 사용량 과금" onClick={() => openSettings('keys')}>⚙ 키</button>}
             {(videoEngine === 'comfy' || (typeof videoEngine === 'string' && videoEngine.indexOf('comfy::') === 0)) && <button className="ghost" title="ComfyUI i2v 설정 — 로컬/클라우드·API키·워크플로(Wan/LTX)" onClick={openCvid}>⚙ ComfyUI</button>}
             {videoEngine === 'none'
               ? <span className="meta" title="비디오 없이 이미지만으로 .vrew 생성 (켄번스)">이미지만(켄번스)</span>
@@ -1639,7 +1602,7 @@ export default function App() {
                 <option value="grok">영상: Grok(심리스)</option>
                 <option value="none">영상: 없음(이미지 고정)</option>
               </select>
-              <button className="ghost" title="이미지 순환 순서·계정 · 나노바나나 키/모델 설정" onClick={openImgRotation}>⚙</button>
+              <button className="ghost" title="이미지 순환 순서·계정 설정 (Genspark·Flow)" onClick={openImgRotation}>⚙</button>
             </span>
             <span className="hgroup">
               <span className="glabel">완성</span>
@@ -1766,44 +1729,6 @@ export default function App() {
               onChange={(e) => setNameAsk({ ...nameAsk, value: e.target.value })}
               onKeyDown={(e) => { if (e.key === 'Enter') nameAskOk(); else if (e.key === 'Escape') nameAskCancel(); }} />
             <div className="mbtns"><button onClick={nameAskOk}>확인</button><button className="ghost" onClick={nameAskCancel}>취소</button></div>
-          </div>
-        </div>
-      )}
-
-      {ttsSrvOpen && (
-        <div className="modal-bg show">
-          <div className="modal-card" style={{ maxWidth: 560 }}>
-            <h3>🖧 TTS 서버 주소</h3>
-            <div className="meta" style={{ marginBottom: 8, lineHeight: 1.5 }}>
-              OmniVoice·Supertonic 은 <b>메인 GPU PC</b>에서 도는 서버입니다. 다른 PC에서 쓰려면 그 주소를 메인 PC의
-              <b> LAN IP</b>(예: 192.168.x.x) 또는 <b>Tailscale IP</b>(예: 100.x.x.x)로 바꾸세요. (이 설정은 <b>이 PC에만</b> 저장됩니다)
-            </div>
-            <div className="frow"><label>OmniVoice</label>
-              <input style={{ flex: 1 }} placeholder="http://100.112.7.63:9881" value={ttsSrv.omnivoice.baseUrl}
-                onChange={(e) => setTtsSrv({ ...ttsSrv, omnivoice: { baseUrl: e.target.value } })} onBlur={() => saveTtsSrv('omnivoice')} />
-              <button className="ghost" style={{ flex: '0 0 auto' }} onClick={() => testTtsSrv('omnivoice')}>연결테스트</button></div>
-            <div className="frow"><label>Supertonic</label>
-              <input style={{ flex: 1 }} placeholder="http://127.0.0.1:9882" value={ttsSrv.supertonic.baseUrl}
-                onChange={(e) => setTtsSrv({ ...ttsSrv, supertonic: { baseUrl: e.target.value } })} onBlur={() => saveTtsSrv('supertonic')} />
-              <button className="ghost" style={{ flex: '0 0 auto' }} onClick={() => testTtsSrv('supertonic')}>연결테스트</button></div>
-            <div className="meta" style={{ marginTop: 4 }}>입력 후 칸 밖을 클릭하면 저장됩니다. 「연결테스트」 = 그 주소의 /health 확인.</div>
-            <div className="mbtns" style={{ marginTop: 10 }}><span style={{ flex: 1 }} /><button className="ghost" onClick={() => setTtsSrvOpen(false)}>닫기</button></div>
-          </div>
-        </div>
-      )}
-
-      {xaiOpen && (
-        <div className="modal-bg show">
-          <div className="modal-card" style={{ maxWidth: 460 }}>
-            <h3>⚙ Grok API 키 (비디오)</h3>
-            <div className="meta" style={{ marginBottom: 8, lineHeight: 1.5 }}>
-              xAI <b>Grok Imagine</b> 비디오 API 키입니다. <b>console.x.ai</b> → API Keys 에서 발급.<br />
-              <b>사용량 과금</b>(영상 1개당 비용) — 브라우저 Grok(SuperGrok/X 구독)과 별개입니다. 이미지→비디오(i2v)로 동작하므로 그룹 이미지가 있어야 합니다.
-            </div>
-            <input autoFocus type="password" placeholder="🔑 xAI API 키 (xai-...)" style={{ width: '100%', boxSizing: 'border-box', padding: '7px 9px' }}
-              value={xaiVal} onChange={(e) => setXaiVal(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') saveXaiKey(); }} />
-            <div className="mbtns"><button onClick={saveXaiKey}>저장</button><button className="ghost" onClick={() => setXaiOpen(false)}>취소</button></div>
           </div>
         </div>
       )}
@@ -2028,137 +1953,147 @@ export default function App() {
         </div>
       )}
 
-      {comfyOpen && comfyCfg && (
-        <div className="modal-bg show" onClick={(e) => { if (e.target.classList.contains('modal-bg')) setComfyOpen(false); }}>
-          <div className="modal-card">
-            <h3>⚙ ComfyUI 이미지 (z-image · Krea2 등 · 로컬/클라우드)</h3>
-            <div className="meta" style={{ marginBottom: 8 }}>ComfyUI 에서 워크플로를 <b>「저장(API 포맷)」</b>한 JSON 을 <b>＋추가</b>로 여러 개 등록하고, 드롭다운으로 골라 쓰세요(z-image·Krea2 등). 헤더 이미지 방식을 <b>ComfyUI(z-image)</b>로 고르면 선택된 워크플로로 이미지를 만듭니다.</div>
-            <div className="frow"><label>서버</label>
-              <select style={{ flex: 1 }} value={comfyCfg.activeServer || ''} title="저장된 서버(comfy.org/RunPod)로 전환 — 주소·클라우드·키를 한 번에 적용"
-                onChange={(e) => { if (e.target.value) pickComfyServer(e.target.value); }}>
-                <option value="">— 서버 프로필 선택(comfy.org/RunPod) —</option>
-                {(comfyCfg.servers || []).map((s) => <option key={s.name} value={s.name}>{s.name}{s.cloud ? ' (클라우드)' : ''}</option>)}
-              </select>
-              <button className="ghost" title="현재 주소·클라우드·키를 이름 붙여 서버 프로필로 저장" onClick={saveComfyServer}>💾 저장</button>
-              <button className="ghost" title="선택된 서버 프로필 삭제" disabled={!comfyCfg.activeServer} onClick={removeComfyServer}>🗑</button></div>
-            <div className="frow"><label>주소</label>
-              <input style={{ flex: 1 }} value={comfyCfg.baseUrl || ''} placeholder="http://127.0.0.1:8188"
-                onChange={(e) => setComfyCfg({ ...comfyCfg, baseUrl: e.target.value })} onBlur={() => saveComfyCfg({ baseUrl: (comfyCfg.baseUrl || '').trim() })} /></div>
-            <div className="frow">
-              <label className="chk" style={{ display: 'flex', gap: 4, alignItems: 'center', width: 'auto' }}>
-                <input type="checkbox" style={{ width: 'auto' }} checked={!!comfyCfg.cloud} onChange={(e) => { const v = e.target.checked; setComfyCfg({ ...comfyCfg, cloud: v }); saveComfyCfg({ cloud: v }); }} /> 클라우드(comfy.org)
-              </label>
-              {comfyCfg.cloud && <input type="password" style={{ flex: 1 }} placeholder="🔑 X-API-Key (Standard+ 구독)" value={comfyCfg.apiKey || ''}
-                onChange={(e) => setComfyCfg({ ...comfyCfg, apiKey: e.target.value })} onBlur={() => saveComfyCfg({ apiKey: (comfyCfg.apiKey || '').trim() })} />}
-            </div>
-            <div className="frow"><label>워크플로</label>
-              <select style={{ flex: 1 }} value={comfyCfg.workflowPath || ''} title={comfyCfg.workflowPath || ''} onChange={(e) => saveComfyCfg({ workflowPath: e.target.value })}>
-                {(!comfyCfg.workflows || !comfyCfg.workflows.length) && <option value="">— 없음 (＋추가로 z-image·Krea2 등록) —</option>}
-                {(comfyCfg.workflows || []).map((w) => <option key={w.path} value={w.path}>{w.name}</option>)}
-              </select>
-              <button className="ghost" title="ComfyUI '저장(API 포맷)' JSON 추가 (이름 지정)" onClick={pickComfyWf}>＋ 추가</button>
-              <button className="ghost" title="선택된 워크플로를 목록에서 제거" disabled={!comfyCfg.workflowPath} onClick={removeComfyWf}>🗑</button></div>
-            <div className="frow"><label>프롬프트 노드</label>
-              <input style={{ flex: 1 }} value={comfyCfg.promptNodeId || ''} placeholder="빈값=자동(CLIPTextEncode). 프롬프트가 안 들어가면 노드ID 지정"
-                onChange={(e) => setComfyCfg({ ...comfyCfg, promptNodeId: e.target.value })} onBlur={() => saveComfyCfg({ promptNodeId: (comfyCfg.promptNodeId || '').trim() })} /></div>
-            <div className="frow"><label>타임아웃(초)</label>
-              <input type="number" style={{ width: 90 }} value={comfyCfg.timeoutSec || 300}
-                onChange={(e) => setComfyCfg({ ...comfyCfg, timeoutSec: e.target.value })} onBlur={() => saveComfyCfg({ timeoutSec: parseInt(comfyCfg.timeoutSec, 10) || 300 })} />
-              <label className="chk" style={{ display: 'flex', gap: 4, alignItems: 'center', width: 'auto' }}>
-                <input type="checkbox" style={{ width: 'auto' }} checked={comfyCfg.sendDims !== false} onChange={(e) => { const v = e.target.checked; setComfyCfg({ ...comfyCfg, sendDims: v }); saveComfyCfg({ sendDims: v }); }} /> 비율에 맞춰 해상도 주입
-              </label></div>
-            <div className="meta" style={{ marginTop: 4 }}>클라우드는 <b>주소 cloud.comfy.org + API키 + 유료구독(Standard+)</b>이 필요합니다. 로컬은 내 PC ComfyUI에 z-image 모델(z_image·qwen_3_4b·ae)이 설치돼 있어야 합니다.</div>
-            <div className="mbtns" style={{ marginTop: 10 }}>
-              <button onClick={testComfy}>🔌 연결 테스트</button>
-              <span style={{ flex: 1 }} />
-              <button className="ghost" onClick={() => setComfyOpen(false)}>닫기</button>
-            </div>
-          </div>
-        </div>
-      )}
-      {rpOpen && rpCfg && (
-        <div className="modal-bg show" onClick={(e) => { if (e.target.classList.contains('modal-bg')) setRpOpen(false); }}>
-          <div className="modal-card" style={{ maxWidth: 560 }}>
-            <h3>⚡ RunPod 파드 반자동</h3>
-            <div className="meta" style={{ marginBottom: 8, lineHeight: 1.5 }}>
-              만들기 시작 시 파드가 꺼져 있으면 <b>자동으로 켜고</b>(ComfyUI 뜰 때까지 대기), 큐/만들기가 <b>끝나면 자동으로 끕니다</b>(GPU 과금 중단).
-              활성 ComfyUI 서버가 <b>RunPod 주소</b>일 때만 작동합니다. podId 는 주소에서 자동 추출됩니다.
-            </div>
-            <div className="frow"><label>API 키</label>
-              <input type="password" style={{ flex: 1 }} placeholder="RunPod → Settings → API Keys 에서 발급" value={rpKey}
-                onChange={(e) => setRpKey(e.target.value)} onBlur={() => api.setRunpodKey((rpKey || '').trim())} /></div>
-            <div className="frow">
-              <label className="chk" style={{ display: 'flex', gap: 4, alignItems: 'center', width: 'auto' }}>
-                <input type="checkbox" style={{ width: 'auto' }} checked={!!rpCfg.autoManage} onChange={(e) => { const v = e.target.checked; setRpCfg({ ...rpCfg, autoManage: v }); saveRpCfg({ autoManage: v }); }} /> 반자동(만들기 시 자동 켜고, 끝나면 끄기)
-              </label></div>
-            <div className="frow">
-              <label className="chk" style={{ display: 'flex', gap: 4, alignItems: 'center', width: 'auto' }}>
-                <input type="checkbox" style={{ width: 'auto' }} checked={rpCfg.stopOnAbort !== false} onChange={(e) => { const v = e.target.checked; setRpCfg({ ...rpCfg, stopOnAbort: v }); saveRpCfg({ stopOnAbort: v }); }} /> 중단해도 파드 끄기(과금 절감)
-              </label></div>
-            <div className="frow"><label>podId(선택)</label>
-              <input style={{ flex: 1 }} placeholder="비우면 ComfyUI 주소에서 자동 추출" value={rpCfg.podId || ''}
-                onChange={(e) => setRpCfg({ ...rpCfg, podId: e.target.value })} onBlur={() => saveRpCfg({ podId: (rpCfg.podId || '').trim() })} /></div>
-            {rpMsg && <div className="meta" style={{ marginTop: 4 }}>{rpMsg}</div>}
-            <div className="meta" style={{ marginTop: 4 }}>⚠ 파드를 껐다 켜면 <b>콜드스타트</b>(부팅+모델 로딩 ~1~3분)가 붙습니다. 곧 다시 쓸 거면 켜둔 채로, 한동안 안 쓸 때 끄는 게 유리합니다.</div>
-            <div className="mbtns" style={{ marginTop: 10 }}>
-              <button onClick={rpStart}>▶ 파드 켜기</button>
-              <button onClick={rpStop}>⏹ 파드 끄기</button>
-              <button className="ghost" onClick={rpCheck}>상태</button>
-              <span style={{ flex: 1 }} />
-              <button className="ghost" onClick={() => setRpOpen(false)}>닫기</button>
-            </div>
-          </div>
-        </div>
-      )}
-      {cvidOpen && cvidCfg && (
-        <div className="modal-bg show">
+      {settingsOpen && (
+        <div className="modal-bg show" onClick={(e) => { if (e.target.classList.contains('modal-bg')) setSettingsOpen(false); }}>
           <div className="modal-card wide">
-            <h3>⚙ ComfyUI 비디오 i2v (Wan 2.2 · LTX 등 · 로컬/클라우드)</h3>
-            <div className="meta" style={{ marginBottom: 8 }}>그룹 이미지를 업로드해 <b>이미지→비디오</b>로 만듭니다. ComfyUI 에서 i2v 워크플로를 <b>「저장(API 포맷)」</b>한 JSON 을 <b>＋추가</b>로 등록하세요. (Wan 2.2는 <b>Load Image → start_image</b> 연결이 있어야 하며, 없으면 앱이 자동 주입을 시도합니다.)</div>
-            <div className="frow"><label>서버</label>
-              <select style={{ flex: 1 }} value={cvidCfg.activeServer || ''} title="저장된 서버(comfy.org/RunPod)로 전환 — 주소·클라우드·키를 한 번에 적용"
-                onChange={(e) => { if (e.target.value) pickCvidServer(e.target.value); }}>
-                <option value="">— 서버 프로필 선택(comfy.org/RunPod) —</option>
-                {(cvidCfg.servers || []).map((s) => <option key={s.name} value={s.name}>{s.name}{s.cloud ? ' (클라우드)' : ''}</option>)}
-              </select>
-              <button className="ghost" title="현재 주소·클라우드·키를 이름 붙여 서버 프로필로 저장" onClick={saveCvidServer}>💾 저장</button>
-              <button className="ghost" title="선택된 서버 프로필 삭제" disabled={!cvidCfg.activeServer} onClick={removeCvidServer}>🗑</button></div>
-            <div className="frow"><label>주소</label>
-              <input style={{ flex: 1 }} value={cvidCfg.baseUrl || ''} placeholder="http://127.0.0.1:8188"
-                onChange={(e) => setCvidCfg({ ...cvidCfg, baseUrl: e.target.value })} onBlur={() => saveCvidCfg({ baseUrl: (cvidCfg.baseUrl || '').trim() })} /></div>
-            <div className="frow">
-              <label className="chk" style={{ display: 'flex', gap: 4, alignItems: 'center', width: 'auto' }}>
-                <input type="checkbox" style={{ width: 'auto' }} checked={!!cvidCfg.cloud} onChange={(e) => { const v = e.target.checked; setCvidCfg({ ...cvidCfg, cloud: v }); saveCvidCfg({ cloud: v }); }} /> 클라우드(comfy.org)
-              </label>
-              {cvidCfg.cloud && <input type="password" style={{ flex: 1 }} placeholder="🔑 X-API-Key (Standard+ 구독)" value={cvidCfg.apiKey || ''}
-                onChange={(e) => setCvidCfg({ ...cvidCfg, apiKey: e.target.value })} onBlur={() => saveCvidCfg({ apiKey: (cvidCfg.apiKey || '').trim() })} />}</div>
-            <div className="frow"><label>워크플로</label>
-              <select style={{ flex: 1 }} value={cvidCfg.workflowPath || ''} title={cvidCfg.workflowPath || ''} onChange={(e) => saveCvidCfg({ workflowPath: e.target.value })}>
-                {(!cvidCfg.workflows || !cvidCfg.workflows.length) && <option value="">— 없음 (＋추가로 Wan/LTX 등록) —</option>}
-                {(cvidCfg.workflows || []).map((w) => <option key={w.path} value={w.path}>{w.name}</option>)}
-              </select>
-              <button className="ghost" title="ComfyUI '저장(API 포맷)' i2v JSON 추가 (이름 지정)" onClick={pickCvidWf}>＋ 추가</button>
-              <button className="ghost" title="선택된 워크플로를 목록에서 제거" disabled={!cvidCfg.workflowPath} onClick={removeCvidWf}>🗑</button></div>
-            <div className="frow"><label>최대 길이(초)</label>
-              <input type="number" style={{ width: 70 }} value={cvidCfg.videoMaxSec != null ? cvidCfg.videoMaxSec : 8} title="0=제한없음(TTS 길이 그대로). 클라우드 GPU 시간/비용 상한"
-                onChange={(e) => setCvidCfg({ ...cvidCfg, videoMaxSec: e.target.value })} onBlur={() => saveCvidCfg({ videoMaxSec: Math.max(0, parseInt(cvidCfg.videoMaxSec, 10) || 0) })} />
-              <label style={{ width: 'auto' }}>fps</label>
-              <input type="number" style={{ width: 60 }} value={cvidCfg.fps || 24} title="워크플로 CreateVideo fps 와 맞추기 (초→프레임 변환)"
-                onChange={(e) => setCvidCfg({ ...cvidCfg, fps: e.target.value })} onBlur={() => saveCvidCfg({ fps: parseInt(cvidCfg.fps, 10) || 24 })} />
-              <label style={{ width: 'auto' }}>타임아웃(초)</label>
-              <input type="number" style={{ width: 80 }} value={cvidCfg.timeoutSec || 600}
-                onChange={(e) => setCvidCfg({ ...cvidCfg, timeoutSec: e.target.value })} onBlur={() => saveCvidCfg({ timeoutSec: parseInt(cvidCfg.timeoutSec, 10) || 600 })} /></div>
-            <div className="frow"><label>프롬프트 노드</label>
-              <input style={{ flex: 1 }} value={cvidCfg.promptNodeId || ''} placeholder="빈값=자동(Positive CLIPTextEncode)"
-                onChange={(e) => setCvidCfg({ ...cvidCfg, promptNodeId: e.target.value })} onBlur={() => saveCvidCfg({ promptNodeId: (cvidCfg.promptNodeId || '').trim() })} />
-              <label className="chk" style={{ display: 'flex', gap: 4, alignItems: 'center', width: 'auto' }}>
-                <input type="checkbox" style={{ width: 'auto' }} checked={cvidCfg.sendDims !== false} onChange={(e) => { const v = e.target.checked; setCvidCfg({ ...cvidCfg, sendDims: v }); saveCvidCfg({ sendDims: v }); }} /> 비율에 맞춰 해상도
-              </label></div>
-            <div className="meta" style={{ marginTop: 4 }}>클라우드 = <b>구독 GPU 시간(정액)</b>으로 실행 — 영상당 추가 과금 없음. 로컬 RTX 3060은 Wan 2.2 <b>5B</b> 권장(12GB). i2v는 그룹 이미지가 있어야 동작합니다.</div>
+            <h3>⚙ 설정</h3>
+            <div className="frow" style={{ gap: 6, marginBottom: 10, borderBottom: '1px solid var(--line)', paddingBottom: 8, flexWrap: 'wrap' }}>
+              {[['img', '🖼 ComfyUI 이미지'], ['vid', '🎬 ComfyUI 비디오'], ['keys', '🔑 API 키'], ['tts', '🖧 TTS 서버']].map(([id, lbl]) => (
+                <button key={id} className={settingsTab === id ? '' : 'ghost'} style={{ padding: '5px 10px' }} onClick={() => setSettingsTab(id)}>{lbl}</button>
+              ))}
+            </div>
+
+            {settingsTab === 'img' && comfyCfg && (<div>
+              <div className="meta" style={{ marginBottom: 8 }}>ComfyUI 에서 워크플로를 <b>「저장(API 포맷)」</b>한 JSON 을 <b>＋추가</b>로 여러 개 등록하고, 드롭다운으로 골라 쓰세요(z-image·Krea2 등). 헤더 이미지 방식을 <b>ComfyUI</b>로 고르면 선택된 워크플로로 이미지를 만듭니다.</div>
+              <div className="frow"><label>서버</label>
+                <select style={{ flex: 1 }} value={comfyCfg.activeServer || ''} title="저장된 서버(comfy.org/로컬)로 전환 — 주소·클라우드·키를 한 번에 적용"
+                  onChange={(e) => { if (e.target.value) pickComfyServer(e.target.value); }}>
+                  <option value="">— 서버 프로필 선택 —</option>
+                  {(comfyCfg.servers || []).map((s) => <option key={s.name} value={s.name}>{s.name}{s.cloud ? ' (클라우드)' : ''}</option>)}
+                </select>
+                <button className="ghost" title="현재 주소·클라우드·키를 이름 붙여 서버 프로필로 저장" onClick={saveComfyServer}>💾 저장</button>
+                <button className="ghost" title="선택된 서버 프로필 삭제" disabled={!comfyCfg.activeServer} onClick={removeComfyServer}>🗑</button></div>
+              <div className="frow"><label>주소</label>
+                <input style={{ flex: 1 }} value={comfyCfg.baseUrl || ''} placeholder="http://127.0.0.1:8188"
+                  onChange={(e) => setComfyCfg({ ...comfyCfg, baseUrl: e.target.value })} onBlur={() => saveComfyCfg({ baseUrl: (comfyCfg.baseUrl || '').trim() })} /></div>
+              <div className="frow">
+                <label className="chk" style={{ display: 'flex', gap: 4, alignItems: 'center', width: 'auto' }}>
+                  <input type="checkbox" style={{ width: 'auto' }} checked={!!comfyCfg.cloud} onChange={(e) => { const v = e.target.checked; setComfyCfg({ ...comfyCfg, cloud: v }); saveComfyCfg({ cloud: v }); }} /> 클라우드(comfy.org)
+                </label>
+                {comfyCfg.cloud && <input type="password" style={{ flex: 1 }} placeholder="🔑 X-API-Key (Standard+ 구독)" value={comfyCfg.apiKey || ''}
+                  onChange={(e) => setComfyCfg({ ...comfyCfg, apiKey: e.target.value })} onBlur={() => saveComfyCfg({ apiKey: (comfyCfg.apiKey || '').trim() })} />}
+              </div>
+              <div className="frow"><label>워크플로</label>
+                <select style={{ flex: 1 }} value={comfyCfg.workflowPath || ''} title={comfyCfg.workflowPath || ''} onChange={(e) => saveComfyCfg({ workflowPath: e.target.value })}>
+                  {(!comfyCfg.workflows || !comfyCfg.workflows.length) && <option value="">— 없음 (＋추가로 z-image·Krea2 등록) —</option>}
+                  {(comfyCfg.workflows || []).map((w) => <option key={w.path} value={w.path}>{w.name}</option>)}
+                </select>
+                <button className="ghost" title="ComfyUI '저장(API 포맷)' JSON 추가 (이름 지정)" onClick={pickComfyWf}>＋ 추가</button>
+                <button className="ghost" title="선택된 워크플로를 목록에서 제거" disabled={!comfyCfg.workflowPath} onClick={removeComfyWf}>🗑</button></div>
+              <div className="frow"><label>프롬프트 노드</label>
+                <input style={{ flex: 1 }} value={comfyCfg.promptNodeId || ''} placeholder="빈값=자동(CLIPTextEncode). 프롬프트가 안 들어가면 노드ID 지정"
+                  onChange={(e) => setComfyCfg({ ...comfyCfg, promptNodeId: e.target.value })} onBlur={() => saveComfyCfg({ promptNodeId: (comfyCfg.promptNodeId || '').trim() })} /></div>
+              <div className="frow"><label>타임아웃(초)</label>
+                <input type="number" style={{ width: 90 }} value={comfyCfg.timeoutSec || 300}
+                  onChange={(e) => setComfyCfg({ ...comfyCfg, timeoutSec: e.target.value })} onBlur={() => saveComfyCfg({ timeoutSec: parseInt(comfyCfg.timeoutSec, 10) || 300 })} />
+                <label className="chk" style={{ display: 'flex', gap: 4, alignItems: 'center', width: 'auto' }}>
+                  <input type="checkbox" style={{ width: 'auto' }} checked={comfyCfg.sendDims !== false} onChange={(e) => { const v = e.target.checked; setComfyCfg({ ...comfyCfg, sendDims: v }); saveComfyCfg({ sendDims: v }); }} /> 비율에 맞춰 해상도 주입
+                </label></div>
+              <div className="meta" style={{ marginTop: 4 }}>클라우드는 <b>주소 cloud.comfy.org + API키 + 유료구독(Standard+)</b>이 필요합니다. 로컬은 내 PC ComfyUI에 z-image 모델(z_image·qwen_3_4b·ae)이 설치돼 있어야 합니다.</div>
+            </div>)}
+
+            {settingsTab === 'vid' && cvidCfg && (<div>
+              <div className="meta" style={{ marginBottom: 8 }}>그룹 이미지를 업로드해 <b>이미지→비디오</b>로 만듭니다. ComfyUI 에서 i2v 워크플로를 <b>「저장(API 포맷)」</b>한 JSON 을 <b>＋추가</b>로 등록하세요. (Wan 2.2는 <b>Load Image → start_image</b> 연결이 있어야 하며, 없으면 앱이 자동 주입을 시도합니다.)</div>
+              <div className="frow"><label>서버</label>
+                <select style={{ flex: 1 }} value={cvidCfg.activeServer || ''} title="저장된 서버(comfy.org/로컬)로 전환 — 주소·클라우드·키를 한 번에 적용"
+                  onChange={(e) => { if (e.target.value) pickCvidServer(e.target.value); }}>
+                  <option value="">— 서버 프로필 선택 —</option>
+                  {(cvidCfg.servers || []).map((s) => <option key={s.name} value={s.name}>{s.name}{s.cloud ? ' (클라우드)' : ''}</option>)}
+                </select>
+                <button className="ghost" title="현재 주소·클라우드·키를 이름 붙여 서버 프로필로 저장" onClick={saveCvidServer}>💾 저장</button>
+                <button className="ghost" title="선택된 서버 프로필 삭제" disabled={!cvidCfg.activeServer} onClick={removeCvidServer}>🗑</button></div>
+              <div className="frow"><label>주소</label>
+                <input style={{ flex: 1 }} value={cvidCfg.baseUrl || ''} placeholder="http://127.0.0.1:8188"
+                  onChange={(e) => setCvidCfg({ ...cvidCfg, baseUrl: e.target.value })} onBlur={() => saveCvidCfg({ baseUrl: (cvidCfg.baseUrl || '').trim() })} /></div>
+              <div className="frow">
+                <label className="chk" style={{ display: 'flex', gap: 4, alignItems: 'center', width: 'auto' }}>
+                  <input type="checkbox" style={{ width: 'auto' }} checked={!!cvidCfg.cloud} onChange={(e) => { const v = e.target.checked; setCvidCfg({ ...cvidCfg, cloud: v }); saveCvidCfg({ cloud: v }); }} /> 클라우드(comfy.org)
+                </label>
+                {cvidCfg.cloud && <input type="password" style={{ flex: 1 }} placeholder="🔑 X-API-Key (Standard+ 구독)" value={cvidCfg.apiKey || ''}
+                  onChange={(e) => setCvidCfg({ ...cvidCfg, apiKey: e.target.value })} onBlur={() => saveCvidCfg({ apiKey: (cvidCfg.apiKey || '').trim() })} />}</div>
+              <div className="frow"><label>워크플로</label>
+                <select style={{ flex: 1 }} value={cvidCfg.workflowPath || ''} title={cvidCfg.workflowPath || ''} onChange={(e) => saveCvidCfg({ workflowPath: e.target.value })}>
+                  {(!cvidCfg.workflows || !cvidCfg.workflows.length) && <option value="">— 없음 (＋추가로 Wan/LTX 등록) —</option>}
+                  {(cvidCfg.workflows || []).map((w) => <option key={w.path} value={w.path}>{w.name}</option>)}
+                </select>
+                <button className="ghost" title="ComfyUI '저장(API 포맷)' i2v JSON 추가 (이름 지정)" onClick={pickCvidWf}>＋ 추가</button>
+                <button className="ghost" title="선택된 워크플로를 목록에서 제거" disabled={!cvidCfg.workflowPath} onClick={removeCvidWf}>🗑</button></div>
+              <div className="frow"><label>최대 길이(초)</label>
+                <input type="number" style={{ width: 70 }} value={cvidCfg.videoMaxSec != null ? cvidCfg.videoMaxSec : 8} title="0=제한없음(TTS 길이 그대로). 클라우드 GPU 시간/비용 상한"
+                  onChange={(e) => setCvidCfg({ ...cvidCfg, videoMaxSec: e.target.value })} onBlur={() => saveCvidCfg({ videoMaxSec: Math.max(0, parseInt(cvidCfg.videoMaxSec, 10) || 0) })} />
+                <label style={{ width: 'auto' }}>fps</label>
+                <input type="number" style={{ width: 60 }} value={cvidCfg.fps || 24} title="워크플로 CreateVideo fps 와 맞추기 (초→프레임 변환)"
+                  onChange={(e) => setCvidCfg({ ...cvidCfg, fps: e.target.value })} onBlur={() => saveCvidCfg({ fps: parseInt(cvidCfg.fps, 10) || 24 })} />
+                <label style={{ width: 'auto' }}>타임아웃(초)</label>
+                <input type="number" style={{ width: 80 }} value={cvidCfg.timeoutSec || 600}
+                  onChange={(e) => setCvidCfg({ ...cvidCfg, timeoutSec: e.target.value })} onBlur={() => saveCvidCfg({ timeoutSec: parseInt(cvidCfg.timeoutSec, 10) || 600 })} /></div>
+              <div className="frow"><label>프롬프트 노드</label>
+                <input style={{ flex: 1 }} value={cvidCfg.promptNodeId || ''} placeholder="빈값=자동(Positive CLIPTextEncode)"
+                  onChange={(e) => setCvidCfg({ ...cvidCfg, promptNodeId: e.target.value })} onBlur={() => saveCvidCfg({ promptNodeId: (cvidCfg.promptNodeId || '').trim() })} />
+                <label className="chk" style={{ display: 'flex', gap: 4, alignItems: 'center', width: 'auto' }}>
+                  <input type="checkbox" style={{ width: 'auto' }} checked={cvidCfg.sendDims !== false} onChange={(e) => { const v = e.target.checked; setCvidCfg({ ...cvidCfg, sendDims: v }); saveCvidCfg({ sendDims: v }); }} /> 비율에 맞춰 해상도
+                </label></div>
+              <div className="meta" style={{ marginTop: 4 }}>클라우드 = <b>구독 GPU 시간(정액)</b>으로 실행 — 영상당 추가 과금 없음. 로컬 RTX 3060은 Wan 2.2 <b>5B</b> 권장(12GB). i2v는 그룹 이미지가 있어야 동작합니다.</div>
+            </div>)}
+
+            {settingsTab === 'keys' && (<div>
+              <div style={{ background: '#fbf6ee', border: '1px solid var(--line)', borderRadius: 8, padding: '8px 10px', margin: '0 0 10px' }}>
+                <div className="frow" style={{ flexWrap: 'wrap' }}>
+                  <label style={{ width: 'auto', fontWeight: 700, color: 'var(--hook)' }}>🍌 유료 나노바나나2 (Gemini)</label>
+                  <input type="password" placeholder="🔑 Gemini API 키" value={giKey} style={{ flex: 1, minWidth: 180 }}
+                    onChange={(e) => setGiKey(e.target.value)} onBlur={() => saveGiKey(giKey.trim())} />
+                </div>
+                {giCfg && <div className="frow" style={{ flexWrap: 'wrap', marginTop: 4 }}>
+                  <label style={{ width: 'auto' }}>모델</label>
+                  <input style={{ flex: 1, minWidth: 200 }} value={giCfg.model || ''} placeholder="gemini-3.1-flash-lite-image"
+                    onChange={(e) => setGiCfg({ ...giCfg, model: e.target.value })} onBlur={() => saveGiCfg({ model: (giCfg.model || '').trim() })} />
+                  <label className="chk" style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                    <input type="checkbox" style={{ width: 'auto' }} checked={giCfg.sendAspect !== false} onChange={(e) => saveGiCfg({ sendAspect: e.target.checked })} />비율 전송
+                  </label>
+                </div>}
+                <div className="meta" style={{ marginTop: 4 }}>헤더에서 <b>「이미지: 유료」</b>를 고르면 이 키로 나노바나나가 이미지를 만듭니다(유료, ~$0.034/장). 모델명이 안 맞으면(404) 여기서 고치고, 비율 오류면 「비율 전송」을 끄세요. (aistudio.google.com 에서 키 발급)</div>
+              </div>
+              <div style={{ background: '#fbf6ee', border: '1px solid var(--line)', borderRadius: 8, padding: '8px 10px' }}>
+                <div className="frow" style={{ flexWrap: 'wrap' }}>
+                  <label style={{ width: 'auto', fontWeight: 700, color: 'var(--hook)' }}>🎬 Grok API (xAI, 비디오)</label>
+                  <input type="password" placeholder="🔑 xAI API 키 (xai-...)" value={xaiVal} style={{ flex: 1, minWidth: 180 }}
+                    onChange={(e) => setXaiVal(e.target.value)} onBlur={() => api.setXaiKey((xaiVal || '').trim())} />
+                </div>
+                <div className="meta" style={{ marginTop: 4 }}>xAI <b>Grok Imagine</b> 비디오 API 키. <b>console.x.ai</b> → API Keys 에서 발급. <b>사용량 과금</b>(영상 1개당) — 브라우저 Grok(구독)과 별개. 헤더 비디오에서 <b>「Grok API」</b> 선택 시 사용. i2v라 그룹 이미지가 있어야 합니다.</div>
+              </div>
+            </div>)}
+
+            {settingsTab === 'tts' && (<div>
+              <div className="meta" style={{ marginBottom: 8, lineHeight: 1.5 }}>
+                OmniVoice·Supertonic 은 <b>메인 GPU PC</b>에서 도는 서버입니다. 다른 PC에서 쓰려면 그 주소를 메인 PC의
+                <b> LAN IP</b>(예: 192.168.x.x) 또는 <b>Tailscale IP</b>(예: 100.x.x.x)로 바꾸세요. (이 설정은 <b>이 PC에만</b> 저장됩니다)
+              </div>
+              <div className="frow"><label>OmniVoice</label>
+                <input style={{ flex: 1 }} placeholder="http://100.112.7.63:9881" value={ttsSrv.omnivoice.baseUrl}
+                  onChange={(e) => setTtsSrv({ ...ttsSrv, omnivoice: { baseUrl: e.target.value } })} onBlur={() => saveTtsSrv('omnivoice')} />
+                <button className="ghost" style={{ flex: '0 0 auto' }} onClick={() => testTtsSrv('omnivoice')}>연결테스트</button></div>
+              <div className="frow"><label>Supertonic</label>
+                <input style={{ flex: 1 }} placeholder="http://127.0.0.1:9882" value={ttsSrv.supertonic.baseUrl}
+                  onChange={(e) => setTtsSrv({ ...ttsSrv, supertonic: { baseUrl: e.target.value } })} onBlur={() => saveTtsSrv('supertonic')} />
+                <button className="ghost" style={{ flex: '0 0 auto' }} onClick={() => testTtsSrv('supertonic')}>연결테스트</button></div>
+              <div className="meta" style={{ marginTop: 4 }}>입력 후 칸 밖을 클릭하면 저장됩니다. 「연결테스트」 = 그 주소의 /health 확인.</div>
+            </div>)}
+
             <div className="mbtns" style={{ marginTop: 10 }}>
-              <button onClick={async () => { setStatus('ComfyUI 비디오 연결 확인 중…'); try { const r = await api.testComfyVideo(); setStatus(r && r.ok ? `✓ 연결 OK (${r.baseUrl})` : `✗ 연결 실패${r && r.error ? ': ' + r.error : ''}`); } catch (e) { logline(e.message); } }}>🔌 연결 테스트</button>
+              {settingsTab === 'img' && <button onClick={testComfy}>🔌 연결 테스트</button>}
+              {settingsTab === 'vid' && <button onClick={async () => { setStatus('ComfyUI 비디오 연결 확인 중…'); try { const r = await api.testComfyVideo(); setStatus(r && r.ok ? `✓ 연결 OK (${r.baseUrl})` : `✗ 연결 실패${r && r.error ? ': ' + r.error : ''}`); } catch (e) { logline(e.message); } }}>🔌 연결 테스트</button>}
               <span style={{ flex: 1 }} />
-              <button className="ghost" onClick={() => setCvidOpen(false)}>닫기</button>
+              <button className="ghost" onClick={() => setSettingsOpen(false)}>닫기</button>
             </div>
           </div>
         </div>
@@ -2166,26 +2101,8 @@ export default function App() {
       {imgRotOpen && imgRot && (
         <div className="modal-bg show">
           <div className="modal-card">
-            <h3>⚙ 이미지 설정 (순환 · 나노바나나2 Lite)</h3>
-            {giCfg ? (
-              <div style={{ background: '#fbf6ee', border: '1px solid var(--line)', borderRadius: 8, padding: '8px 10px', margin: '0 0 10px' }}>
-                <div className="frow" style={{ flexWrap: 'wrap' }}>
-                  <label style={{ width: 'auto', fontWeight: 700, color: 'var(--hook)' }}>🍌 유료 나노바나나2 Lite</label>
-                  <input type="password" placeholder="🔑 Gemini API 키" value={giKey} style={{ flex: 1, minWidth: 180 }}
-                    onChange={(e) => setGiKey(e.target.value)} onBlur={() => saveGiKey(giKey.trim())} />
-                </div>
-                <div className="frow" style={{ flexWrap: 'wrap', marginTop: 4 }}>
-                  <label style={{ width: 'auto' }}>모델</label>
-                  <input style={{ flex: 1, minWidth: 200 }} value={giCfg.model || ''} placeholder="gemini-3.1-flash-lite-image"
-                    onChange={(e) => setGiCfg({ ...giCfg, model: e.target.value })} onBlur={() => saveGiCfg({ model: (giCfg.model || '').trim() })} />
-                  <label className="chk" style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-                    <input type="checkbox" style={{ width: 'auto' }} checked={giCfg.sendAspect !== false} onChange={(e) => saveGiCfg({ sendAspect: e.target.checked })} />비율 전송
-                  </label>
-                </div>
-                <div className="meta" style={{ marginTop: 4 }}>헤더에서 <b>「이미지: 유료」</b>를 고르면 이 키로 나노바나나가 이미지를 만듭니다(유료, ~$0.034/장). 모델명이 안 맞으면(404) 여기서 고치고, 비율 오류면 「비율 전송」을 끄세요.</div>
-              </div>
-            ) : null}
-            <div className="meta" style={{ marginBottom: 8 }}>위에서부터 순서대로 시도하고, 한 엔진이 <b>한도</b>(Genspark가 보내는 휴식/한도 메시지, Flow 계정한도)에 걸리면 <b>다음 엔진</b>이 남은 이미지를 이어 만듭니다. 체크 해제 시 순환에서 제외. (유료 나노바나나는 순환과 별개 — 헤더에서 선택)</div>
+            <h3>⚙ 이미지 순환 (Genspark · Flow)</h3>
+            <div className="meta" style={{ marginBottom: 8 }}>위에서부터 순서대로 시도하고, 한 엔진이 <b>한도</b>(Genspark가 보내는 휴식/한도 메시지, Flow 계정한도)에 걸리면 <b>다음 엔진</b>이 남은 이미지를 이어 만듭니다. 체크 해제 시 순환에서 제외. (유료 나노바나나 키는 <b>⚙ 설정 → 🔑 API 키</b>에서 관리)</div>
             <div style={{ margin: '8px 0' }}>
               {(imgRot.order || []).map((id, i) => (
                 <div key={id} className="frow" style={{ alignItems: 'center', gap: 4 }}>
