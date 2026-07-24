@@ -7,6 +7,17 @@
 **편별 Vrew 4.0.1 .vrew 파일**을 자동 생성하는 Electron 앱. PrimingFlow(D:\PrimingFlow)의 엔진을
 복사·재활용한 독립 클론.
 
+## ⚡ 「이미지+비디오」 큐 처리 = 전 항목 이미지 → 전 항목 비디오 (콜드스타트 최소화) (2026-07-24, v0.2.70)
+> 지적(로이): 롱폼 작업큐 여러 개일 때 상단 🖼→🎬 를 누르면 항목마다 이미지→비디오→다음항목 이미지→비디오… 라
+>   ComfyUI 가 이미지↔비디오 모델을 번갈아 로드(콜드스타트). 전 항목 이미지 먼저·그다음 전 항목 비디오가 스왑 최소.
+- **원인**: `runStageQueue('imgvid')`(App.jsx)가 items 루프 안에서 한 항목의 image+video 를 함께 처리 → 항목마다
+  ComfyUI 모델 스왑(이미지 단계는 `freeMemory()`로 비디오 모델 언로드까지) → 모델 재로딩 ~2×N 번.
+- **수정**: imgvid 를 **2패스**로 — `phases = stage==='imgvid' ? ['image','video'] : [stage]`, 바깥 phase 루프 ×
+  안쪽 items 루프. 즉 **전 항목 이미지 배치 → 전 항목 비디오 배치**. 모델 스왑이 사실상 1번(이미지→비디오)으로 감소.
+  단일 stage(image/video/tts)는 phases=[stage] 라 기존과 동일(1패스). RunPod 파드 start/stop 은 바깥 finally 그대로 1회씩.
+  진행 상태표시는 패스별 라벨(이미지 k/N → 비디오 k/N). 대본 위 단건 버튼(runImgVid)은 그 대본만이라 무변경.
+- ⚠ 앱 재시작 반영(라이트). deps 무변경.
+
 ## 🧩 ComfyUI 워크플로(이미지·비디오) 번들 자동 등록 — PC 무관 정합 (2026-07-24, v0.2.69)
 > 증상: 아내 PC(깃허브 설치본)는 버전(코드)은 업데이트되는데 비디오 도구 드롭다운에 **LTX 가 아니라 Wan** 만 뜸.
 - **원인(코드 확정)**: 워크플로 목록(`workflows[]`)·활성(`workflowPath`)은 **홈 설정파일**(`~/.priming-maker/comfy-video-config.json`,

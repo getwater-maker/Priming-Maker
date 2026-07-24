@@ -483,15 +483,21 @@ export default function App() {
     const usesGpu = (stage !== 'tts'); // TTS 는 OmniVoice(파드와 무관)
     if (rpAuto && usesGpu) { setStatus('RunPod 파드 시작 중…'); try { await api.runpodStart(); } catch (_) {} }
     try {
-      for (let k = 0; k < items.length; k++) {
-        const it = items[k];
-        setStatus(`⚡ 큐 ${label} — ${k + 1}/${items.length}편…`);
-        try { await api.selectQueueItem(it.id); } catch (_) {}
-        try {
-          if (stage === 'tts') { const d = await api.ttsBuild({ shortsNum: null, dry: false, presetName: presetName || null, speed: ttsSpeed || null, clipMaxSec: _clipMaxSec() }); if (d) setDto(d); }
-          if (stage === 'image' || stage === 'imgvid') { const d = await api.imageBuild({ shortsNum: null, engine: imgEngine, styleId: styleId || null }); if (d) setDto(d); }
-          if ((stage === 'video' || stage === 'imgvid') && videoEngine !== 'none') { const d = await api.videoBuild({ shortsNum: null, fromNum: parseInt(vidFrom, 10) || 1, toNum: parseInt(vidTo, 10) || 1, engine: videoEngine, flowVideoModel, flowCount, imgEngine, styleId: styleId || null }); if (d) setDto(d); }
-        } catch (e) { logline(`큐 ${label} 오류: ${e.message}`); }
+      // 이미지+비디오는 콜드스타트(ComfyUI 이미지↔비디오 모델 스왑) 최소화를 위해 '전 항목 이미지 → 전 항목 비디오' 2패스로.
+      // (항목마다 이미지·비디오를 번갈아 하면 모델을 2×N번 다시 로드 → 배치로 묶어 스왑 1번.) 단일 stage 는 기존대로 1패스.
+      const phases = stage === 'imgvid' ? ['image', 'video'] : [stage];
+      for (const ph of phases) {
+        const plabel = { tts: 'TTS', image: '이미지', video: '비디오' }[ph] || ph;
+        for (let k = 0; k < items.length; k++) {
+          const it = items[k];
+          setStatus(`⚡ 큐 ${plabel} — ${k + 1}/${items.length}편…`);
+          try { await api.selectQueueItem(it.id); } catch (_) {}
+          try {
+            if (ph === 'tts') { const d = await api.ttsBuild({ shortsNum: null, dry: false, presetName: presetName || null, speed: ttsSpeed || null, clipMaxSec: _clipMaxSec() }); if (d) setDto(d); }
+            if (ph === 'image') { const d = await api.imageBuild({ shortsNum: null, engine: imgEngine, styleId: styleId || null }); if (d) setDto(d); }
+            if (ph === 'video' && videoEngine !== 'none') { const d = await api.videoBuild({ shortsNum: null, fromNum: parseInt(vidFrom, 10) || 1, toNum: parseInt(vidTo, 10) || 1, engine: videoEngine, flowVideoModel, flowCount, imgEngine, styleId: styleId || null }); if (d) setDto(d); }
+          } catch (e) { logline(`큐 ${plabel} 오류: ${e.message}`); }
+        }
       }
     } finally {
       if (rpAuto && usesGpu) { try { await api.runpodStop(); } catch (_) {} }
@@ -1600,7 +1606,7 @@ export default function App() {
               : (<>
                   <span title="영상으로 만들 그룹 범위 (N번~N번). 롱폼 기본=도입부 그룹만">범위 <input type="number" min="1" style={{ width: 44 }} value={vidFrom} onChange={(e) => setVidFrom(e.target.value)} />~<input type="number" min="1" style={{ width: 44 }} value={vidTo} onChange={(e) => setVidTo(e.target.value)} /></span>
                   <button disabled={!loaded} title={`상단 버튼 = 작업큐의 모든 대본 G${vidFrom}~G${vidTo} 그룹을 i2v 비디오로 변환`} onClick={() => runStageQueue('video')}>🎬 비디오</button>
-                  <button disabled={!loaded} title="작업큐의 모든 대본 — 이미지 전부 만든 뒤 비디오까지 (한 번에)" onClick={() => runStageQueue('imgvid')}>🖼→🎬 이미지+비디오</button>
+                  <button disabled={!loaded} title="작업큐 전체 — 모든 대본의 이미지를 먼저 다 만든 뒤, 모든 대본의 비디오 (모델 스왑 1번으로 콜드스타트 최소화)" onClick={() => runStageQueue('imgvid')}>🖼→🎬 이미지+비디오</button>
                 </>)}
           </span>
           <span className="hgroup" style={{ marginLeft: 'auto' }}>
